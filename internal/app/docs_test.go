@@ -131,7 +131,7 @@ func TestSeedModes(t *testing.T) {
 		t.Fatalf("scan seed = %v, want depth-1 results", got)
 	}
 
-	ed := c.OpenDoc(c.Files[0].Path, nil)
+	ed := c.OpenDoc(c.Files[0].Path, nil, nil)
 	c.Seed()
 	if got := c.Open[c.Files[0].Path]; got != ed {
 		t.Fatal("reseeding must not drop open buffers")

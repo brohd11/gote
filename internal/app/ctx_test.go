@@ -13,7 +13,7 @@ func TestCloseDoc(t *testing.T) {
 	newCtx := func(paths ...string) *Ctx {
 		c := &Ctx{Open: map[string]*components.EditorScreen{}}
 		for _, p := range paths {
-			c.OpenDoc(p, nil)
+			c.OpenDoc(p, nil, nil)
 		}
 		return c
 	}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -139,7 +140,7 @@ func TestEditorExitClosesDoc(t *testing.T) {
 		t.Fatalf("the pane should show %q's editor and the dot should follow it, render:\n%s", a, v)
 	}
 
-	s.modular.FocusSlot(s.editorSlot()) // the exit focused the docs list; go back
+	s.modular.FocusSlot(s.editorSlot())          // the exit focused the docs list; go back
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // closes a: none remain
 	s.Receive(sh, ReseedMsg{})
 	if s.currentPath != "" || len(c.OpenDocs()) != 0 {
@@ -147,5 +148,159 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	}
 	if !strings.Contains(stripANSI(s.View(sh)), "Editor") {
 		t.Fatalf("the pane should show a fresh scratch editor, render:\n%s", stripANSI(s.View(sh)))
+	}
+}
+
+// TestEditorEscReleasesFocus: esc hands the keys back to the docs list WITHOUT
+// closing the buffer — the distinction from ctrl+x, which closes it. The editor
+// captures every printable key, so before the OnRelease hook the only ways out were
+// the shift+← pane chord and that destructive ctrl+x.
+func TestEditorEscReleasesFocus(t *testing.T) {
+	s, sh := newHome(t)
+	c := Of(sh)
+	path := filepath.Join(t.TempDir(), "a.txt")
+
+	s.openDoc(sh, path)
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("opening a doc should focus the editor, got %s", got)
+	}
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyEsc})
+	if got := focusedPane(s, sh); got != "list" {
+		t.Fatalf("esc should hand focus to the docs list, got %s", got)
+	}
+	if _, ok := c.Open[path]; !ok {
+		t.Fatal("esc must not close the buffer")
+	}
+	if s.currentPath != path {
+		t.Fatalf("esc must not change the current doc, got %q", s.currentPath)
+	}
+}
+
+// TestEditorEscUnhidesSidebar: with the sidebar hidden the editor is the only pane,
+// so releasing focus has to bring back somewhere to release it TO — the same reason
+// the ctrl+x path unhides.
+func TestEditorEscUnhidesSidebar(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if s.sidebar {
+		t.Fatal("ctrl+b should have hidden the sidebar")
+	}
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyEsc})
+	if !s.sidebar {
+		t.Fatal("esc should unhide the sidebar so there is a pane to focus")
+	}
+	if got := focusedPane(s, sh); got != "list" {
+		t.Fatalf("esc should land on the docs list, got %s", got)
+	}
+}
+
+// TestEscOverExitPromptStillCancels: the editor's own save/discard/cancel prompt
+// claims esc first, so ctrl+x on a dirty buffer keeps its cancel instead of the
+// release hook firing over it.
+func TestEscOverExitPromptStillCancels(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("dirty")})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // dirty ⇒ the prompt, not an exit
+	if !strings.Contains(stripANSI(s.View(sh)), "Save modified buffer?") {
+		t.Fatal("a dirty ctrl+x should raise the exit prompt")
+	}
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyEsc})
+	if v := stripANSI(s.View(sh)); strings.Contains(v, "Save modified buffer?") {
+		t.Fatal("esc should cancel the prompt")
+	}
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("cancelling the prompt must not also release the pane, got %s", got)
+	}
+}
+
+// TestPreviewCycle walks ctrl+p through its three rungs: off → the live side pane →
+// the pushed overlay → off. The overlay is a screen on the router's stack, so the
+// cycle's third step shows up as a push Action rather than as state here.
+func TestPreviewCycle(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+
+	ctrlP := tea.KeyMsg{Type: tea.KeyCtrlP}
+
+	_, act := s.Update(sh, ctrlP)
+	if s.preview != previewPane {
+		t.Fatal("the first ctrl+p should open the side pane")
+	}
+	if got := msgType(act); got != "" {
+		t.Fatalf("the side pane is a layout change, not a navigation, got %s", got)
+	}
+	if !strings.Contains(stripANSI(s.View(sh)), "preview") {
+		t.Fatalf("the pane should be on screen, render:\n%s", stripANSI(s.View(sh)))
+	}
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("toggling the preview must not move focus, got %s", got)
+	}
+
+	_, act = s.Update(sh, ctrlP)
+	if s.preview != previewOff {
+		t.Fatal("the pane should be torn down before the overlay goes up")
+	}
+	if got := msgType(act); got != "core.pushMsg" {
+		t.Fatalf("the second ctrl+p should push the overlay, got %s", got)
+	}
+	if strings.Contains(stripANSI(s.View(sh)), "preview") {
+		t.Fatal("the side pane should be gone once the overlay is up")
+	}
+}
+
+// msgType names an Action's control message, the only handle a consumer package has
+// on one (the nav message types are core-internal).
+func msgType(act core.Action) string {
+	if act.Msg == nil {
+		return ""
+	}
+	return reflect.TypeOf(act.Msg).String()
+}
+
+// TestPreviewPaneTracksEdits: the side pane re-renders as the buffer changes, which
+// is the whole reason it exists next to the editor rather than over it.
+func TestPreviewPaneTracksEdits(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+	v := stripANSI(s.View(sh))
+	// The editor shows the source and the preview the render, so the marker appears
+	// once (the editor) and the bare text twice.
+	if strings.Count(v, "# Title") != 1 {
+		t.Fatalf("the preview should render the heading, not echo its marker:\n%s", v)
+	}
+	if strings.Count(v, "Title") < 2 {
+		t.Fatalf("the pane should show the rendered heading, render:\n%s", v)
+	}
+}
+
+// TestPreviewOverlayRendersBuffer: the overlay renders the LIVE buffer, not a snapshot
+// taken when it was built, and the key that opened it also closes it.
+func TestPreviewOverlayRendersBuffer(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- bullet")})
+
+	doc := s.previewScreen()
+	doc.SetSize(sh, 80, 24)
+	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• bullet") {
+		t.Fatalf("the overlay should render the live buffer, got:\n%s", v)
+	}
+	if !strings.Contains(doc.Title, "a.md") {
+		t.Errorf("the overlay should name the doc, got %q", doc.Title)
+	}
+
+	if _, a := doc.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}); msgType(a) != "core.popMsg" {
+		t.Fatal("ctrl+p should pop the overlay")
+	}
+	if _, a := doc.Update(sh, tea.KeyMsg{Type: tea.KeyEsc}); msgType(a) != "core.popMsg" {
+		t.Fatal("esc should pop the overlay")
 	}
 }

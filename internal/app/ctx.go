@@ -73,13 +73,18 @@ func (c *Ctx) Seed() {
 }
 
 // OpenDoc returns the editor for path, creating and registering it on first open.
-// onExit is wired only into newly created editors; an already-open doc keeps its
-// existing editor (and its buffer) untouched.
-func (c *Ctx) OpenDoc(path string, onExit func(*core.Shared) core.Action) *components.EditorScreen {
+// The hooks are wired only into newly created editors; an already-open doc keeps its
+// existing editor (and its buffer) untouched. onExit is ctrl+x (close the buffer),
+// onRelease is esc (leave the pane, keep the buffer).
+func (c *Ctx) OpenDoc(path string, onExit, onRelease func(*core.Shared) core.Action) *components.EditorScreen {
 	if ed, ok := c.Open[path]; ok {
 		return ed
 	}
-	ed := components.NewEditorScreen(components.EditorOpts{Path: path, OnExit: onExit})
+	ed := components.NewEditorScreen(components.EditorOpts{
+		Path:      path,
+		OnExit:    onExit,
+		OnRelease: onRelease,
+	})
 	c.Open[path] = ed
 	c.OpenOrder = append(c.OpenOrder, path)
 	return ed
