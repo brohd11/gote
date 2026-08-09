@@ -50,11 +50,16 @@ var _ core.Crumber = (*homeScreen)(nil)
 func NewHomeScreen(sh *core.Shared) core.Screen {
 	s := &homeScreen{sidebar: true}
 	c := Of(sh)
+	// Border on both sidebar lists: with three panes on screen the focused one has
+	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
+	// a core.Borderer child).
 	s.docsPanel = components.NewListPanel(docItems(c.Files), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
+		Border:   true,
 	})
 	s.openPanel = components.NewListPanel(nil, "Open", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
+		Border:   true,
 	})
 	s.editorPanel = components.NewScreenPanel(components.NewEditorScreen(components.EditorOpts{
 		OnExit: s.editorExit,
