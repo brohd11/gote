@@ -137,3 +137,53 @@ func TestSeedModes(t *testing.T) {
 		t.Fatal("reseeding must not drop open buffers")
 	}
 }
+
+// TestNewDocPath: a plain name gets the configured extension, "/" nests under
+// the base, an explicit extension is kept, and blank/absolute/escaping names are
+// rejected — the line edit must never write outside the doc store.
+func TestNewDocPath(t *testing.T) {
+	base := t.TempDir()
+
+	for name, want := range map[string]string{
+		"foo":      filepath.Join(base, "foo.md"),
+		"a/b":      filepath.Join(base, "a", "b.md"),
+		"  pad  ":  filepath.Join(base, "pad.md"),
+		"keep.txt": filepath.Join(base, "keep.txt"),
+	} {
+		got, err := newDocPath(base, name, "md")
+		if err != nil || got != want {
+			t.Errorf("newDocPath(%q) = (%q, %v), want (%q, nil)", name, got, err, want)
+		}
+	}
+
+	for _, name := range []string{"", "   ", ".", "./", "/etc/x", "../escape", "a/../../escape"} {
+		if got, err := newDocPath(base, name, "md"); err == nil {
+			t.Errorf("newDocPath(%q) = %q, want an error", name, got)
+		}
+	}
+}
+
+// TestCreateDoc: the file and its parent dirs are created, and a second call on
+// an existing file leaves its contents alone.
+func TestCreateDoc(t *testing.T) {
+	base := t.TempDir()
+	path := filepath.Join(base, "notes", "deep", "todo.md")
+
+	if err := createDoc(path); err != nil {
+		t.Fatalf("createDoc: %v", err)
+	}
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		t.Fatalf("expected a file at %s", path)
+	}
+
+	if err := os.WriteFile(path, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := createDoc(path); err != nil {
+		t.Fatalf("createDoc over an existing file: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != "keep me" {
+		t.Fatalf("existing file clobbered: %q, %v", b, err)
+	}
+}

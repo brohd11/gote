@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -102,4 +103,60 @@ func docItems(docs []DocFile) []list.Item {
 		items = append(items, docItem{doc: d})
 	}
 	return items
+}
+
+// newFileItem is the docs list's first row — an action, not a doc: enter opens
+// the floating line edit that creates a file. A distinct type (not docItem) so
+// pickDoc can route it; the panel's OnSelect bypasses per-item Pick.
+type newFileItem struct{}
+
+func (newFileItem) Title() string       { return "+ new file" }
+func (newFileItem) Description() string { return "type a name (a/b.md nests dirs)" }
+func (newFileItem) FilterValue() string { return "new file" }
+
+// docRows is the docs panel's full row set: the action row, then the seeded docs.
+// Every (re)build of the list goes through here so the row survives reseeds.
+func docRows(c *Ctx) []list.Item {
+	return append([]list.Item{newFileItem{}}, docItems(c.Files)...)
+}
+
+// newDocPath resolves a name typed into the new-file line edit against base. A
+// name without an extension gets the configured one (the docs list filters to it,
+// so an extensionless file would be invisible); "/" in the name nests under base.
+// Absolute names and ones escaping base ("..") are rejected — the line edit must
+// never write outside the doc store.
+func newDocPath(base, name, ext string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("no name given")
+	}
+	if filepath.IsAbs(name) {
+		return "", fmt.Errorf("%q is absolute; give a name relative to the doc store", name)
+	}
+	path := filepath.Join(base, name)
+	// path == base happens for "." / "./" — rejecting it also covers the ext
+	// append below, which would otherwise produce a sibling of base, outside it.
+	if path == base || !strings.HasPrefix(path, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q escapes the doc store", name)
+	}
+	if filepath.Ext(path) == "" {
+		path += "." + ext
+	}
+	return path, nil
+}
+
+// createDoc writes an empty doc at path, making parent dirs as needed, without
+// clobbering: an existing file is left alone (the editor opens it either way).
+func createDoc(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if os.IsExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }

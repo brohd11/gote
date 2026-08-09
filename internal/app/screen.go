@@ -1,6 +1,8 @@
 package app
 
 import (
+	"strings"
+
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
@@ -53,7 +55,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
-	s.docsPanel = components.NewListPanel(docItems(c.Files), "Docs", components.ListPanelOpts{
+	s.docsPanel = components.NewListPanel(docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
@@ -118,31 +120,94 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 	if _, ok := payload.(ReseedMsg); ok {
 		c := Of(sh)
 		c.Seed()
-		s.docsPanel.SetItems(docItems(c.Files))
+		s.docsPanel.SetItems(docRows(c))
 		s.openPanel.SetItems(docItems(c.OpenDocs()))
 		return core.Action{}
 	}
 	return core.OnThemeChange(payload)
 }
 
-// pickDoc opens (or switches to) the selected doc in the editor pane and moves focus
-// to it. The doc's editor is reused across picks, so its unsaved buffer survives.
+// pickDoc routes the docs list's rows: the action row opens the new-file line
+// edit; a doc row opens (or switches to) that doc in the editor pane.
 func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
+	if _, ok := it.(newFileItem); ok {
+		return s.newFile(sh)
+	}
 	di, ok := it.(docItem)
 	if !ok {
 		return core.Action{}
 	}
+	return s.openDoc(sh, di.doc.Path)
+}
+
+// openDoc switches the editor pane to path (creating or reusing its buffer, so
+// unsaved edits survive) and moves focus to it.
+func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
-	ed := c.OpenDoc(di.doc.Path, s.editorExit)
+	ed := c.OpenDoc(path, s.editorExit)
 	s.openPanel.SetItems(docItems(c.OpenDocs()))
 	cmd := s.editorPanel.SetChild(ed)
 	s.modular.FocusSlot(s.editorSlot())
 	return core.Async(cmd)
 }
 
+// newFile pushes the floating line edit over the selected docs row. Anchor math:
+// the docs panel is column 0 row 0 of the layout, so its outer top-left is
+// (0, BodyY); its border takes one row, and the LineEdit anchor sits one row
+// above the covered row (its own top border) — the two cancel, so the anchor is
+// BodyY + the list-relative row. x=0 and width=sidebarWidth land the box's
+// borders exactly on the panel's own.
+func (s *homeScreen) newFile(sh *core.Shared) core.Action {
+	l := s.docsPanel.List()
+	row, ok := components.ListItemRow(l, l.Index())
+	if !ok {
+		row = 0 // the selected row is on-page by construction; never die on it
+	}
+	edit := components.NewLineEdit("name (a/b.md nests dirs)", 0, sh.BodyY()+row, sidebarWidth,
+		s.createFile, nil)
+	edit.Crumb = "new file"
+	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
+	return core.Push(edit)
+}
+
+// createFile is the line edit's OnDone: resolve the typed name against the doc
+// store (the scan root in scan mode), write the file (making parent dirs for
+// names containing "/"), then reseed the list and open the file in the editor.
+// Blank input cancels quietly. Errors surface as a popup — gote has no status
+// pane — swapped in over the line edit so the overlay's stack depth holds.
+func (s *homeScreen) createFile(sh *core.Shared, name string) core.Action {
+	if strings.TrimSpace(name) == "" {
+		return core.Pop()
+	}
+	c := Of(sh)
+	base := c.ScanDir
+	if c.Mode == ModeHome {
+		dir, err := Dir()
+		if err != nil {
+			return core.Replace(errPopup("new file", err))
+		}
+		base = dir
+	}
+	path, err := newDocPath(base, name, c.Ext)
+	if err != nil {
+		return core.Replace(errPopup("new file", err))
+	}
+	if err := createDoc(path); err != nil {
+		return core.Replace(errPopup("new file", err))
+	}
+	return core.Seq(core.Pop(), core.PropagateAll(ReseedMsg{}), s.openDoc(sh, path))
+}
+
+// errPopup builds the error dialog a failed new-file submit is replaced with.
+func errPopup(title string, err error) *components.DialogScreen {
+	return components.CreatePopup(title, err.Error(), core.Pop())
+}
+
 // editorExit is the editor pane's OnExit hook (ctrl+x, after the save prompt): focus
-// returns to the docs list, unhiding the sidebar first when needed — the editor's
-// capture swallows tab, so this hook is the keyboard's way out of the pane.
+// returns to the docs list, unhiding the sidebar first when needed. This is the
+// "done with this buffer" gesture, not an escape hatch — shift+← leaves the pane at
+// any time, and unhiding the sidebar is what makes ctrl+x meaningful with it hidden,
+// where there is no other pane to move to.
 func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 	if !s.sidebar {
 		s.setSidebar(true)
