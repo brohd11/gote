@@ -89,18 +89,29 @@ func sortDocs(docs []DocFile) {
 	sort.Slice(docs, func(i, j int) bool { return docs[i].Path < docs[j].Path })
 }
 
-// docItem adapts a DocFile to a list.Item for the picker panels.
-type docItem struct{ doc DocFile }
+// docItem adapts a DocFile to a list.Item for the picker panels. current marks the
+// doc showing in the editor pane: its row gets a dot prefix (the list has no other
+// "open here" channel — selection is focus, not state).
+type docItem struct {
+	doc     DocFile
+	current bool
+}
 
-func (i docItem) Title() string       { return i.doc.Name }
+func (i docItem) Title() string {
+	if i.current {
+		return "• " + i.doc.Name
+	}
+	return i.doc.Name
+}
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
 
-// docItems wraps a seed result as list rows.
-func docItems(docs []DocFile) []list.Item {
+// docItems wraps a seed result as list rows, dotting the row whose path is
+// currentPath ("" dots nothing — the docs list never has a current doc).
+func docItems(docs []DocFile, currentPath string) []list.Item {
 	items := make([]list.Item, 0, len(docs))
 	for _, d := range docs {
-		items = append(items, docItem{doc: d})
+		items = append(items, docItem{doc: d, current: d.Path == currentPath && currentPath != ""})
 	}
 	return items
 }
@@ -117,7 +128,7 @@ func (newFileItem) FilterValue() string { return "new file" }
 // docRows is the docs panel's full row set: the action row, then the seeded docs.
 // Every (re)build of the list goes through here so the row survives reseeds.
 func docRows(c *Ctx) []list.Item {
-	return append([]list.Item{newFileItem{}}, docItems(c.Files)...)
+	return append([]list.Item{newFileItem{}}, docItems(c.Files, "")...)
 }
 
 // newDocPath resolves a name typed into the new-file line edit against base. A

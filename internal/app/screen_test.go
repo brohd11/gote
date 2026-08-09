@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -108,5 +109,43 @@ func TestHomePaneNavigationWithoutSidebar(t *testing.T) {
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftLeft})
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("a pane key with nowhere to go should be a no-op, got %s", got)
+	}
+}
+
+// TestEditorExitClosesDoc: the editor's exit hook (every ctrl+x path — clean, saved,
+// discarded) closes the current doc: the open set loses it and the pane swaps to the
+// next open doc, or to a fresh scratch buffer when none remain. Driven through the
+// router-facing Update, so the hook's pane swap runs inside the editor child's own
+// Update — where ScreenPanel's bookkeeping used to clobber it.
+func TestEditorExitClosesDoc(t *testing.T) {
+	s, sh := newHome(t)
+	c := Of(sh)
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+
+	s.openDoc(sh, a)
+	s.openDoc(sh, b) // current: b; open order [a, b]; the editor pane holds focus
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // clean buffer: closes b
+	s.Receive(sh, ReseedMsg{})                   // the router applies the hook's broadcast
+	if _, ok := c.Open[b]; ok {
+		t.Fatal("the exited doc must leave the open set")
+	}
+	if s.currentPath != a {
+		t.Fatalf("the pane should switch to the remaining doc %q, got %q", a, s.currentPath)
+	}
+	if v := stripANSI(s.View(sh)); strings.Contains(v, "b.txt") || !strings.Contains(v, "• a.txt") {
+		t.Fatalf("the pane should show %q's editor and the dot should follow it, render:\n%s", a, v)
+	}
+
+	s.modular.FocusSlot(s.editorSlot()) // the exit focused the docs list; go back
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // closes a: none remain
+	s.Receive(sh, ReseedMsg{})
+	if s.currentPath != "" || len(c.OpenDocs()) != 0 {
+		t.Fatalf("the last exit should clear everything: path %q, open %v", s.currentPath, c.OpenDocs())
+	}
+	if !strings.Contains(stripANSI(s.View(sh)), "Editor") {
+		t.Fatalf("the pane should show a fresh scratch editor, render:\n%s", stripANSI(s.View(sh)))
 	}
 }

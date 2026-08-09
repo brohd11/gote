@@ -37,6 +37,7 @@ type homeScreen struct {
 	docsPanel   *components.ListPanel
 	openPanel   *components.ListPanel
 	editorPanel *components.ScreenPanel
+	currentPath string // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar     bool
 	sh          *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
 	w, h        int
@@ -121,7 +122,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		c := Of(sh)
 		c.Seed()
 		s.docsPanel.SetItems(docRows(c))
-		s.openPanel.SetItems(docItems(c.OpenDocs()))
+		s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
 		return core.Action{}
 	}
 	return core.OnThemeChange(payload)
@@ -145,7 +146,8 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
 	ed := c.OpenDoc(path, s.editorExit)
-	s.openPanel.SetItems(docItems(c.OpenDocs()))
+	s.currentPath = path
+	s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
 	cmd := s.editorPanel.SetChild(ed)
 	s.modular.FocusSlot(s.editorSlot())
 	return core.Async(cmd)
@@ -203,17 +205,32 @@ func errPopup(title string, err error) *components.DialogScreen {
 	return components.CreatePopup(title, err.Error(), core.Pop())
 }
 
-// editorExit is the editor pane's OnExit hook (ctrl+x, after the save prompt): focus
-// returns to the docs list, unhiding the sidebar first when needed. This is the
-// "done with this buffer" gesture, not an escape hatch — shift+← leaves the pane at
-// any time, and unhiding the sidebar is what makes ctrl+x meaningful with it hidden,
-// where there is no other pane to move to.
+// editorExit is the editor pane's OnExit hook (ctrl+x — clean, saved, or discarded;
+// every path closes the buffer): the doc leaves the open set and the pane swaps to
+// the next open doc, or to a fresh scratch buffer when none remain. Focus returns to
+// the docs list, unhiding the sidebar first when needed. This is the "done with this
+// buffer" gesture, not an escape hatch — shift+← leaves the pane at any time, and
+// unhiding the sidebar is what makes ctrl+x meaningful with it hidden, where there is
+// no other pane to move to. The reseed refreshes both lists: the close shows in Open,
+// and a save-as'd file shows in Docs.
 func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
+	c := Of(sh)
+	next := c.CloseDoc(s.currentPath)
+	var cmd tea.Cmd
+	if next != "" {
+		s.currentPath = next
+		cmd = s.editorPanel.SetChild(c.OpenDoc(next, s.editorExit))
+	} else {
+		s.currentPath = ""
+		cmd = s.editorPanel.SetChild(components.NewEditorScreen(components.EditorOpts{
+			OnExit: s.editorExit,
+		}))
+	}
 	if !s.sidebar {
 		s.setSidebar(true)
 	}
 	s.modular.FocusSlot(0)
-	return core.Action{}
+	return core.Seq(core.Async(cmd), core.PropagateAll(ReseedMsg{}))
 }
 
 // editorSlot is the editor pane's flat slot index in the current layout.

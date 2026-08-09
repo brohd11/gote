@@ -19,7 +19,7 @@ const (
 // carries the seed state (mode/dir/depth/extension and the last-seeded file list)
 // and every open buffer: Open maps a doc's path to its EditorScreen, which owns the
 // buffer — so keeping the instance is what preserves unsaved edits across file
-// switches.
+// switches. ctrl+x in the editor closes the buffer (CloseDoc).
 type Ctx struct {
 	Version string
 	Mode    Mode
@@ -92,6 +92,30 @@ func (c *Ctx) OpenDocs() []DocFile {
 		docs = append(docs, DocFile{Name: docName(path), Path: path})
 	}
 	return docs
+}
+
+// CloseDoc removes path from the open set (an empty or unknown path is a no-op,
+// which makes the scratch editor's exit free) and returns the doc to switch to:
+// the one after it in open order, else the new last, else "" when none remain.
+func (c *Ctx) CloseDoc(path string) (next string) {
+	if _, ok := c.Open[path]; !ok {
+		return ""
+	}
+	delete(c.Open, path)
+	for i, p := range c.OpenOrder {
+		if p != path {
+			continue
+		}
+		c.OpenOrder = append(c.OpenOrder[:i], c.OpenOrder[i+1:]...)
+		switch {
+		case i < len(c.OpenOrder):
+			return c.OpenOrder[i]
+		case len(c.OpenOrder) > 0:
+			return c.OpenOrder[len(c.OpenOrder)-1]
+		}
+		return ""
+	}
+	return ""
 }
 
 func docName(path string) string {

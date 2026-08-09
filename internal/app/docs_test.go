@@ -187,3 +187,28 @@ func TestCreateDoc(t *testing.T) {
 		t.Fatalf("existing file clobbered: %q, %v", b, err)
 	}
 }
+
+// TestDocItemsMarksCurrent: the doc showing in the editor pane gets a dot prefix —
+// the list's only "open here" channel for now — and the marker never leaks into
+// filtering. An empty currentPath dots nothing (the docs list's shape).
+func TestDocItemsMarksCurrent(t *testing.T) {
+	docs := []DocFile{{Name: "a.txt", Path: "/x/a.txt"}, {Name: "b.txt", Path: "/x/b.txt"}}
+
+	items := docItems(docs, "/x/b.txt")
+	if got := items[1].(docItem).Title(); got != "• b.txt" {
+		t.Fatalf("the current doc's title = %q, want %q", got, "• b.txt")
+	}
+	if got := items[0].(docItem).Title(); got != "a.txt" {
+		t.Fatalf("a non-current doc keeps its plain title, got %q", got)
+	}
+	if got := items[1].(docItem).FilterValue(); got != "b.txt" {
+		t.Fatalf("the dot must stay out of filtering, got %q", got)
+	}
+
+	items = docItems(docs, "")
+	for i, it := range items {
+		if got := it.(docItem).Title(); got != docs[i].Name {
+			t.Fatalf("an empty currentPath dots nothing, row %d = %q", i, got)
+		}
+	}
+}
