@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -227,9 +228,8 @@ func TestEscOverExitPromptStillCancels(t *testing.T) {
 	}
 }
 
-// TestPreviewCycle walks ctrl+p through its three rungs: off → the live side pane →
-// the pushed overlay → off. The overlay is a screen on the router's stack, so the
-// cycle's third step shows up as a push Action rather than as state here.
+// TestPreviewCycle walks ctrl+p through its two rungs: off → the live side pane →
+// off. Both are layout changes, so neither shows up as a navigation Action.
 func TestPreviewCycle(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
@@ -238,13 +238,11 @@ func TestPreviewCycle(t *testing.T) {
 
 	for _, step := range []struct {
 		mode    int
-		legend  string // the pane's border title, or "" when the preview is off
-		absent  string // a legend that must NOT be on screen
+		legend  bool // is the pane's border title on screen?
 		summary string
 	}{
-		{previewPane, "preview", "glamour", "the first ctrl+p opens the custom reader"},
-		{previewGlamour, "glamour", "preview", "the second swaps it for glamour"},
-		{previewOff, "", "preview", "the third closes the cycle"},
+		{previewPane, true, "the first ctrl+p opens the pane"},
+		{previewOff, false, "the second closes the cycle"},
 	} {
 		_, act := s.Update(sh, ctrlP)
 		if s.preview != step.mode {
@@ -255,11 +253,9 @@ func TestPreviewCycle(t *testing.T) {
 			t.Fatalf("%s: expected no navigation, got %s", step.summary, got)
 		}
 		v := stripANSI(s.View(sh))
-		if step.legend != "" && !strings.Contains(v, step.legend) {
-			t.Fatalf("%s: %q should be on screen, render:\n%s", step.summary, step.legend, v)
-		}
-		if strings.Contains(v, step.absent) {
-			t.Fatalf("%s: %q should be gone, render:\n%s", step.summary, step.absent, v)
+		if got := strings.Contains(v, "preview"); got != step.legend {
+			t.Fatalf("%s: pane legend on screen = %v, want %v, render:\n%s",
+				step.summary, got, step.legend, v)
 		}
 		if got := focusedPane(s, sh); got != "editor" {
 			t.Fatalf("%s: toggling the preview must not move focus, got %s", step.summary, got)
@@ -267,25 +263,23 @@ func TestPreviewCycle(t *testing.T) {
 	}
 }
 
-// TestPreviewSwapRerenders: switching renderers on an UNEDITED buffer must still draw.
-// The refresh skips when the source and width are unchanged, which they are across a
-// mode swap — so setPreview has to clear that cache or the new pane comes up blank.
-func TestPreviewSwapRerenders(t *testing.T) {
+// TestPreviewReopenRerenders: reopening the pane over an UNEDITED buffer must still
+// draw. The refresh skips when the source and width are unchanged, which they are
+// across a close/open — so setPreview has to clear that cache or the pane comes back
+// blank.
+func TestPreviewReopenRerenders(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // custom
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // open
 	if v := stripANSI(s.View(sh)); !strings.Contains(v, "Title") {
-		t.Fatalf("the custom pane should have rendered, got:\n%s", v)
+		t.Fatalf("the pane should have rendered, got:\n%s", v)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // glamour, same buffer
-	v := stripANSI(s.View(sh))
-	if !strings.Contains(v, "glamour") {
-		t.Fatalf("the glamour pane should be up, got:\n%s", v)
-	}
-	if !strings.Contains(v, "Title") {
-		t.Fatalf("the glamour pane should have rendered without an edit, got:\n%s", v)
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // close
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // open again, same buffer
+	if v := stripANSI(s.View(sh)); !strings.Contains(v, "Title") {
+		t.Fatalf("the reopened pane should have rendered without an edit, got:\n%s", v)
 	}
 }
 
@@ -376,6 +370,223 @@ func TestPreviewPaneTracksEdits(t *testing.T) {
 	}
 }
 
+// TestPreviewFollowsEditorScroll pins the three properties the sync guarantees at the
+// ends and in between: the top of the render is visible when the editor is at the top,
+// the pane is bottomed out when the editor is, and scrolling down never moves the pane
+// back up (the eased handoffs must not jitter). The pane opens synced to wherever the
+// editor already is.
+func TestPreviewFollowsEditorScroll(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+
+	// Bullets, not bare prose: the custom reader joins consecutive paragraph lines
+	// into one re-flowed block, which would leave the pane too short to scroll.
+	// Typed with real Enters — rune input carries no newlines, and a file load is a
+	// cmd no test runs.
+	for i := 0; i < 200; i++ {
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- item")})
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+
+	// Typing left the caret (and so the view) at the buffer's end; the pane opens
+	// synced to that, not parked at the top.
+	if s.editor.TopLine() == 0 {
+		t.Fatal("a 200-line buffer should have scrolled the editor off the top")
+	}
+	if got := s.previewPanel.ScrollOffset(); got == 0 {
+		t.Fatal("the pane should open synced to the editor's scrolled position")
+	}
+
+	// Wheel coords must land inside the editor pane: a mouse press is hit-tested
+	// against the slot rects, not broadcast. The sidebar owns x<30, the preview the
+	// right half of what remains.
+	wheel := func(btn tea.MouseButton, n int) {
+		for ; n > 0; n-- {
+			s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: btn, X: 45, Y: 15})
+		}
+	}
+	wheel(tea.MouseButtonWheelUp, 200) // browse all the way back to the start
+	if off, _, _ := s.editor.ScrollSpan(); off != 0 {
+		t.Fatalf("wheeling up should reach the buffer's top, got offset %d", off)
+	}
+	if got := s.previewPanel.ScrollOffset(); got != 0 {
+		t.Fatalf("the render's first row must be visible with the editor at the top, got offset %d", got)
+	}
+
+	// Down one tick at a time, watching for a step backwards.
+	last := 0
+	for i := 0; i < 250; i++ {
+		wheel(tea.MouseButtonWheelDown, 1)
+		got := s.previewPanel.ScrollOffset()
+		if got < last {
+			off, _, _ := s.editor.ScrollSpan()
+			t.Fatalf("scrolling down moved the pane back up: %d → %d (editor offset %d)", last, got, off)
+		}
+		last = got
+	}
+
+	off, maxOff, _ := s.editor.ScrollSpan()
+	if off != maxOff {
+		t.Fatalf("the editor should be bottomed out after 250 ticks, got offset %d of %d", off, maxOff)
+	}
+	if got, want := s.previewPanel.ScrollOffset(), s.previewPanel.MaxScrollOffset(); got != want {
+		t.Fatalf("the pane must bottom out with the editor: offset %d, want %d", got, want)
+	}
+}
+
+// TestPreviewScrollsByHand: the pane is the user's between editor scrolls. A wheel over
+// it (which focuses it, ModularScreen hit-tests the press) or the nav keys once it holds
+// focus move it, and the position STICKS — the regression being pinned is that the
+// router re-lays out after every message (core.Router.Update), so a SetSize that
+// re-asserted the sync unconditionally undid every hand scroll in the tick that made it.
+// The editor scrolling again takes the pane back over, and so does a real resize.
+func TestPreviewScrollsByHand(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+	for i := 0; i < 60; i++ {
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- item")})
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+
+	// The preview column: the sidebar owns x<30 and the editor and preview split what is
+	// left of the 100 cells, putting the pane's left edge at 65.
+	synced := s.previewPanel.ScrollOffset()
+	if synced == 0 {
+		t.Fatal("typing should have left the pane synced away from the top")
+	}
+	for i := 0; i < 4; i++ {
+		s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 80, Y: 15})
+	}
+	if !s.previewPanel.Focused() {
+		t.Fatal("a press over the pane should focus it")
+	}
+	byHand := s.previewPanel.ScrollOffset()
+	if byHand >= synced {
+		t.Fatalf("wheeling the pane up should have moved it off %d, got %d", synced, byHand)
+	}
+
+	// What the router does after every single message, and then an unrelated message.
+	s.SetSize(sh, 100, 30)
+	if got := s.previewPanel.ScrollOffset(); got != byHand {
+		t.Fatalf("a re-layout at the same size must not move the pane: %d → %d", byHand, got)
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlL}) // line numbers: nothing to do with the pane
+	if got := s.previewPanel.ScrollOffset(); got != byHand {
+		t.Fatalf("an unrelated message must not move the pane: %d → %d", byHand, got)
+	}
+
+	// The keyboard path: shift+right walks focus onto the pane, the nav keys scroll it.
+	s.modular.FocusSlot(s.editorSlot())
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	if !s.previewPanel.Focused() {
+		t.Fatal("shift+right from the editor should focus the pane")
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyUp})
+	if got := s.previewPanel.ScrollOffset(); got != byHand-1 {
+		t.Fatalf("up on the focused pane should scroll it one row: %d → %d", byHand, got)
+	}
+
+	// The editor scrolling again re-takes it.
+	s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 45, Y: 15})
+	if got := s.previewPanel.ScrollOffset(); got == byHand-1 {
+		t.Fatal("scrolling the editor should put the pane back under the sync")
+	}
+}
+
+// TestPreviewScrollIsExactNotProportional pins the drift the map exists to remove. In
+// a document that does not render line-for-line — headings take a blank row the source
+// has not got, fences grow rules, a hard-wrapped paragraph collapses into fewer rows —
+// a proportional estimate lands rows away from the line the editor is showing. Through
+// the body of the document (more than one editor screenful from either end, where the
+// eased ends take over) the pane's CENTER row must carry the editor's CENTER line, and
+// the estimate must be wrong somewhere, or the test would prove nothing.
+func TestPreviewScrollIsExactNotProportional(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+
+	// Typed with real Enters — rune input carries no newlines, and a file load is a cmd
+	// no test runs.
+	type_ := func(text string) {
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	for i := 0; i < 20; i++ {
+		type_(fmt.Sprintf("## Section %d", i))
+		type_("")
+		type_(fmt.Sprintf("prose %d hard-wrapped by its author", i)) // these three lines
+		type_("across three source lines that the")                  // re-flow into fewer
+		type_("render folds back together")                          // rows than they take
+		type_("")
+		type_(fmt.Sprintf("- bullet %d", i))
+		type_("")
+		type_("```")
+		type_(fmt.Sprintf("code(%d)", i)) // the fence grows a rule above and below
+		type_("```")
+		type_("")
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+
+	wheel := func(btn tea.MouseButton, n int) {
+		for ; n > 0; n-- {
+			s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: btn, X: 45, Y: 15})
+		}
+	}
+	wheel(tea.MouseButtonWheelUp, 400) // back to the top
+
+	src := strings.Split(s.previewSrc, "\n")
+	lines := strings.Split(stripANSI(components.RenderMarkdown(s.previewSrc, s.previewPanel.TextWidth())), "\n")
+	// The markers are the editor's, not the render's: what survives into the pane is the
+	// text after them. Only headings and bullets answer — the prose lines re-flow, so a
+	// source line is not a row of the render and matching one against the other proves
+	// nothing about the mapping.
+	text := func(line string) string {
+		for _, marker := range []string{"## ", "- "} {
+			if strings.HasPrefix(line, marker) {
+				return strings.TrimPrefix(line, marker)
+			}
+		}
+		return ""
+	}
+
+	checked, drifted := 0, 0
+	for step := 0; step < 30; step++ {
+		wheel(tea.MouseButtonWheelDown, 4)
+		off, maxOff, editorRows := s.editor.ScrollSpan()
+		if off < editorRows || maxOff-off < editorRows {
+			continue // inside an eased end: the endpoints, not the anchor, decide here
+		}
+		checked++
+
+		// The pane's middle row is the row the editor's middle line rendered to.
+		center := s.editor.CenterLine()
+		row := s.previewPanel.ScrollOffset() + s.previewPanel.VisibleRows()/2
+		if row >= len(lines) {
+			t.Fatalf("pane center row %d is past the render's %d rows", row, len(lines))
+		}
+		if want := s.previewMap[center]; row != want {
+			t.Fatalf("editor center line %d (%q): pane center row %d, want %d",
+				center, src[center], row, want)
+		}
+		// And that row really does carry the line — checked on the headings and bullets,
+		// which are short enough that the render never wraps them onto a second row.
+		if want := text(src[center]); want != "" && !strings.Contains(lines[row], want) {
+			t.Fatalf("editor center line %d (%q): pane center row %d = %q, want the row carrying it",
+				center, src[center], row, lines[row])
+		}
+		if est := center * max(len(lines)-1, 0) / max(len(src)-1, 1); est != row {
+			drifted++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("every sample landed in an eased end: this document is too short to exercise the anchor")
+	}
+	if drifted == 0 {
+		t.Fatal("the proportional estimate agreed everywhere: this document does not exercise the map")
+	}
+}
+
 // TestPreviewOverlayRendersBuffer: the overlay renders the LIVE buffer, not a snapshot
 // taken when it was built.
 func TestPreviewOverlayRendersBuffer(t *testing.T) {
@@ -383,7 +594,7 @@ func TestPreviewOverlayRendersBuffer(t *testing.T) {
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- bullet")})
 
-	doc := s.previewScreen(false)
+	doc := s.previewScreen()
 	doc.SetSize(sh, 80, 24)
 	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• bullet") {
 		t.Fatalf("the overlay should render the live buffer, got:\n%s", v)
@@ -393,51 +604,18 @@ func TestPreviewOverlayRendersBuffer(t *testing.T) {
 	}
 }
 
-// TestPreviewOverlayChain: the two overlays chain on ctrl+p — the custom reader
-// REPLACES itself with the glamour one, which then pops, so the fourth press lands
-// back on the editor. esc bails out of either directly, which is why the home screen
-// tracks only the pane: an esc it never sees cannot desync it.
-func TestPreviewOverlayChain(t *testing.T) {
+// TestPreviewOverlayCloses: ctrl+p and esc both pop the parked overlay, which is why
+// the home screen tracks only the pane — an esc it never sees cannot desync it.
+func TestPreviewOverlayCloses(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
 
-	custom := s.previewScreen(false)
-	if _, a := custom.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}); msgType(a) != "core.replaceMsg" {
-		t.Fatalf("ctrl+p on the custom overlay should hand off to glamour, got %s", msgType(a))
-	}
-
-	glam := s.previewScreen(true)
-	if !strings.HasPrefix(glam.Title, "glamour · ") {
-		t.Errorf("the two overlays must be tellable apart by title, got %q", glam.Title)
-	}
-	if _, a := glam.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}); msgType(a) != "core.popMsg" {
-		t.Fatalf("ctrl+p on the glamour overlay should close the cycle, got %s", msgType(a))
-	}
-
-	for _, doc := range []*components.DocScreen{s.previewScreen(false), s.previewScreen(true)} {
-		if _, a := doc.Update(sh, tea.KeyMsg{Type: tea.KeyEsc}); msgType(a) != "core.popMsg" {
-			t.Errorf("esc should pop %q", doc.Title)
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyCtrlP}, {Type: tea.KeyEsc}} {
+		doc := s.previewScreen()
+		if _, a := doc.Update(sh, key); msgType(a) != "core.popMsg" {
+			t.Errorf("%s should pop the overlay, got %s", key, msgType(a))
 		}
-	}
-}
-
-// TestGlamourRendersBuffer: the alternative renderer produces the document's text,
-// and a failure surfaces as page content rather than as an empty page (DocOpts.Render
-// has no error channel).
-func TestGlamourRendersBuffer(t *testing.T) {
-	s, sh := newHome(t)
-	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Heading")})
-
-	doc := s.previewScreen(true)
-	doc.SetSize(sh, 80, 24)
-	v := stripANSI(doc.View(sh))
-	if !strings.Contains(v, "Heading") {
-		t.Fatalf("glamour should render the buffer, got:\n%s", v)
-	}
-	if strings.Contains(v, "glamour: ") {
-		t.Fatalf("glamour reported an error:\n%s", v)
 	}
 }
 
@@ -463,31 +641,6 @@ func TestEditorPaneFillsColumn(t *testing.T) {
 			t.Fatalf("row %d is %d cells wide, not the full %d — the grid is ragged:\n%s",
 				i, w, width, stripANSI(s.View(sh)))
 		}
-	}
-}
-
-// TestGlamourStyleTuning pins gote's two deviations from stock glamour, both of which
-// are invisible in a diff of the render and obvious in the pane: no document margin
-// (the ScrollContainer already draws a border and pads a column, so glamour's own two
-// were doubling up) and, unless showLinkURLs is flipped back on, no raw URLs.
-func TestGlamourStyleTuning(t *testing.T) {
-	out := glamourRender("Some words with a [label](https://example.com/page) in them.\n", 60)
-
-	for _, line := range strings.Split(stripANSI(out), "\n") {
-		if strings.TrimSpace(line) != "" && strings.HasPrefix(line, "  ") {
-			t.Fatalf("the document margin should be gone, got line %q", line)
-		}
-	}
-	if strings.HasPrefix(out, "\n") || strings.HasSuffix(out, "\n") {
-		t.Fatal("the render should not open or close on a blank line")
-	}
-
-	plain := stripANSI(out)
-	if !strings.Contains(plain, "label") {
-		t.Fatalf("the link's text should survive, got:\n%s", plain)
-	}
-	if showLinkURLs != strings.Contains(plain, "https://example.com/page") {
-		t.Fatalf("showLinkURLs = %v disagrees with the render:\n%s", showLinkURLs, plain)
 	}
 }
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"math"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -30,15 +31,14 @@ var (
 	helpKey     = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
 )
 
-// The preview modes ctrl+p cycles through. Both renderers show up as a pane beside
-// the editor rather than as an overlay over it: side by side is the shape a preview
-// actually gets used in, and it is the only shape that lets the two be compared
-// against the SOURCE as well as against each other. The full-width overlay is still
-// built (previewScreen) but parked off the cycle.
+// The preview modes ctrl+p cycles through. The render shows up as a pane beside the
+// editor rather than as an overlay over it: side by side is the shape a preview
+// actually gets used in, and it is the only shape that lets it be read against the
+// SOURCE. The full-width overlay is still built (previewScreen) but parked off the
+// cycle.
 const (
-	previewOff     = iota // editor only
-	previewPane           // the custom reader, live, beside the editor
-	previewGlamour        // the same, rendered by glamour
+	previewOff  = iota // editor only
+	previewPane        // the custom reader, live, beside the editor
 )
 
 // ReseedMsg is gote's "reload the doc list" broadcast: the Actions ▸ Refresh row and
@@ -56,15 +56,16 @@ type homeScreen struct {
 	docsPanel    *components.ListPanel
 	openPanel    *components.ListPanel
 	editorPanel  *components.ScreenPanel
-	previewPanel *components.ScrollContainer // the custom reader's pane
-	glamourPanel *components.ScrollContainer // glamour's pane; separate so each keeps its own scroll
+	previewPanel *components.ScrollContainer // the live preview pane
 	editor       *components.EditorScreen    // the editor pane's live child (ScreenPanel exposes none)
 	currentPath  string                      // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar      bool
 	minimal      bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
-	preview      int          // previewOff/previewPane/previewGlamour
+	preview      int          // previewOff/previewPane
 	previewSrc   string       // the buffer text the pane was last rendered from
 	previewW     int          // the width it was last rendered at (a resize must re-wrap)
+	previewMap   []int        // that render's source line → pane row map (RenderMarkdownMapped)
+	previewAt    int          // the editor scroll offset the pane was last synced to; -1 re-syncs
 	sh           *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
 	w, h         int
 }
@@ -110,7 +111,6 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	}
 	s.editorPanel = components.NewScreenPanel(s.editor)
 	s.previewPanel = components.NewScrollContainer("preview")
-	s.glamourPanel = components.NewScrollContainer("glamour")
 	s.modular = s.buildModular()
 	return s
 }
@@ -150,48 +150,41 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	}
 	_, act := s.modular.Update(sh, msg)
 	s.refreshPreview()
+	s.syncPreviewScroll()
 	return s, act
 }
 
-// cyclePreview steps ctrl+p through the panes: off → the custom reader → glamour →
-// off. Every rung is a layout change, so nothing here touches the router's stack and
-// there is no navigation state to keep in sync.
+// cyclePreview steps ctrl+p through the panes: off → the reader → off. Every rung is
+// a layout change, so nothing here touches the router's stack and there is no
+// navigation state to keep in sync.
 func (s *homeScreen) cyclePreview() core.Action {
 	switch s.preview {
 	case previewOff:
 		s.setPreview(previewPane)
 	case previewPane:
-		s.setPreview(previewGlamour)
-	case previewGlamour:
 		s.setPreview(previewOff)
 		// The parked overlay hangs off this rung: uncomment to make the cycle
-		// off → pane → glamour pane → full-width overlay → off again.
-		// return core.Push(s.previewScreen(false))
+		// off → pane → full-width overlay → off again.
+		// return core.Push(s.previewScreen())
 	}
 	return core.Action{}
 }
 
 // previewScreen is the PARKED full-width overlay over the live buffer — built and
-// tested, but off the ctrl+p cycle while the side-by-side panes are being lived with.
-// Re-enable it from the previewGlamour rung of cyclePreview.
+// tested, but off the ctrl+p cycle while the side-by-side pane is being lived with.
+// Re-enable it from the previewPane rung of cyclePreview.
 //
-// Two of them chain: the custom reader REPLACES itself with the glamour one
-// (pop-then-push in a single action) and the glamour one pops, so the router's stack
-// only ever holds one and esc unwinds to the editor from either.
-func (s *homeScreen) previewScreen(useGlamour bool) *components.DocScreen {
-	title, render, next := "preview · ", components.RenderMarkdown, func() core.Action {
-		return core.Replace(s.previewScreen(true))
-	}
-	if useGlamour {
-		title, render, next = "glamour · ", glamourRender, func() core.Action { return core.Pop() }
-	}
+// It renders the LIVE buffer rather than a snapshot, so it is the same document the
+// pane shows; ctrl+p and esc both pop it, which is why the home screen tracks only
+// the pane — an esc it never sees cannot desync it.
+func (s *homeScreen) previewScreen() *components.DocScreen {
 	return components.NewDocScreen(components.DocOpts{
-		Title:  title + s.previewName(),
-		Crumb:  strings.TrimSuffix(title, " · "),
-		Render: func(width int) string { return render(s.editor.Text(), width) },
+		Title:  "preview · " + s.previewName(),
+		Crumb:  "preview",
+		Render: func(width int) string { return components.RenderMarkdown(s.editor.Text(), width) },
 		OnKey: func(_ *core.Shared, k string) (core.Action, bool) {
 			if core.MatchKey(k, previewKey) {
-				return next(), true
+				return core.Pop(), true
 			}
 			return core.Action{}, false
 		},
@@ -220,30 +213,31 @@ func (s *homeScreen) setPreview(mode int) {
 		s.modular.SetSize(s.sh, s.w, s.h)
 	}
 	s.modular.FocusSlot(s.editorSlot())
-	// Clearing the skip-cache is what makes switching RENDERERS work: the buffer has
-	// not changed, so without this the new pane would never draw.
-	s.previewSrc, s.previewW = "", 0
+	// Clearing the skip-cache is what makes REOPENING the pane work: the buffer has not
+	// changed since it was last up, so without this it would come back blank.
+	s.previewSrc, s.previewW, s.previewMap = "", 0, nil
+	s.previewAt = -1 // the pane re-syncs to wherever the editor is scrolled
 	s.refreshPreview()
+	s.syncPreviewScroll()
 }
 
-// previewPane answers the pane and renderer for the current mode, or nil when the
-// preview is off.
-func (s *homeScreen) previewTarget() (*components.ScrollContainer, func(string, int) string) {
-	switch s.preview {
-	case previewPane:
-		return s.previewPanel, components.RenderMarkdown
-	case previewGlamour:
-		return s.glamourPanel, glamourRender
+// previewTarget answers the live pane, or nil when the preview is off.
+func (s *homeScreen) previewTarget() *components.ScrollContainer {
+	if s.preview == previewPane {
+		return s.previewPanel
 	}
-	return nil, nil
+	return nil
 }
 
 // refreshPreview re-renders the live pane when the buffer changed under it, or when
 // the pane changed width (the render is wrapped to it). It runs from Update — once per
 // message — rather than from View, which would re-render the whole document on every
 // frame, mouse motion included.
+//
+// The mapped renderer costs nothing over the plain one and is what makes the scroll
+// sync exact, so the map is kept with the render it belongs to.
 func (s *homeScreen) refreshPreview() {
-	panel, render := s.previewTarget()
+	panel := s.previewTarget()
 	if panel == nil || s.editor == nil {
 		return
 	}
@@ -251,8 +245,61 @@ func (s *homeScreen) refreshPreview() {
 	if src == s.previewSrc && width == s.previewW {
 		return
 	}
-	s.previewSrc, s.previewW = src, width
-	panel.SetLines(strings.Split(render(src, width), "\n"))
+	out, mapped := components.RenderMarkdownMapped(src, width)
+	s.previewSrc, s.previewW, s.previewMap = src, width, mapped
+	s.previewAt = -1 // the rows the last sync was computed against are gone
+	panel.SetLines(strings.Split(out, "\n"))
+}
+
+// syncPreviewScroll scrolls the live pane to follow the editor. The two views do not
+// hold the same number of rows for the same text — the render joins paragraphs, gives
+// every heading a blank line and grows rules around fences — so a single alignment
+// cannot be right everywhere. This one is right where it matters and eases where it
+// cannot be:
+//
+//   - Through the body of the document the editor's MIDDLE line sits at the pane's
+//     middle row, on the row RenderMarkdownMapped says that line rendered to. Aligning
+//     the middles (rather than the tops) keeps the correspondence readable across the
+//     whole pane, and leaves a half-pane of slack at each end for the two views to
+//     disagree in.
+//   - Within one editor screenful of either end the target eases into the end itself:
+//     offset 0 at the top, the pane's last page at the bottom. Without that the pane
+//     could never reach the bottom at all — the render outruns the source, so the
+//     editor bottoms out while the anchor still points a screenful short.
+//
+// The sync fires only when the editor's scroll offset actually moves, so a manually
+// scrolled pane is left alone until the editor scrolls again.
+func (s *homeScreen) syncPreviewScroll() {
+	panel := s.previewTarget()
+	if panel == nil || s.editor == nil {
+		return
+	}
+	off, maxOff, editorRows := s.editor.ScrollSpan()
+	if off == s.previewAt {
+		return
+	}
+	s.previewAt = off
+	if len(s.previewMap) == 0 {
+		return
+	}
+
+	// The anchor: the center line's row, placed at the pane's middle. The min guards a
+	// map from a render one keystroke behind the buffer.
+	center := s.editor.CenterLine()
+	anchored := s.previewMap[min(center, len(s.previewMap)-1)] - panel.VisibleRows()/2
+
+	// ends is where the pane must be when the editor is AT an end; w is how much of it
+	// to apply — nothing through the body, all of it at either extreme, smoothstepped
+	// between so the handoff has no kink.
+	w, ends := 1.0, 0.0
+	if maxOff > 0 {
+		band := float64(max(editorRows, 1))
+		w = 1 - min(float64(min(off, maxOff-off))/band, 1)
+		w = w * w * (3 - 2*w)
+		ends = float64(off) / float64(maxOff) * float64(panel.MaxScrollOffset())
+	}
+	// ScrollTo clamps, so nothing here has to.
+	panel.ScrollTo(int(math.Round((1-w)*float64(anchored) + w*ends)))
 }
 
 func (s *homeScreen) View(sh *core.Shared) string     { return s.modular.View(sh) }
@@ -260,9 +307,19 @@ func (s *homeScreen) HelpView(sh *core.Shared) string { return s.modular.HelpVie
 
 func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 	s.sh = sh
+	resized := width != s.w || bodyHeight != s.h
 	s.w, s.h = width, bodyHeight
 	s.modular.SetSize(sh, width, bodyHeight)
 	s.refreshPreview() // the pane's new width re-wraps the render
+	if resized {
+		// A height-only resize leaves the render alone but moves both viewports under
+		// it, so the sync has to run again on an unchanged editor offset. Only on a
+		// REAL resize: the router re-lays out after every message (core.Router.Update),
+		// so forcing it every tick would undo a hand-scrolled pane in the same tick the
+		// user scrolled it.
+		s.previewAt = -1
+		s.syncPreviewScroll()
+	}
 }
 
 // Filtering proxies the modular screen's capture state: the router must leave global
@@ -550,7 +607,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	// against the preview's border (or the terminal edge).
 	cols = append(cols, []components.Slot{{Panel: s.editorPanel, Weight: 1, ExpandH: true}})
 	widths = append(widths, 0)
-	if panel, _ := s.previewTarget(); panel != nil {
+	if panel := s.previewTarget(); panel != nil {
 		cols = append(cols, []components.Slot{{Panel: panel, Weight: 1}})
 		widths = append(widths, 0)
 	}
