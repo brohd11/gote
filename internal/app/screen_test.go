@@ -650,3 +650,56 @@ func pump(r core.Router, cmd tea.Cmd) {
 		_, cmd = r.Update(msg)
 	}
 }
+
+// TestQuitGate: a clean screen lets the quit through (handled=false); a dirty
+// buffer intercepts it with a push (the confirm popup) and dirtyDocs names it —
+// the scratch buffer here, which lives outside the ctx's open set.
+func TestQuitGate(t *testing.T) {
+	s, sh := newHome(t)
+
+	if _, handled := s.QuitGate(sh); handled {
+		t.Fatal("a clean home screen should let the quit through")
+	}
+
+	// Focus the editor pane and dirty the scratch buffer.
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+
+	if names := s.dirtyDocs(sh); len(names) != 1 || names[0] != "scratch" {
+		t.Fatalf("dirtyDocs should name the scratch buffer, got %v", names)
+	}
+	act, handled := s.QuitGate(sh)
+	if !handled || act.Msg == nil {
+		t.Fatal("a dirty buffer should intercept the quit with a confirm popup push")
+	}
+
+	// The popup must force-quit on q/ctrl+c rather than re-trigger the gate
+	// below it (which would stack popup upon popup).
+	if _, handled := quitPopup([]string{"scratch"}).QuitGate(sh); !handled {
+		t.Fatal("the quit popup should answer the quit gate itself (force-quit)")
+	}
+}
+
+// TestHelpKey: ? pushes the shortcut overlay while nothing captures text, types a
+// literal ? into the editor when it does, and alt+? summons the overlay even from
+// inside the editor.
+func TestHelpKey(t *testing.T) {
+	s, sh := newHome(t)
+
+	if _, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}); act.Msg == nil {
+		t.Fatal("? should push the help overlay when nothing is capturing text")
+	}
+
+	// Into the editor pane: ? is text now, so the buffer goes dirty.
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if !s.editor.Dirty() {
+		t.Fatal("? should type into the editor, not open help")
+	}
+
+	if _, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?"), Alt: true}); act.Msg == nil {
+		t.Fatal("alt+? should push the help overlay even from the editor")
+	}
+}

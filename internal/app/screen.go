@@ -15,8 +15,10 @@ import (
 const sidebarWidth = 30
 
 // The home screen's own keys. ctrl+b carries a modifier, so it passes the router's
-// capture gate and toggles even while typing in the editor; "a" is intercepted only
-// when nothing is capturing, so typed text and /-filters never lose the letter.
+// capture gate and toggles even while typing in the editor; "a" and "?" are
+// intercepted only when nothing is capturing, so typed text and /-filters never
+// lose the letter (alt+? is the modified alias that summons help from anywhere,
+// the editor included).
 var (
 	sidebarKey = key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "sidebar"))
 	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
@@ -25,6 +27,7 @@ var (
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
 	lineNumsKey = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
+	helpKey     = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
 )
 
 // The preview modes ctrl+p cycles through. Both renderers show up as a pane beside
@@ -71,6 +74,7 @@ var _ core.Filterer = (*homeScreen)(nil)
 var _ core.Receiver = (*homeScreen)(nil)
 var _ core.Crumber = (*homeScreen)(nil)
 var _ core.ChromeMasker = (*homeScreen)(nil)
+var _ core.QuitGater = (*homeScreen)(nil)
 
 // NewHomeScreen builds the root screen: the docs list seeded from the ctx, an empty
 // open-docs list, and the editor pane starting on a scratch buffer.
@@ -128,6 +132,9 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		}
 		if core.MatchKey(k, actionsKey) && !s.modular.Filtering() {
 			return s, core.Push(actionsMenu(sh))
+		}
+		if core.MatchKey(k, helpKey) && (!s.modular.Filtering() || k == "alt+?") {
+			return s, core.Push(s.helpScreen())
 		}
 		if core.MatchKey(k, previewKey) {
 			return s, s.cyclePreview()
@@ -261,6 +268,47 @@ func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 // Filtering proxies the modular screen's capture state: the router must leave global
 // single-key shortcuts alone while the editor types or a list filters.
 func (s *homeScreen) Filtering() bool { return s.modular.Filtering() }
+
+// QuitGate implements core.QuitGater: q and ctrl+c quit instantly when every
+// buffer is clean; with unsaved changes they push a confirm popup listing the
+// dirty docs — y quits anyway (discarding them), esc/n cancels. The router
+// consults the stack top-down, so the gate still answers from under a pushed
+// modal (the save-as/new-file line edit, the help overlay).
+func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
+	dirty := s.dirtyDocs(sh)
+	if len(dirty) == 0 {
+		return core.Action{}, false
+	}
+	return core.Push(quitPopup(dirty)), true
+}
+
+// quitPopup builds the dirty-quit confirm. OnQuit keeps q/ctrl+c as the
+// force-quit while the popup is on top: without it the router's stack walk
+// would find this screen's gate below the popup and stack another one.
+func quitPopup(dirty []string) *components.DialogScreen {
+	body := "unsaved changes in:\n\n  " + strings.Join(dirty, "\n  ") +
+		"\n\nquitting discards them.\n(q/ctrl+c force-quits)"
+	popup := components.CreatePopup("unsaved changes", body, core.Async(tea.Quit), components.DefaultHelpKeys...)
+	popup.OnQuit = func(*core.Shared) (core.Action, bool) { return core.Async(tea.Quit), true }
+	return popup
+}
+
+// dirtyDocs names every open buffer with unsaved changes: the live editor first
+// (it is the only home of the scratch buffer, which isn't in the open set), then
+// each dirty doc in the ctx's open set, in opening order.
+func (s *homeScreen) dirtyDocs(sh *core.Shared) []string {
+	var names []string
+	if s.editor != nil && s.editor.Dirty() {
+		names = append(names, s.previewName()) // "scratch" or the current doc's name
+	}
+	c := Of(sh)
+	for _, path := range c.OpenOrder {
+		if ed := c.Open[path]; ed != nil && ed != s.editor && ed.Dirty() {
+			names = append(names, docName(path))
+		}
+	}
+	return names
+}
 
 // ChromeMask hides every router-drawn element in minimal mode, giving the editor the
 // whole terminal: the breadcrumb and help bar are the only ones gote has up, and a
@@ -484,7 +532,9 @@ func (s *homeScreen) setSidebar(visible bool) {
 // leaves.
 func (s *homeScreen) buildModular() *components.ModularScreen {
 	opts := components.ModularOpts{
-		Help: []key.Binding{sidebarKey, previewKey, actionsKey, wrapKey, lineNumsKey},
+		// The bar stays lean on purpose: preview/wrap/line-nums still work, but
+		// they are documented in the ? overlay (helpKey) instead of the bar.
+		Help: []key.Binding{sidebarKey, actionsKey, helpKey},
 	}
 	var cols [][]components.Slot
 	var widths []int
