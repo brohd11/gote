@@ -29,13 +29,13 @@ const hereArg = "here"
 var rootCmd = &cobra.Command{
 	Use:   "gote [here|dir|file] [depth]",
 	Short: "A simple text editor (TUI)",
-	Long: `gote is a simple TUI text editor. With no arguments it lists the docs stored in
-~/.gote (extension and scan depth come from ~/.gote/config.yml). Given a directory it
-lists every matching file found by a recursive scan, to the depth given as a second
-argument. Given a file it opens that file alone, with the sidebar and the surrounding
-chrome hidden — the shape to use as your $EDITOR.
+	Long: `gote is a simple TUI text editor. With no arguments it opens the default vault
+named in ~/.gote/config.yml, or the ~/.gote document store when no valid default is
+configured. Given a directory it lists every matching file found by a recursive scan,
+to the depth given as a second argument. Given a file it opens that file alone, with
+the sidebar and surrounding chrome hidden — the shape to use as your $EDITOR.
 
-  gote                  # ~/.gote docs
+  gote                  # configured default vault, otherwise ~/.gote docs
   gote here             # scan the current directory, config depth
   gote here 3           # scan the current directory, depth 3
   gote ~/notes 4        # scan ~/notes, depth 4
@@ -75,7 +75,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 // of gote's argument grammar, kept apart from the cobra wiring so it can be tested
 // without starting a program:
 //
-//   - no argument: the ~/.gote store, or (with --scan) a scan of the cwd
+//   - no argument: config chooses the default vault later, or (with --scan) scan cwd
 //   - "here": a scan of the cwd
 //   - a directory (or --scan, or a trailing separator): a scan of it
 //   - anything else, existing or not: that file, in the minimal editor

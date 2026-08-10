@@ -123,6 +123,42 @@ func TestHomePaneNavigation(t *testing.T) {
 	}
 }
 
+// TestThemeChangeKeepsEditor drives the framework's real theme broadcast through
+// the router. gote's root is stateful: rebuilding it used to leave the replacement
+// ScreenPanel uninitialized, so both the editor and its unsaved buffer disappeared
+// while the ordinary list panels kept rendering.
+func TestThemeChangeKeepsEditor(t *testing.T) {
+	prev := core.CurrentTheme()
+	t.Cleanup(func() { core.SetTheme(prev) })
+	t.Setenv("HOME", t.TempDir())
+
+	sh := core.NewShared(New("test", DefaultConfig(), Options{}))
+	r := core.NewRouter(sh, []core.TabEntry{
+		{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+	})
+	r.Init()
+	var model tea.Model = r
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftRight}) // docs -> open
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftRight}) // open -> editor
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved theme text")})
+
+	if !strings.Contains(stripANSI(model.View()), "unsaved theme text") {
+		t.Fatal("test setup did not render the unsaved editor buffer")
+	}
+
+	next := "mono"
+	if prev == next {
+		next = "godot"
+	}
+	model, _ = model.Update(core.ApplyTheme(next))
+
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "unsaved theme text") {
+		t.Fatalf("theme change must keep the live editor and its unsaved buffer, render:\n%s", view)
+	}
+}
+
 // TestHomePaneNavigationWithoutSidebar: ctrl+b leaves a single-pane grid, where the
 // pane keys have nowhere to go. They must stay consumed rather than falling through
 // to the editor, and ctrl+x must still be the way back to the sidebar.
@@ -850,6 +886,67 @@ func TestQuitGate(t *testing.T) {
 	// below it (which would stack popup upon popup).
 	if _, handled := quitPopup([]string{"scratch"}).QuitGate(sh); !handled {
 		t.Fatal("the quit popup should answer the quit gate itself (force-quit)")
+	}
+}
+
+func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
+	s, sh := newHome(t)
+	c := Of(sh)
+	vault := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vault, "vault.md"), []byte("vault"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.Config.Vaults["notes"] = VaultConfig{Path: vault, Open: []string{}}
+
+	oldPath := filepath.Join(t.TempDir(), "old.md")
+	s.openDoc(sh, oldPath)
+	oldEditor := s.editor
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved")})
+	s.preview = previewPane
+
+	if act := s.requestVaultSwitch(sh, "notes"); msgType(act) != "core.pushMsg" {
+		t.Fatalf("dirty switch should push the unsaved popup, got %s", msgType(act))
+	}
+	if c.Mode == ModeVault || s.editor != oldEditor || c.Open[oldPath] != oldEditor {
+		t.Fatal("requesting a dirty switch mutated the session before confirmation")
+	}
+
+	act := s.activateVault(sh, "notes") // the dirty popup's confirm action
+	if msgType(act) != "core.seqMsg" {
+		t.Fatalf("confirmed switch should reset navigation, got %s", msgType(act))
+	}
+	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
+		t.Fatalf("active vault = mode %v name %q dir %q", c.Mode, c.VaultName, c.ScanDir)
+	}
+	if len(c.Open) != 0 || len(c.OpenOrder) != 0 || len(c.OpenRoots) != 0 {
+		t.Fatalf("confirmed switch left open state: %v %v %v", c.Open, c.OpenOrder, c.OpenRoots)
+	}
+	if s.editor == oldEditor || s.editor.Dirty() || s.currentPath != "" {
+		t.Fatal("confirmed switch should install a fresh clean scratch editor")
+	}
+	if s.preview != previewOff || !s.sidebar || s.minimal {
+		t.Fatalf("switch layout = preview %d sidebar %v minimal %v", s.preview, s.sidebar, s.minimal)
+	}
+	view := stripANSI(s.View(sh))
+	if !strings.Contains(view, "vault.md") || strings.Contains(view, "unsaved") {
+		t.Fatalf("switched view did not show only the new vault:\n%s", view)
+	}
+	if got := s.CrumbLabel(false); got != "vault: notes" {
+		t.Fatalf("vault crumb = %q", got)
+	}
+}
+
+func TestVaultSwitchRejectsMissingFolderWithoutClosing(t *testing.T) {
+	s, sh := newHome(t)
+	c := Of(sh)
+	c.Config.Vaults["gone"] = VaultConfig{Path: filepath.Join(t.TempDir(), "gone"), Open: []string{}}
+	oldEditor := s.editor
+
+	if act := s.requestVaultSwitch(sh, "gone"); msgType(act) != "core.pushMsg" {
+		t.Fatalf("missing vault should push an error popup, got %s", msgType(act))
+	}
+	if c.Mode != ModeHome || s.editor != oldEditor {
+		t.Fatal("invalid vault switch changed the live session")
 	}
 }
 

@@ -3,6 +3,8 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +15,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg != DefaultConfig() {
+	if !reflect.DeepEqual(cfg, DefaultConfig()) {
 		t.Fatalf("cfg = %+v, want %+v", cfg, DefaultConfig())
 	}
 }
@@ -57,7 +59,56 @@ func TestLoadConfigMalformed(t *testing.T) {
 	if err == nil {
 		t.Fatal("a malformed config should report an error")
 	}
-	if cfg != DefaultConfig() {
+	if !reflect.DeepEqual(cfg, DefaultConfig()) {
 		t.Fatalf("cfg = %+v, want the defaults on a malformed file", cfg)
+	}
+}
+
+func TestConfigVaultRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := filepath.Join(home, "Notes")
+	if err := os.Mkdir(vault, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := DefaultConfig()
+	want.Default = "notes"
+	want.Vaults["notes"] = VaultConfig{Path: vault, Open: []string{}}
+	if err := SaveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, ".gote", "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "open: []") {
+		t.Fatalf("new vault schema must preserve the reserved empty open list:\n%s", raw)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeVaultPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	notes := filepath.Join(home, "Notes")
+	if err := os.Mkdir(notes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := normalizeVaultPath("~/Notes"); err != nil || got != notes {
+		t.Fatalf("normalize ~/Notes = %q, %v; want %q", got, err, notes)
+	}
+	file := filepath.Join(home, "note.md")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeVaultPath(file); err == nil {
+		t.Fatal("a vault path naming a file should fail")
 	}
 }

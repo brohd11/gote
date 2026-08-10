@@ -1,20 +1,23 @@
 package app
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 )
 
-// Mode is what gote was launched as: a doc list seeded from the flat ~/.gote store or
-// from a recursive scan, or a single file opened on its own.
+// Mode is the active document source: the flat ~/.gote store, an ad-hoc recursive
+// scan, a single file opened alone, or a configured named vault.
 type Mode int
 
 const (
-	ModeHome Mode = iota // ~/.gote/*.<ext> — the default
-	ModeScan             // recursive scan of ScanDir to Depth
-	ModeFile             // FilePath alone, in the chrome-less minimal editor
+	ModeHome  Mode = iota // ~/.gote/*.<ext> — the default
+	ModeScan              // recursive scan of ScanDir to Depth
+	ModeFile              // FilePath alone, in the chrome-less minimal editor
+	ModeVault             // a named, configured recursive document root
 )
 
 // Ctx is gote's app context, stored on core.Shared.App and recovered with Of. It
@@ -23,13 +26,15 @@ const (
 // buffer — so keeping the instance is what preserves unsaved edits across file
 // switches. ctrl+x in the editor closes the buffer (CloseDoc).
 type Ctx struct {
-	Version  string
-	Mode     Mode
-	ScanDir  string
-	FilePath string // ModeFile's file; the doc the minimal editor boots on
-	Depth    int
-	Ext      string
-	Files    []DocFile
+	Version   string
+	Mode      Mode
+	ScanDir   string
+	FilePath  string // ModeFile's file; the doc the minimal editor boots on
+	VaultName string // ModeVault's configured display/lookup name
+	Depth     int
+	Ext       string
+	Files     []DocFile
+	Config    Config
 
 	Open      map[string]*components.EditorScreen
 	OpenOrder []string          // Open's insertion order, for the open-docs list
@@ -38,7 +43,7 @@ type Ctx struct {
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
 // fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile. A zero
-// Options is the default launch — the ~/.gote store at the config's depth.
+// Options is the default launch — Config.Default's vault when valid, else ~/.gote.
 //
 // Depth carries DepthSet rather than treating 0 as "unset", because 0 is a meaningful
 // depth: `gote here 0` lists the current directory alone. Unset means the config's
@@ -59,6 +64,7 @@ func New(version string, cfg Config, opts Options) *Ctx {
 		Mode:      opts.Mode,
 		Ext:       cfg.Extension,
 		Depth:     cfg.ScanDepth,
+		Config:    cfg,
 		Open:      map[string]*components.EditorScreen{},
 		OpenRoots: map[string]string{},
 	}
@@ -70,6 +76,12 @@ func New(version string, cfg Config, opts Options) *Ctx {
 		c.ScanDir = opts.Dir
 	case ModeFile:
 		c.FilePath = opts.File
+	case ModeHome:
+		if cfg.Default != "" {
+			if path, err := vaultPath(cfg, cfg.Default); err == nil {
+				c.Mode, c.VaultName, c.ScanDir = ModeVault, cfg.Default, path
+			}
+		}
 	}
 	c.Seed()
 	return c
@@ -84,7 +96,7 @@ func Of(sh *core.Shared) *Ctx { return core.App[Ctx](sh) }
 // buffers outlive reseeds.
 func (c *Ctx) Seed() {
 	switch c.Mode {
-	case ModeScan:
+	case ModeScan, ModeVault:
 		c.Files = ScanDocs(c.ScanDir, c.Depth, c.Ext)
 	case ModeFile:
 		c.Files = nil
@@ -96,6 +108,69 @@ func (c *Ctx) Seed() {
 		}
 		c.Files = HomeDocs(dir, c.Ext)
 	}
+}
+
+// vaultPath resolves and validates one configured vault without changing live state.
+func vaultPath(cfg Config, name string) (string, error) {
+	v, ok := cfg.Vaults[name]
+	if !ok {
+		return "", fmt.Errorf("vault %q is not configured", name)
+	}
+	path, err := normalizeVaultPath(v.Path)
+	if err != nil {
+		return "", fmt.Errorf("vault %q: %w", name, err)
+	}
+	return path, nil
+}
+
+// AddVault validates and persists a new named vault. Config is replaced in memory
+// only after the atomic write succeeds, so an error cannot leave the menu ahead of
+// config.yml.
+func (c *Ctx) AddVault(name, rawPath string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if _, exists := c.Config.Vaults[name]; exists {
+		return fmt.Errorf("vault %q already exists", name)
+	}
+	path, err := normalizeVaultPath(rawPath)
+	if err != nil {
+		return err
+	}
+	for other, v := range c.Config.Vaults {
+		otherPath, err := normalizeVaultPath(v.Path)
+		if err == nil && otherPath == path {
+			return fmt.Errorf("%q is already saved as vault %q", path, other)
+		}
+	}
+	next := c.Config
+	next.Vaults = make(map[string]VaultConfig, len(c.Config.Vaults)+1)
+	for k, v := range c.Config.Vaults {
+		next.Vaults[k] = v
+	}
+	next.Vaults[name] = VaultConfig{Path: path, Open: []string{}}
+	if err := SaveConfig(next); err != nil {
+		return err
+	}
+	c.Config = next
+	return nil
+}
+
+// SwitchVault closes the current session and activates name. Validation happens
+// first, so a vanished or malformed vault never destroys open buffers.
+func (c *Ctx) SwitchVault(name string) error {
+	path, err := vaultPath(c.Config, name)
+	if err != nil {
+		return err
+	}
+	c.Open = map[string]*components.EditorScreen{}
+	c.OpenOrder = nil
+	c.OpenRoots = map[string]string{}
+	c.Mode, c.VaultName, c.ScanDir = ModeVault, name, path
+	c.FilePath = ""
+	c.Seed()
+	return nil
 }
 
 // OpenDoc returns the editor for path, creating and registering it on first open.
@@ -209,7 +284,7 @@ func (c *Ctx) rootForPath(path string) string {
 		}
 	}
 	switch c.Mode {
-	case ModeScan:
+	case ModeScan, ModeVault:
 		if c.ScanDir != "" {
 			return filepath.Clean(c.ScanDir)
 		}

@@ -41,8 +41,8 @@ const (
 	previewPane        // the custom reader, live, beside the editor
 )
 
-// ReseedMsg is gote's "reload the doc list" broadcast: the Actions ▸ Refresh row and
-// the mode toggle raise it; the home screen reseeds and rebuilds its lists on it.
+// ReseedMsg is gote's "reload the doc list" broadcast: the Actions ▸ Refresh row
+// raises it, and the home screen reseeds and rebuilds its lists on receipt.
 type ReseedMsg struct{}
 
 // homeScreen is gote's root screen: a ModularScreen with a hideable sidebar (the docs
@@ -339,13 +339,26 @@ func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
 	return core.Push(quitPopup(dirty)), true
 }
 
-// quitPopup builds the dirty-quit confirm. OnQuit keeps q/ctrl+c as the
-// force-quit while the popup is on top: without it the router's stack walk
-// would find this screen's gate below the popup and stack another one.
+// quitPopup builds the dirty-quit confirm. OnQuit keeps q/ctrl+c as the force-quit
+// while the popup is on top: without it the router's stack walk would find this
+// screen's gate below the popup and stack another one.
 func quitPopup(dirty []string) *components.DialogScreen {
+	return dirtyPopup(dirty, "quitting", func(*core.Shared) core.Action { return core.Async(tea.Quit) })
+}
+
+// dirtyPopup is the shared discard gate for quitting and vault switches. It keeps
+// the same compact list and confirm/cancel controls in both places; only the action
+// named in the warning and run on confirmation differs.
+func dirtyPopup(dirty []string, consequence string, onYes func(*core.Shared) core.Action) *components.DialogScreen {
 	body := "unsaved changes in:\n\n  " + strings.Join(dirty, "\n  ") +
-		"\n\nquitting discards them.\n(q/ctrl+c force-quits)"
-	popup := components.CreatePopup("unsaved changes", body, core.Async(tea.Quit), components.DefaultHelpKeys...)
+		"\n\n" + consequence + " discards them.\n(q/ctrl+c force-quits)"
+	popup := &components.DialogScreen{
+		Title:   "unsaved changes",
+		Render:  func(*core.Shared) string { return body },
+		OnYes:   onYes,
+		Help:    components.DefaultHelpKeys,
+		Overlay: true,
+	}
 	popup.OnQuit = func(*core.Shared) (core.Action, bool) { return core.Async(tea.Quit), true }
 	return popup
 }
@@ -381,16 +394,26 @@ func (s *homeScreen) ChromeMask() core.ChromeMask {
 	return core.ChromeMask{}
 }
 
-// CrumbLabel contributes the mode segment: the store, or the scanned directory.
+// CrumbLabel contributes the active store, ad-hoc scan, or named vault.
 func (s *homeScreen) CrumbLabel(short bool) string {
-	if s.sh != nil && Of(s.sh).Mode == ModeScan {
-		return "scan: " + Of(s.sh).ScanDir
+	if s.sh != nil {
+		c := Of(s.sh)
+		switch c.Mode {
+		case ModeScan:
+			return "scan: " + c.ScanDir
+		case ModeVault:
+			return "vault: " + c.VaultName
+		}
 	}
 	return "docs"
 }
 
 // Receive handles app-level broadcasts: a ReseedMsg reloads both lists from a fresh
-// seed; anything else falls through to the theme-change handler.
+// seed; a theme change restyles the two live list models in place. gote's root owns
+// stateful editor instances, so it must not use core.OnThemeChange: that helper
+// rebuilds the root and would discard the scratch buffer and the pane's live wiring.
+// The editor and panel frames read theme colors while rendering; only bubbles lists
+// cache themed styles and need an explicit refresh here.
 func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 	if _, ok := payload.(ReseedMsg); ok {
 		c := Of(sh)
@@ -399,7 +422,55 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
 		return core.Action{}
 	}
-	return core.OnThemeChange(payload)
+	if msg, ok := payload.(SwitchVaultMsg); ok {
+		return s.requestVaultSwitch(sh, msg.Name)
+	}
+	if _, ok := payload.(core.MsgThemeChanged); ok {
+		core.StyleList(s.docsPanel.List())
+		core.StyleList(s.openPanel.List())
+	}
+	return core.Action{}
+}
+
+// requestVaultSwitch validates the target before consulting dirty state. A broken
+// saved path must never make the user discard work for a switch that cannot happen.
+func (s *homeScreen) requestVaultSwitch(sh *core.Shared, name string) core.Action {
+	if _, err := vaultPath(Of(sh).Config, name); err != nil {
+		return core.Push(errPopup("open vault", err))
+	}
+	if dirty := s.dirtyDocs(sh); len(dirty) > 0 {
+		return core.Push(dirtyPopup(dirty, "switching vaults", func(sh *core.Shared) core.Action {
+			return s.activateVault(sh, name)
+		}))
+	}
+	return s.activateVault(sh, name)
+}
+
+// activateVault performs the destructive half of a confirmed switch: the context's
+// open set is cleared, the pane gets a fresh scratch editor, and every vault-specific
+// view state is rebuilt before navigation returns to the root.
+func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
+	c := Of(sh)
+	if err := c.SwitchVault(name); err != nil {
+		return core.Replace(errPopup("open vault", err))
+	}
+	s.currentPath = ""
+	s.editor = components.NewEditorScreen(s.editorOpts())
+	cmd := s.editorPanel.SetChild(s.editor)
+	s.docsPanel.SetItems(docRows(c))
+	s.openPanel.SetItems(nil)
+	s.preview = previewOff
+	s.previewSrc, s.previewW, s.previewMap = "", 0, nil
+	s.previewAt = -1
+	s.minimal = false
+	s.sidebar = true
+	s.modular.SetFocused(false)
+	s.modular = s.buildModular()
+	if s.w > 0 {
+		s.modular.SetSize(sh, s.w, s.h)
+	}
+	s.modular.FocusSlot(0)
+	return core.Seq(core.Async(cmd), core.ResetToRoot())
 }
 
 // pickDoc routes the docs list's rows: the action row opens the new-file line

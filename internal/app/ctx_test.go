@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -50,6 +51,77 @@ func TestCloseDoc(t *testing.T) {
 	}
 	if next := c.CloseDoc(""); next != "" || len(order(c)) != 1 {
 		t.Fatalf("the scratch path is a no-op: next %q, order %v", next, order(c))
+	}
+}
+
+func TestConfiguredDefaultVaultAndCLIOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := filepath.Join(home, "Notes")
+	if err := os.Mkdir(vault, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vault, "note.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	cfg.Default = "notes"
+	cfg.Vaults["notes"] = VaultConfig{Path: vault, Open: []string{}}
+
+	c := New("dev", cfg, Options{})
+	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
+		t.Fatalf("bare launch = mode %v vault %q dir %q", c.Mode, c.VaultName, c.ScanDir)
+	}
+	if len(c.Files) != 1 || c.Files[0].Name != "note.md" {
+		t.Fatalf("default vault seed = %+v", c.Files)
+	}
+
+	scan := t.TempDir()
+	c = New("dev", cfg, Options{Mode: ModeScan, Dir: scan})
+	if c.Mode != ModeScan || c.ScanDir != scan || c.VaultName != "" {
+		t.Fatalf("explicit scan must override default vault: %+v", c)
+	}
+
+	cfg.Default = "missing"
+	c = New("dev", cfg, Options{})
+	if c.Mode != ModeHome {
+		t.Fatalf("unknown default vault should fall back home, got mode %v", c.Mode)
+	}
+}
+
+func TestAddAndSwitchVault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := filepath.Join(home, "Notes")
+	if err := os.Mkdir(vault, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := New("dev", DefaultConfig(), Options{})
+	old := c.OpenDoc(filepath.Join(home, "old.md"), components.EditorOpts{})
+
+	if err := c.AddVault("notes", vault); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Config.Vaults["notes"]; got.Path != vault || got.Open == nil || len(got.Open) != 0 {
+		t.Fatalf("saved vault = %#v", got)
+	}
+	if err := c.AddVault("notes", vault); err == nil {
+		t.Fatal("duplicate vault name should fail")
+	}
+	if err := c.AddVault("other", vault); err == nil {
+		t.Fatal("duplicate vault path should fail")
+	}
+	if err := c.SwitchVault("notes"); err != nil {
+		t.Fatal(err)
+	}
+	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
+		t.Fatalf("switched context = %+v", c)
+	}
+	if len(c.Open) != 0 || len(c.OpenOrder) != 0 || len(c.OpenRoots) != 0 {
+		t.Fatalf("switch should close open session: open=%v order=%v roots=%v", c.Open, c.OpenOrder, c.OpenRoots)
+	}
+	if c.Open[filepath.Join(home, "old.md")] == old {
+		t.Fatal("old editor survived vault switch")
 	}
 }
 
