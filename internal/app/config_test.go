@@ -36,8 +36,8 @@ func TestLoadConfigFile(t *testing.T) {
 	if cfg.Extension != "txt" {
 		t.Fatalf("extension = %q, want txt", cfg.Extension)
 	}
-	if cfg.ScanDepth != 2 {
-		t.Fatalf("scan depth = %d, want the default 2", cfg.ScanDepth)
+	if want := DefaultConfig().ScanDepth; cfg.ScanDepth != want {
+		t.Fatalf("scan depth = %d, want the default %d", cfg.ScanDepth, want)
 	}
 }
 

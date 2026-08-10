@@ -23,14 +23,15 @@ var (
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
 )
 
-// The preview modes this screen can be in. The third rung of the ctrl+p cycle — the
-// full-width overlay — is a pushed DocScreen and so lives on the router's stack, not
-// here. The pane and the overlay are two different readings of the same render (one
-// to write against, one to read), and which earns a permanent home is still open, so
-// the key offers both rather than the choice being made here.
+// The preview modes ctrl+p cycles through. Both renderers show up as a pane beside
+// the editor rather than as an overlay over it: side by side is the shape a preview
+// actually gets used in, and it is the only shape that lets the two be compared
+// against the SOURCE as well as against each other. The full-width overlay is still
+// built (previewScreen) but parked off the cycle.
 const (
-	previewOff  = iota // editor only
-	previewPane        // a live pane beside the editor
+	previewOff     = iota // editor only
+	previewPane           // the custom reader, live, beside the editor
+	previewGlamour        // the same, rendered by glamour
 )
 
 // ReseedMsg is gote's "reload the doc list" broadcast: the Actions ▸ Refresh row and
@@ -48,11 +49,13 @@ type homeScreen struct {
 	docsPanel    *components.ListPanel
 	openPanel    *components.ListPanel
 	editorPanel  *components.ScreenPanel
-	previewPanel *components.ScrollContainer
-	editor       *components.EditorScreen // the editor pane's live child (ScreenPanel exposes none)
-	currentPath  string                   // the doc the editor pane is showing; "" = the scratch buffer
+	previewPanel *components.ScrollContainer // the custom reader's pane
+	glamourPanel *components.ScrollContainer // glamour's pane; separate so each keeps its own scroll
+	editor       *components.EditorScreen    // the editor pane's live child (ScreenPanel exposes none)
+	currentPath  string                      // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar      bool
-	preview      int          // previewOff/previewPane; the overlay lives on the router's stack
+	minimal      bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
+	preview      int          // previewOff/previewPane/previewGlamour
 	previewSrc   string       // the buffer text the pane was last rendered from
 	previewW     int          // the width it was last rendered at (a resize must re-wrap)
 	sh           *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
@@ -63,12 +66,20 @@ var _ core.Screen = (*homeScreen)(nil)
 var _ core.Filterer = (*homeScreen)(nil)
 var _ core.Receiver = (*homeScreen)(nil)
 var _ core.Crumber = (*homeScreen)(nil)
+var _ core.ChromeMasker = (*homeScreen)(nil)
 
 // NewHomeScreen builds the root screen: the docs list seeded from the ctx, an empty
 // open-docs list, and the editor pane starting on a scratch buffer.
+//
+// ModeFile builds the same screen minimally instead: the sidebar starts hidden and
+// stays unreachable, the chrome is masked away (ChromeMask), and the editor boots on
+// the file gote was given rather than on a scratch buffer. It is the same screen
+// because everything that makes the editor pane work — the save/rekey bookkeeping in
+// editorOpts, the ctrl+p preview panes — is wired here and is wanted there too.
 func NewHomeScreen(sh *core.Shared) core.Screen {
-	s := &homeScreen{sidebar: true}
 	c := Of(sh)
+	minimal := c.Mode == ModeFile
+	s := &homeScreen{sidebar: !minimal, minimal: minimal}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
@@ -80,12 +91,18 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
-	s.editor = components.NewEditorScreen(components.EditorOpts{
-		OnExit:    s.editorExit,
-		OnRelease: s.editorRelease,
-	})
+	// The minimal editor goes through the ctx like any picked doc, so the buffer is
+	// registered under its path and a save-as rekeys it the same way. ScreenPanel.Init
+	// forwards Init to its child, so the file read fires at startup unprompted.
+	if minimal {
+		s.currentPath = c.FilePath
+		s.editor = c.OpenDoc(c.FilePath, s.editorOpts())
+	} else {
+		s.editor = components.NewEditorScreen(s.editorOpts())
+	}
 	s.editorPanel = components.NewScreenPanel(s.editor)
 	s.previewPanel = components.NewScrollContainer("preview")
+	s.glamourPanel = components.NewScrollContainer("glamour")
 	s.modular = s.buildModular()
 	return s
 }
@@ -117,33 +134,45 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	return s, act
 }
 
-// cyclePreview steps ctrl+p through the preview modes: off → the live pane → the
-// full-width overlay → off. The overlay is a pushed screen rather than a fourth
-// state here, so the pane is torn down before it goes up and popping the overlay
-// (its own ctrl+p, or esc) lands back at off, closing the cycle.
+// cyclePreview steps ctrl+p through the panes: off → the custom reader → glamour →
+// off. Every rung is a layout change, so nothing here touches the router's stack and
+// there is no navigation state to keep in sync.
 func (s *homeScreen) cyclePreview() core.Action {
 	switch s.preview {
 	case previewOff:
 		s.setPreview(previewPane)
-		return core.Action{}
 	case previewPane:
+		s.setPreview(previewGlamour)
+	case previewGlamour:
 		s.setPreview(previewOff)
-		return core.Push(s.previewScreen())
+		// The parked overlay hangs off this rung: uncomment to make the cycle
+		// off → pane → glamour pane → full-width overlay → off again.
+		// return core.Push(s.previewScreen(false))
 	}
 	return core.Action{}
 }
 
-// previewScreen is the full-width overlay: a DocScreen re-rendering the live buffer
-// at whatever width it is given. esc pops it through core.Keys.Back; ctrl+p is added
-// so the key that opened it also closes it.
-func (s *homeScreen) previewScreen() *components.DocScreen {
+// previewScreen is the PARKED full-width overlay over the live buffer — built and
+// tested, but off the ctrl+p cycle while the side-by-side panes are being lived with.
+// Re-enable it from the previewGlamour rung of cyclePreview.
+//
+// Two of them chain: the custom reader REPLACES itself with the glamour one
+// (pop-then-push in a single action) and the glamour one pops, so the router's stack
+// only ever holds one and esc unwinds to the editor from either.
+func (s *homeScreen) previewScreen(useGlamour bool) *components.DocScreen {
+	title, render, next := "preview · ", components.RenderMarkdown, func() core.Action {
+		return core.Replace(s.previewScreen(true))
+	}
+	if useGlamour {
+		title, render, next = "glamour · ", glamourRender, func() core.Action { return core.Pop() }
+	}
 	return components.NewDocScreen(components.DocOpts{
-		Title:  "preview · " + s.previewName(),
-		Crumb:  "preview",
-		Render: func(width int) string { return components.RenderMarkdown(s.editor.Text(), width) },
+		Title:  title + s.previewName(),
+		Crumb:  strings.TrimSuffix(title, " · "),
+		Render: func(width int) string { return render(s.editor.Text(), width) },
 		OnKey: func(_ *core.Shared, k string) (core.Action, bool) {
 			if core.MatchKey(k, previewKey) {
-				return core.Pop(), true
+				return next(), true
 			}
 			return core.Action{}, false
 		},
@@ -158,9 +187,9 @@ func (s *homeScreen) previewName() string {
 	return docName(s.currentPath)
 }
 
-// setPreview shows or hides the side pane, rebuilding the layout around it. The
-// rebuild auto-focuses the first slot, so focus is put back on the editor: ctrl+p is
-// a view toggle, not a navigation.
+// setPreview swaps which preview pane (if any) sits beside the editor, rebuilding the
+// layout around it. The rebuild auto-focuses the first slot, so focus is put back on
+// the editor: ctrl+p is a view toggle, not a navigation.
 func (s *homeScreen) setPreview(mode int) {
 	if s.preview == mode {
 		return
@@ -172,24 +201,39 @@ func (s *homeScreen) setPreview(mode int) {
 		s.modular.SetSize(s.sh, s.w, s.h)
 	}
 	s.modular.FocusSlot(s.editorSlot())
-	s.previewSrc, s.previewW = "", 0 // the pane is new (or gone); the next refresh must not skip
+	// Clearing the skip-cache is what makes switching RENDERERS work: the buffer has
+	// not changed, so without this the new pane would never draw.
+	s.previewSrc, s.previewW = "", 0
 	s.refreshPreview()
 }
 
-// refreshPreview re-renders the side pane when the buffer changed under it, or when
+// previewPane answers the pane and renderer for the current mode, or nil when the
+// preview is off.
+func (s *homeScreen) previewTarget() (*components.ScrollContainer, func(string, int) string) {
+	switch s.preview {
+	case previewPane:
+		return s.previewPanel, components.RenderMarkdown
+	case previewGlamour:
+		return s.glamourPanel, glamourRender
+	}
+	return nil, nil
+}
+
+// refreshPreview re-renders the live pane when the buffer changed under it, or when
 // the pane changed width (the render is wrapped to it). It runs from Update — once per
 // message — rather than from View, which would re-render the whole document on every
 // frame, mouse motion included.
 func (s *homeScreen) refreshPreview() {
-	if s.preview != previewPane || s.editor == nil {
+	panel, render := s.previewTarget()
+	if panel == nil || s.editor == nil {
 		return
 	}
-	src, width := s.editor.Text(), s.previewPanel.TextWidth()
+	src, width := s.editor.Text(), panel.TextWidth()
 	if src == s.previewSrc && width == s.previewW {
 		return
 	}
 	s.previewSrc, s.previewW = src, width
-	s.previewPanel.SetLines(strings.Split(components.RenderMarkdown(src, width), "\n"))
+	panel.SetLines(strings.Split(render(src, width), "\n"))
 }
 
 func (s *homeScreen) View(sh *core.Shared) string     { return s.modular.View(sh) }
@@ -205,6 +249,18 @@ func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 // Filtering proxies the modular screen's capture state: the router must leave global
 // single-key shortcuts alone while the editor types or a list filters.
 func (s *homeScreen) Filtering() bool { return s.modular.Filtering() }
+
+// ChromeMask hides every router-drawn element in minimal mode, giving the editor the
+// whole terminal: the breadcrumb and help bar are the only ones gote has up, and a
+// nano replacement should be the file and nothing else. The router asks the top screen
+// per render, so a pushed overlay (the save-as box) is unaffected and no state is left
+// to restore.
+func (s *homeScreen) ChromeMask() core.ChromeMask {
+	if s.minimal {
+		return core.FullscreenMask()
+	}
+	return core.ChromeMask{}
+}
 
 // CrumbLabel contributes the mode segment: the store, or the scanned directory.
 func (s *homeScreen) CrumbLabel(short bool) string {
@@ -244,7 +300,7 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 // unsaved edits survive) and moves focus to it.
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
-	ed := c.OpenDoc(path, s.editorExit, s.editorRelease)
+	ed := c.OpenDoc(path, s.editorOpts())
 	s.currentPath = path
 	s.editor = ed
 	s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
@@ -305,6 +361,31 @@ func errPopup(title string, err error) *components.DialogScreen {
 	return components.CreatePopup(title, err.Error(), core.Pop())
 }
 
+// editorOpts is the hook set every editor in this screen is built with — the pane's
+// three ways out and back: ctrl+x closes the buffer, esc hands the keys back, ctrl+s
+// writes it and stays. Path is filled in by whoever constructs the editor (Ctx.OpenDoc
+// for a doc, left empty for the scratch buffer).
+func (s *homeScreen) editorOpts() components.EditorOpts {
+	return components.EditorOpts{
+		OnExit:    s.editorExit,
+		OnRelease: s.editorRelease,
+		OnSaved:   s.editorSaved,
+	}
+}
+
+// editorSaved is the editor pane's OnSaved hook (ctrl+s): the buffer stays exactly
+// where it is, and gote catches up with where it now lives. A save-as points the same
+// editor at a new path, which the open set is keyed by — so without the rekey the map
+// would still answer to the old name and ctrl+x would close a doc that no longer
+// exists. The reseed does the rest: Receive rebuilds the Docs list (a file saved
+// somewhere new shows up in it) and the Open list (the row renames, and stays selected
+// because currentPath moved with it). No SetChild — the pane's child never changed.
+func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
+	Of(sh).RekeyDoc(s.currentPath, path, s.editor)
+	s.currentPath = path
+	return core.PropagateAll(ReseedMsg{})
+}
+
 // editorExit is the editor pane's OnExit hook (ctrl+x — clean, saved, or discarded;
 // every path closes the buffer): the doc leaves the open set and the pane swaps to
 // the next open doc, or to a fresh scratch buffer when none remain. Focus returns to
@@ -313,19 +394,24 @@ func errPopup(title string, err error) *components.DialogScreen {
 // the pane at any time, and unhiding the sidebar is what makes ctrl+x meaningful with
 // it hidden, where there is no other pane to move to. The reseed refreshes both lists:
 // the close shows in Open, and a save-as'd file shows in Docs.
+//
+// Minimal mode makes ctrl+x quit outright — nano's exit, and the only one available:
+// there is no list to go back to, and the router clamps pops so the root screen can
+// never be popped off. The editor's own save prompt has already run by the time this
+// is reached, so a dirty buffer still gets its (y)es/(n)o/(c)ancel.
 func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
+	if s.minimal {
+		return core.Async(tea.Quit)
+	}
 	c := Of(sh)
 	next := c.CloseDoc(s.currentPath)
 	var cmd tea.Cmd
 	if next != "" {
 		s.currentPath = next
-		s.editor = c.OpenDoc(next, s.editorExit, s.editorRelease)
+		s.editor = c.OpenDoc(next, s.editorOpts())
 	} else {
 		s.currentPath = ""
-		s.editor = components.NewEditorScreen(components.EditorOpts{
-			OnExit:    s.editorExit,
-			OnRelease: s.editorRelease,
-		})
+		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
 	cmd = s.editorPanel.SetChild(s.editor)
 	if !s.sidebar {
@@ -362,7 +448,14 @@ func (s *homeScreen) editorSlot() int {
 // column. The old screen's focused panel is blurred before it is discarded, and the
 // new one (which auto-focuses its first focusable slot — the docs list, or the lone
 // editor) gets the current size.
+//
+// Minimal mode returns here: this is the single door the sidebar can come back through
+// (ctrl+b, and the unhide branches of editorExit/editorRelease), so refusing it here is
+// what makes "the editor alone" hold without a guard at every call site.
 func (s *homeScreen) setSidebar(visible bool) {
+	if s.minimal {
+		return
+	}
 	s.modular.SetFocused(false)
 	s.sidebar = visible
 	s.modular = s.buildModular()
@@ -390,10 +483,13 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		})
 		widths = append(widths, sidebarWidth)
 	}
-	cols = append(cols, []components.Slot{{Panel: s.editorPanel, Weight: 1}})
+	// ExpandH on the editor: its body is only as wide as its longest line unless the
+	// scrollbar forces the padding, so a short doc would leave the column ragged
+	// against the preview's border (or the terminal edge).
+	cols = append(cols, []components.Slot{{Panel: s.editorPanel, Weight: 1, ExpandH: true}})
 	widths = append(widths, 0)
-	if s.preview == previewPane {
-		cols = append(cols, []components.Slot{{Panel: s.previewPanel, Weight: 1}})
+	if panel, _ := s.previewTarget(); panel != nil {
+		cols = append(cols, []components.Slot{{Panel: panel, Weight: 1}})
 		widths = append(widths, 0)
 	}
 	if s.sidebar {

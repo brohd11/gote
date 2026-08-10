@@ -11,12 +11,14 @@ import (
 // fresh install needs no setup.
 type Config struct {
 	Extension string `yaml:"extension,omitempty"`  // doc extension the lists filter on (default "md")
-	ScanDepth int    `yaml:"scan_depth,omitempty"` // default recursive scan depth (default 2)
+	ScanDepth int    `yaml:"scan_depth,omitempty"` // default recursive scan depth (default 5)
 }
 
-// DefaultConfig is what a missing ~/.gote/config.yml means.
+// DefaultConfig is what a missing ~/.gote/config.yml means. ScanDepth is the depth
+// `gote here` (and a bare directory argument) scans to when none is given on the
+// command line — deep enough that a project's docs turn up without asking for it.
 func DefaultConfig() Config {
-	return Config{Extension: "md", ScanDepth: 2}
+	return Config{Extension: "md", ScanDepth: 5}
 }
 
 // Dir is ~/.gote, the home for stored docs and config.yml.
@@ -50,7 +52,7 @@ func LoadConfig() (Config, error) {
 		cfg.Extension = "md"
 	}
 	if cfg.ScanDepth <= 0 {
-		cfg.ScanDepth = 2
+		cfg.ScanDepth = 5
 	}
 	return cfg, nil
 }

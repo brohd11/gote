@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/brohd11/bubblestack/components"
 )
 
 // writeTree creates a fixed doc tree under t.TempDir():
@@ -114,7 +116,7 @@ func TestSeedModes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := New("dev", DefaultConfig(), false, "", 0)
+	c := New("dev", DefaultConfig(), Options{})
 	if c.Mode != ModeHome {
 		t.Fatal("default mode should be home")
 	}
@@ -123,15 +125,15 @@ func TestSeedModes(t *testing.T) {
 	}
 
 	root := writeTree(t)
-	c = New("dev", DefaultConfig(), true, root, 1)
+	c = New("dev", DefaultConfig(), Options{Mode: ModeScan, Dir: root, Depth: 1, DepthSet: true})
 	if c.Mode != ModeScan {
-		t.Fatal("scan flag should set scan mode")
+		t.Fatal("scan options should set scan mode")
 	}
 	if got := docNames(c.Files); !equalNames(got, "F.MD", "a.md", "c.md") {
 		t.Fatalf("scan seed = %v, want depth-1 results", got)
 	}
 
-	ed := c.OpenDoc(c.Files[0].Path, nil, nil)
+	ed := c.OpenDoc(c.Files[0].Path, components.EditorOpts{})
 	c.Seed()
 	if got := c.Open[c.Files[0].Path]; got != ed {
 		t.Fatal("reseeding must not drop open buffers")

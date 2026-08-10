@@ -13,7 +13,7 @@ func TestCloseDoc(t *testing.T) {
 	newCtx := func(paths ...string) *Ctx {
 		c := &Ctx{Open: map[string]*components.EditorScreen{}}
 		for _, p := range paths {
-			c.OpenDoc(p, nil, nil)
+			c.OpenDoc(p, components.EditorOpts{})
 		}
 		return c
 	}
@@ -49,5 +49,69 @@ func TestCloseDoc(t *testing.T) {
 	}
 	if next := c.CloseDoc(""); next != "" || len(order(c)) != 1 {
 		t.Fatalf("the scratch path is a no-op: next %q, order %v", next, order(c))
+	}
+}
+
+// TestRekeyDoc covers what a save-as does to the open set: the buffer keeps its
+// identity as an editor and changes it as a path, in place, without disturbing the
+// rows around it.
+func TestRekeyDoc(t *testing.T) {
+	newCtx := func(paths ...string) *Ctx {
+		c := &Ctx{Open: map[string]*components.EditorScreen{}}
+		for _, p := range paths {
+			c.OpenDoc(p, components.EditorOpts{})
+		}
+		return c
+	}
+	order := func(c *Ctx) []string { return append([]string{}, c.OpenOrder...) }
+	eq := func(t *testing.T, got, want []string) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("open order = %v, want %v", got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("open order = %v, want %v", got, want)
+			}
+		}
+	}
+
+	// A rename keeps the row where it was, so the selection doesn't jump.
+	c := newCtx("a", "b", "c")
+	ed := c.Open["b"]
+	c.RekeyDoc("b", "b2", ed)
+	eq(t, order(c), []string{"a", "b2", "c"})
+	if c.Open["b2"] != ed {
+		t.Fatal("the renamed path should answer with the same editor")
+	}
+	if _, ok := c.Open["b"]; ok {
+		t.Fatal("the old path must leave the open set")
+	}
+
+	// The scratch buffer has no path at all until a save gives it one.
+	c = newCtx("a")
+	scratch := components.NewEditorScreen(components.EditorOpts{})
+	c.RekeyDoc("", "fresh.md", scratch)
+	eq(t, order(c), []string{"a", "fresh.md"})
+	if c.Open["fresh.md"] != scratch {
+		t.Fatal("saving the scratch buffer should register it")
+	}
+
+	// Saving onto a path another buffer holds leaves one row for it, not two.
+	c = newCtx("a", "b")
+	ed = c.Open["a"]
+	c.RekeyDoc("a", "b", ed)
+	eq(t, order(c), []string{"b"})
+	if c.Open["b"] != ed {
+		t.Fatal("the saved buffer should be the one the path resolves to")
+	}
+
+	// The ordinary same-path save changes nothing.
+	c = newCtx("a", "b")
+	ed = c.Open["a"]
+	c.RekeyDoc("a", "a", ed)
+	eq(t, order(c), []string{"a", "b"})
+	if c.Open["a"] != ed {
+		t.Fatal("a same-path save must leave the entry alone")
 	}
 }
