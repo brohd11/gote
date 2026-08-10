@@ -32,7 +32,8 @@ type Ctx struct {
 	Files    []DocFile
 
 	Open      map[string]*components.EditorScreen
-	OpenOrder []string // Open's insertion order, for the open-docs list
+	OpenOrder []string          // Open's insertion order, for the open-docs list
+	OpenRoots map[string]string // path's origin root; stable across mode switches
 }
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
@@ -54,11 +55,12 @@ type Options struct {
 // performs the initial seed so the first screen has rows to show.
 func New(version string, cfg Config, opts Options) *Ctx {
 	c := &Ctx{
-		Version: version,
-		Mode:    opts.Mode,
-		Ext:     cfg.Extension,
-		Depth:   cfg.ScanDepth,
-		Open:    map[string]*components.EditorScreen{},
+		Version:   version,
+		Mode:      opts.Mode,
+		Ext:       cfg.Extension,
+		Depth:     cfg.ScanDepth,
+		Open:      map[string]*components.EditorScreen{},
+		OpenRoots: map[string]string{},
 	}
 	if opts.DepthSet {
 		c.Depth = opts.Depth
@@ -104,9 +106,13 @@ func (c *Ctx) OpenDoc(path string, opts components.EditorOpts) *components.Edito
 	if ed, ok := c.Open[path]; ok {
 		return ed
 	}
+	if c.OpenRoots == nil {
+		c.OpenRoots = map[string]string{}
+	}
 	opts.Path = path
 	ed := components.NewEditorScreen(opts)
 	c.Open[path] = ed
+	c.OpenRoots[path] = c.rootForPath(path)
 	c.OpenOrder = append(c.OpenOrder, path)
 	return ed
 }
@@ -125,8 +131,17 @@ func (c *Ctx) RekeyDoc(old, newPath string, ed *components.EditorScreen) {
 	if old == newPath && c.Open[newPath] == ed {
 		return
 	}
+	root := c.OpenRoots[old]
+	if root == "" {
+		root = filepath.Dir(newPath)
+	}
 	delete(c.Open, old)
+	delete(c.OpenRoots, old)
 	c.Open[newPath] = ed
+	if c.OpenRoots == nil {
+		c.OpenRoots = map[string]string{}
+	}
+	c.OpenRoots[newPath] = root
 
 	at := -1
 	filtered := c.OpenOrder[:0]
@@ -154,7 +169,7 @@ func (c *Ctx) RekeyDoc(old, newPath string, ed *components.EditorScreen) {
 func (c *Ctx) OpenDocs() []DocFile {
 	docs := make([]DocFile, 0, len(c.OpenOrder))
 	for _, path := range c.OpenOrder {
-		docs = append(docs, DocFile{Name: docName(path), Path: path})
+		docs = append(docs, DocFile{Name: docName(path), Path: path, Root: c.OpenRoots[path]})
 	}
 	return docs
 }
@@ -167,6 +182,7 @@ func (c *Ctx) CloseDoc(path string) (next string) {
 		return ""
 	}
 	delete(c.Open, path)
+	delete(c.OpenRoots, path)
 	for i, p := range c.OpenOrder {
 		if p != path {
 			continue
@@ -181,6 +197,28 @@ func (c *Ctx) CloseDoc(path string) (next string) {
 		return ""
 	}
 	return ""
+}
+
+// rootForPath records where a document came from when it first enters Open. Seeded
+// docs carry an exact root; other paths use the active mode, while a standalone or
+// otherwise unseeded file is treated as flat in its containing directory.
+func (c *Ctx) rootForPath(path string) string {
+	for _, doc := range c.Files {
+		if doc.Path == path && doc.Root != "" {
+			return doc.Root
+		}
+	}
+	switch c.Mode {
+	case ModeScan:
+		if c.ScanDir != "" {
+			return filepath.Clean(c.ScanDir)
+		}
+	case ModeHome:
+		if dir, err := Dir(); err == nil {
+			return filepath.Clean(dir)
+		}
+	}
+	return filepath.Dir(path)
 }
 
 func docName(path string) string {

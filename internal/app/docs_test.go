@@ -194,9 +194,9 @@ func TestCreateDoc(t *testing.T) {
 // the list's only "open here" channel for now — and the marker never leaks into
 // filtering. An empty currentPath dots nothing (the docs list's shape).
 func TestDocItemsMarksCurrent(t *testing.T) {
-	docs := []DocFile{{Name: "a.txt", Path: "/x/a.txt"}, {Name: "b.txt", Path: "/x/b.txt"}}
+	docs := []DocFile{{Name: "a.txt", Path: "/x/a.txt", Root: "/x"}, {Name: "b.txt", Path: "/x/nested/b.txt", Root: "/x"}}
 
-	items := docItems(docs, "/x/b.txt")
+	items := docItems(docs, "/x/nested/b.txt")
 	if got := items[1].(docItem).Title(); got != "• b.txt" {
 		t.Fatalf("the current doc's title = %q, want %q", got, "• b.txt")
 	}
@@ -205,6 +205,12 @@ func TestDocItemsMarksCurrent(t *testing.T) {
 	}
 	if got := items[1].(docItem).FilterValue(); got != "b.txt" {
 		t.Fatalf("the dot must stay out of filtering, got %q", got)
+	}
+	if got := items[0].(docItem).SuffixText(); got != "" {
+		t.Fatalf("a root-level doc suffix = %q, want empty", got)
+	}
+	if got := items[1].(docItem).SuffixText(); got != "nested"+string(filepath.Separator) {
+		t.Fatalf("a nested doc suffix = %q, want nested plus separator", got)
 	}
 
 	items = docItems(docs, "")

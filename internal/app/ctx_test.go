@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/brohd11/bubblestack/components"
@@ -113,5 +114,35 @@ func TestRekeyDoc(t *testing.T) {
 	eq(t, order(c), []string{"a", "b"})
 	if c.Open["a"] != ed {
 		t.Fatal("a same-path save must leave the entry alone")
+	}
+}
+
+func TestOpenDocsKeepOriginRoot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes", "todo.md")
+	c := &Ctx{
+		Mode:      ModeScan,
+		ScanDir:   root,
+		Files:     []DocFile{{Name: "todo.md", Path: path, Root: root}},
+		Open:      map[string]*components.EditorScreen{},
+		OpenRoots: map[string]string{},
+	}
+	ed := c.OpenDoc(path, components.EditorOpts{})
+
+	c.Mode = ModeHome
+	docs := c.OpenDocs()
+	if len(docs) != 1 || docs[0].Root != root {
+		t.Fatalf("open doc root after mode switch = %v, want %q", docs, root)
+	}
+
+	renamed := filepath.Join(root, "archive", "todo.md")
+	c.RekeyDoc(path, renamed, ed)
+	docs = c.OpenDocs()
+	if len(docs) != 1 || docs[0].Path != renamed || docs[0].Root != root {
+		t.Fatalf("rekeyed open doc = %v, want path %q rooted at %q", docs, renamed, root)
+	}
+	c.CloseDoc(renamed)
+	if _, ok := c.OpenRoots[renamed]; ok {
+		t.Fatal("closing a doc must remove its origin root")
 	}
 }

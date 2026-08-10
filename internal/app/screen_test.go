@@ -40,6 +40,25 @@ var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func stripANSI(s string) string { return ansiSGR.ReplaceAllString(s, "") }
 
+// typeMarkdownBullets enters n list items using the editor's Markdown continuation:
+// the first line supplies the marker and each Enter supplies the next one. Clear the
+// final unused marker so the fixture ends with the same blank line as manually typed
+// source did before continuation existed.
+func typeMarkdownBullets(s *homeScreen, sh *core.Shared, n int) {
+	if n <= 0 {
+		return
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- item")})
+	for i := 0; i < n; i++ {
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+		if i+1 < n {
+			s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("item")})
+		}
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
+}
+
 // focusedPane names which pane holds focus, read off the help bar: the sidebar
 // lists contribute their select/filter hints (ListPanel.PanelHelp) while the
 // editor's ScreenPanel contributes none, so "filter" present means a list is
@@ -383,10 +402,7 @@ func TestPreviewFollowsEditorScroll(t *testing.T) {
 	// into one re-flowed block, which would leave the pane too short to scroll.
 	// Typed with real Enters — rune input carries no newlines, and a file load is a
 	// cmd no test runs.
-	for i := 0; i < 200; i++ {
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- item")})
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
-	}
+	typeMarkdownBullets(s, sh, 200)
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
 
 	// Typing left the caret (and so the view) at the buffer's end; the pane opens
@@ -444,10 +460,7 @@ func TestPreviewFollowsEditorScroll(t *testing.T) {
 func TestPreviewScrollsByHand(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	for i := 0; i < 60; i++ {
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- item")})
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
-	}
+	typeMarkdownBullets(s, sh, 60)
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
 
 	// The preview column: the sidebar owns x<30 and the editor and preview split what is
@@ -511,6 +524,12 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 	type_ := func(text string) {
 		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
 		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+		// This fixture wants a blank line after its bullet. Enter now supplies the
+		// next marker, so remove that marker before typing the intended blank line.
+		if strings.HasPrefix(text, "- ") {
+			s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
+			s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
+		}
 	}
 	for i := 0; i < 20; i++ {
 		type_(fmt.Sprintf("## Section %d", i))

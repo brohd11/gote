@@ -15,6 +15,7 @@ import (
 type DocFile struct {
 	Name string // base name, shown in the list
 	Path string // absolute path, the editor's load/save target
+	Root string // origin root used to render stable relative path context
 }
 
 // HomeDocs lists the docs stored flat in dir (the home mode seed), filtered to ext.
@@ -34,7 +35,7 @@ func HomeDocs(dir, ext string) []DocFile {
 		if e.IsDir() || !matchesExt(e.Name(), ext) {
 			continue
 		}
-		docs = append(docs, DocFile{Name: e.Name(), Path: filepath.Join(dir, e.Name())})
+		docs = append(docs, DocFile{Name: e.Name(), Path: filepath.Join(dir, e.Name()), Root: filepath.Clean(dir)})
 	}
 	sortDocs(docs)
 	return docs
@@ -61,7 +62,7 @@ func ScanDocs(root string, depth int, ext string) []DocFile {
 			return nil
 		}
 		if matchesExt(d.Name(), ext) {
-			docs = append(docs, DocFile{Name: d.Name(), Path: path})
+			docs = append(docs, DocFile{Name: d.Name(), Path: path, Root: root})
 		}
 		return nil
 	})
@@ -105,6 +106,17 @@ func (i docItem) Title() string {
 }
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
+func (i docItem) SuffixText() string {
+	rel, err := filepath.Rel(i.doc.Root, i.doc.Path)
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		return ""
+	}
+	return dir + string(filepath.Separator)
+}
 
 // docItems wraps a seed result as list rows, dotting the row whose path is
 // currentPath ("" dots nothing — the docs list never has a current doc).
@@ -124,6 +136,7 @@ type newFileItem struct{}
 func (newFileItem) Title() string       { return "+ new file" }
 func (newFileItem) Description() string { return "type a name (a/b.md nests dirs)" }
 func (newFileItem) FilterValue() string { return "new file" }
+func (newFileItem) SuffixText() string  { return "type a name (a/b.md nests dirs)" }
 
 // docRows is the docs panel's full row set: the action row, then the seeded docs.
 // Every (re)build of the list goes through here so the row survives reseeds.

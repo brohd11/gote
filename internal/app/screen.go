@@ -53,8 +53,8 @@ type ReseedMsg struct{}
 // load over a dirty buffer).
 type homeScreen struct {
 	modular      *components.ModularScreen
-	docsPanel    *components.ListPanel
-	openPanel    *components.ListPanel
+	docsPanel    *components.CompactListPanel
+	openPanel    *components.CompactListPanel
 	editorPanel  *components.ScreenPanel
 	previewPanel *components.ScrollContainer // the live preview pane
 	editor       *components.EditorScreen    // the editor pane's live child (ScreenPanel exposes none)
@@ -92,11 +92,11 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
-	s.docsPanel = components.NewListPanel(docRows(c), "Docs", components.ListPanelOpts{
+	s.docsPanel = components.NewCompactListPanel(docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
-	s.openPanel = components.NewListPanel(nil, "Open", components.ListPanelOpts{
+	s.openPanel = components.NewCompactListPanel(nil, "Open", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
@@ -434,7 +434,7 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 // borders exactly on the panel's own.
 func (s *homeScreen) newFile(sh *core.Shared) core.Action {
 	l := s.docsPanel.List()
-	row, ok := components.ListItemRow(l, l.Index())
+	row, ok := components.CompactListItemRow(l, l.Index())
 	if !ok {
 		row = 0 // the selected row is on-page by construction; never die on it
 	}
