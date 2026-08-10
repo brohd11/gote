@@ -298,6 +298,65 @@ func msgType(act core.Action) string {
 	return reflect.TypeOf(act.Msg).String()
 }
 
+// TestHomeWrapAndLineNums: alt+z toggles soft wrap and ctrl+l the line-number gutter on
+// the editor. The editor owns the state; the home screen just forwards the keys.
+//
+// Every toggle is followed by a render, which is the assertion that matters: the flags
+// flipping proves nothing on its own, and a version of this test that only checked them
+// passed while the app died on the first frame after the key.
+func TestHomeWrapAndLineNums(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(strings.Repeat("w", 400))})
+	render := func(what string) {
+		t.Helper()
+		if v := s.View(sh); v == "" {
+			t.Fatalf("%s: empty render", what)
+		}
+	}
+	if s.editor.WrapMode() || s.editor.LineNumMode() {
+		t.Fatal("both toggles should start off")
+	}
+
+	altZ := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}, Alt: true}
+	s.Update(sh, altZ)
+	if !s.editor.WrapMode() {
+		t.Fatal("alt+z should turn wrap on")
+	}
+	render("wrapped")
+	s.Update(sh, altZ)
+	if s.editor.WrapMode() {
+		t.Fatal("a second alt+z should turn wrap off")
+	}
+	render("unwrapped")
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlL})
+	if !s.editor.LineNumMode() {
+		t.Fatal("ctrl+l should turn line numbers on")
+	}
+	render("numbered")
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlL})
+	if s.editor.LineNumMode() {
+		t.Fatal("a second ctrl+l should turn line numbers off")
+	}
+	render("unnumbered")
+}
+
+// TestHomeLeavesCtrlWToTheEditor: ctrl+w is the editor's delete-word-back, so the home
+// screen must not claim it for anything — which is why wrap is on alt+z.
+func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha beta")})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlW})
+	if got, want := s.editor.Text(), "alpha "; got != want {
+		t.Fatalf("ctrl+w through the home screen = %q, want %q (delete-word-back)", got, want)
+	}
+	if s.editor.WrapMode() {
+		t.Fatal("ctrl+w must not toggle wrap")
+	}
+}
+
 // TestPreviewPaneTracksEdits: the side pane re-renders as the buffer changes, which
 // is the whole reason it exists next to the editor rather than over it.
 func TestPreviewPaneTracksEdits(t *testing.T) {

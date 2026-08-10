@@ -21,6 +21,10 @@ var (
 	sidebarKey = key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "sidebar"))
 	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
+	// alt+z, not ctrl+w: ctrl+w is the editor's own delete-word-back (and readline's),
+	// and intercepting it here would swallow it before the editor ever sees it.
+	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
+	lineNumsKey = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
 )
 
 // The preview modes ctrl+p cycles through. Both renderers show up as a pane beside
@@ -127,6 +131,14 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		}
 		if core.MatchKey(k, previewKey) {
 			return s, s.cyclePreview()
+		}
+		if core.MatchKey(k, wrapKey) {
+			s.editor.ToggleWrap()
+			return s, core.Action{}
+		}
+		if core.MatchKey(k, lineNumsKey) {
+			s.editor.ToggleLineNums()
+			return s, core.Action{}
 		}
 	}
 	_, act := s.modular.Update(sh, msg)
@@ -472,7 +484,7 @@ func (s *homeScreen) setSidebar(visible bool) {
 // leaves.
 func (s *homeScreen) buildModular() *components.ModularScreen {
 	opts := components.ModularOpts{
-		Help: []key.Binding{sidebarKey, previewKey, actionsKey},
+		Help: []key.Binding{sidebarKey, previewKey, actionsKey, wrapKey, lineNumsKey},
 	}
 	var cols [][]components.Slot
 	var widths []int
