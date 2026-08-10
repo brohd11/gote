@@ -367,14 +367,16 @@ func (s *homeScreen) dirtyDocs(sh *core.Shared) []string {
 	return names
 }
 
-// ChromeMask hides every router-drawn element in minimal mode, giving the editor the
-// whole terminal: the breadcrumb and help bar are the only ones gote has up, and a
-// nano replacement should be the file and nothing else. The router asks the top screen
-// per render, so a pushed overlay (the save-as box) is unaffected and no state is left
-// to restore.
+// ChromeMask hides persistent router chrome in minimal mode, giving the editor the
+// whole terminal in steady state. The status line remains eligible but has zero height
+// unless transient feedback (such as a clipboard result) is present. The router asks
+// the top screen per render, so a pushed overlay is unaffected and no state is left to
+// restore.
 func (s *homeScreen) ChromeMask() core.ChromeMask {
 	if s.minimal {
-		return core.FullscreenMask()
+		mask := core.FullscreenMask()
+		mask.Status = false // normally zero-height; clipboard feedback may appear briefly
+		return mask
 	}
 	return core.ChromeMask{}
 }
