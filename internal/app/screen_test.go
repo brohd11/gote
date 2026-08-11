@@ -442,8 +442,8 @@ func TestHomeEditorSearch(t *testing.T) {
 	}
 	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha")})
 	drive(tea.KeyMsg{Type: tea.KeyEnter})
-	if view := stripANSI(model.View()); !strings.Contains(view, "a.txt [+] · find: alpha") {
-		t.Fatalf("first buffer should display its retained query:\n%s", view)
+	if view := stripANSI(model.View()); !strings.Contains(view, "a.txt [+]") || strings.Contains(view, "a.txt [+] · find:") || strings.Index(view, "find: alpha") < strings.Index(view, "a.txt [+]") {
+		t.Fatalf("first buffer should retain its query below the editor, not in its title:\n%s", view)
 	}
 
 	s.openDoc(sh, b)
@@ -472,8 +472,20 @@ func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
 	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
 	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("needle")})
 	drive(tea.KeyMsg{Type: tea.KeyEnter})
-	if view := stripANSI(model.View()); !strings.Contains(view, "single.md · find: needle") {
-		t.Fatalf("chrome-less file mode should retain the editor's search row:\n%s", view)
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "single.md") || strings.Contains(view, "single.md · find:") {
+		t.Fatalf("chrome-less file mode should keep an ordinary editor title:\n%s", view)
+	}
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	findRow := -1
+	for i, line := range lines {
+		if strings.Contains(line, "find: needle") {
+			findRow = i
+			break
+		}
+	}
+	if findRow != len(lines)-2 || findRow < 1 || !strings.Contains(lines[findRow-1], "╭") || !strings.Contains(lines[findRow+1], "╰") {
+		t.Fatalf("chrome-less file mode should retain a rounded search bar at the bottom:\n%s", view)
 	}
 }
 
