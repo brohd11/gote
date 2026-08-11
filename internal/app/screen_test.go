@@ -34,6 +34,22 @@ func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 	return s, sh
 }
 
+// newHomeRouter builds the same screen through the real router. Tests that exercise
+// pushed overlays need this path: calling homeScreen.Update directly returns the
+// navigation Action but cannot apply it to a stack.
+func newHomeRouter(t *testing.T, opts Options) (tea.Model, *homeScreen, *core.Shared) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	sh := core.NewShared(New("test", DefaultConfig(), opts))
+	r := core.NewRouter(sh, []core.TabEntry{
+		{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+	})
+	r.Init()
+	var model tea.Model = r
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	return model, model.(core.Router).Top().(*homeScreen), sh
+}
+
 // ansiSGR matches the color escapes the render is dressed in, so assertions can be
 // made against the plain text underneath.
 var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
@@ -403,6 +419,61 @@ func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
 	}
 	if s.editor.WrapMode() {
 		t.Fatal("ctrl+w must not toggle wrap")
+	}
+}
+
+// TestHomeEditorSearch pins gote's opt-in wiring and the per-buffer ownership of
+// queries. Each open path retains its own EditorScreen, so switching documents must
+// swap both the text and its active search rather than leaking one global filter.
+func TestHomeEditorSearch(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
+	a := filepath.Join(t.TempDir(), "a.txt")
+	b := filepath.Join(t.TempDir(), "b.txt")
+
+	if !s.editorOpts().Search {
+		t.Fatal("every editor built by gote should enable shared editor search")
+	}
+	s.openDoc(sh, a)
+	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha body")})
+	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
+	if overlay := stripANSI(model.View()); !strings.Contains(overlay, "╭") || !strings.Contains(overlay, "find:") {
+		t.Fatalf("ctrl+f should show the shared rounded line-edit overlay:\n%s", overlay)
+	}
+	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha")})
+	drive(tea.KeyMsg{Type: tea.KeyEnter})
+	if view := stripANSI(model.View()); !strings.Contains(view, "a.txt [+] · find: alpha") {
+		t.Fatalf("first buffer should display its retained query:\n%s", view)
+	}
+
+	s.openDoc(sh, b)
+	if view := stripANSI(model.View()); strings.Contains(view, "find: alpha") {
+		t.Fatalf("a new buffer inherited the previous buffer's search:\n%s", view)
+	}
+	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta body")})
+	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
+	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta")})
+	drive(tea.KeyMsg{Type: tea.KeyEnter})
+
+	s.openDoc(sh, a)
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "find: alpha") || strings.Contains(view, "find: beta") {
+		t.Fatalf("switching back should restore a's search only:\n%s", view)
+	}
+	if help := s.helpText(); !strings.Contains(help, "ctrl+f") || !strings.Contains(help, "search") {
+		t.Fatalf("gote shortcut help should advertise editor search:\n%s", help)
+	}
+}
+
+func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "single.md")
+	model, _, _ := newHomeRouter(t, Options{Mode: ModeFile, File: path})
+	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
+	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
+	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("needle")})
+	drive(tea.KeyMsg{Type: tea.KeyEnter})
+	if view := stripANSI(model.View()); !strings.Contains(view, "single.md · find: needle") {
+		t.Fatalf("chrome-less file mode should retain the editor's search row:\n%s", view)
 	}
 }
 

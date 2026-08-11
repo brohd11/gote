@@ -560,6 +560,7 @@ func (s *homeScreen) editorOpts() components.EditorOpts {
 		OnExit:    s.editorExit,
 		OnRelease: s.editorRelease,
 		OnSaved:   s.editorSaved,
+		Search:    true,
 	}
 }
 
