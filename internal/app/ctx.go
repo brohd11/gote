@@ -9,19 +9,19 @@ import (
 	"github.com/brohd11/bubblestack/core"
 )
 
-// Mode is the active document source: the flat ~/.gote store, an ad-hoc recursive
+// Mode is the active document source: the flat ~/.gote/docs store, an ad-hoc recursive
 // scan, a single file opened alone, or a configured named vault.
 type Mode int
 
 const (
-	ModeHome  Mode = iota // ~/.gote/*.<ext> — the default
+	ModeHome  Mode = iota // the flat ~/.gote/docs store — the default
 	ModeScan              // recursive scan of ScanDir to Depth
 	ModeFile              // FilePath alone, in the chrome-less minimal editor
 	ModeVault             // a named, configured recursive document root
 )
 
 // Ctx is gote's app context, stored on core.Shared.App and recovered with Of. It
-// carries the seed state (mode/dir/depth/extension and the last-seeded file list)
+// carries the seed state (mode/dir/depth/filter and the last-seeded file list)
 // and every open buffer: Open maps a doc's path to its EditorScreen, which owns the
 // buffer — so keeping the instance is what preserves unsaved edits across file
 // switches. ctrl+x in the editor closes the buffer (CloseDoc).
@@ -32,7 +32,8 @@ type Ctx struct {
 	FilePath  string // ModeFile's file; the doc the minimal editor boots on
 	VaultName string // ModeVault's configured display/lookup name
 	Depth     int
-	Ext       string
+	Filter    DocFilter // which files the lists seed from
+	NewExt    string    // extension "+ new file" appends to an extensionless name
 	Files     []DocFile
 	Config    Config
 
@@ -43,17 +44,21 @@ type Ctx struct {
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
 // fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile. A zero
-// Options is the default launch — Config.Default's vault when valid, else ~/.gote.
+// Options is the default launch — Config.Default's vault when valid, else ~/.gote/docs.
 //
 // Depth carries DepthSet rather than treating 0 as "unset", because 0 is a meaningful
 // depth: `gote here 0` lists the current directory alone. Unset means the config's
-// ScanDepth, which is what the zero value has to mean.
+// ScanDepth, which is what the zero value has to mean. Exts carries ExtsSet for the
+// same reason: `gote --ext=` is an empty set on purpose — it widens a restricting
+// config back to every text file for one run.
 type Options struct {
 	Mode     Mode
 	Dir      string // ModeScan root, absolute
 	File     string // ModeFile path, absolute
 	Depth    int    // scan depth, honored only when DepthSet
 	DepthSet bool
+	Exts     []string // --ext; replaces Config.Extensions, honored only when ExtsSet
+	ExtsSet  bool
 }
 
 // New builds the context from the loaded config and the CLI's launch options, and
@@ -62,7 +67,7 @@ func New(version string, cfg Config, opts Options) *Ctx {
 	c := &Ctx{
 		Version:   version,
 		Mode:      opts.Mode,
-		Ext:       cfg.Extension,
+		Filter:    cfg.Filter(),
 		Depth:     cfg.ScanDepth,
 		Config:    cfg,
 		Open:      map[string]*components.EditorScreen{},
@@ -71,6 +76,11 @@ func New(version string, cfg Config, opts Options) *Ctx {
 	if opts.DepthSet {
 		c.Depth = opts.Depth
 	}
+	if opts.ExtsSet {
+		c.Filter = NewDocFilter(opts.Exts)
+	}
+	// Derived after the override, so --ext=txt also decides what a bare "notes" becomes.
+	c.NewExt = defaultExt(c.Filter.Exts)
 	switch opts.Mode {
 	case ModeScan:
 		c.ScanDir = opts.Dir
@@ -97,16 +107,16 @@ func Of(sh *core.Shared) *Ctx { return core.App[Ctx](sh) }
 func (c *Ctx) Seed() {
 	switch c.Mode {
 	case ModeScan, ModeVault:
-		c.Files = ScanDocs(c.ScanDir, c.Depth, c.Ext)
+		c.Files = ScanDocs(c.ScanDir, c.Depth, c.Filter)
 	case ModeFile:
 		c.Files = nil
 	default:
-		dir, err := Dir()
+		dir, err := DocsDir()
 		if err != nil {
 			c.Files = nil
 			return
 		}
-		c.Files = HomeDocs(dir, c.Ext)
+		c.Files = HomeDocs(dir, c.Filter)
 	}
 }
 
@@ -289,7 +299,7 @@ func (c *Ctx) rootForPath(path string) string {
 			return filepath.Clean(c.ScanDir)
 		}
 	case ModeHome:
-		if dir, err := Dir(); err == nil {
+		if dir, err := DocsDir(); err == nil {
 			return filepath.Clean(dir)
 		}
 	}

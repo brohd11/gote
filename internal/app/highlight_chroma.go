@@ -137,13 +137,20 @@ func (h *chromaHighlighter) HighlightLine(row int) []components.Span {
 // filename pattern chroma knows: these are what a scan-mode gote actually opens, the
 // registry is a global one extension can only be claimed in once, and adding to it is
 // one line. Anything not listed keeps rendering plain, exactly as before.
+//
+// Two exclusions are deliberate. ".md"/".markdown" belong to bubblestack's own
+// markdown highlighter and claiming them here would take them from it. Files chroma
+// matches by whole name rather than extension — Makefile, Dockerfile — cannot be
+// registered at all, since the registry's key IS the extension; they list and edit
+// fine, just unhighlighted.
 var chromaExts = []string{
-	".go", ".py", ".rb", ".rs", ".java", ".lua", ".php",
+	".go", ".py", ".rb", ".rs", ".java", ".lua", ".php", ".pl", ".r",
 	".js", ".jsx", ".ts", ".tsx",
-	".c", ".h", ".cc", ".cpp", ".hpp",
-	".sh", ".bash", ".zsh", ".fish",
-	".json", ".yaml", ".yml", ".toml", ".ini", ".xml",
+	".c", ".h", ".cc", ".cpp", ".hpp", ".cs", ".kt", ".swift", ".dart",
+	".sh", ".bash", ".zsh", ".fish", ".vim",
+	".json", ".yaml", ".yml", ".toml", ".ini", ".xml", ".csv",
 	".html", ".css", ".scss", ".sql", ".diff", ".patch",
+	".tf", ".gradle", ".proto", ".mk",
 }
 
 // init registers a highlighter for each extension chroma has a lexer for. The lexer is

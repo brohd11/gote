@@ -20,7 +20,18 @@ var version = "dev"
 var (
 	scan  bool
 	depth int
+	exts  []string
 )
+
+// flags is the parsed flag state the argument grammar reads, kept as a struct so
+// resolveOptions' signature does not grow a positional parameter per flag added.
+type flags struct {
+	scan     bool
+	depth    int
+	depthSet bool
+	exts     []string
+	extsSet  bool
+}
 
 // hereArg is the keyword that means "scan the current directory". It wins over a
 // directory of the same name — `gote ./here` is the way to reach that one.
@@ -30,16 +41,21 @@ var rootCmd = &cobra.Command{
 	Use:   "gote [here|dir|file] [depth]",
 	Short: "A simple text editor (TUI)",
 	Long: `gote is a simple TUI text editor. With no arguments it opens the default vault
-named in ~/.gote/config.yml, or the ~/.gote document store when no valid default is
-configured. Given a directory it lists every matching file found by a recursive scan,
-to the depth given as a second argument. Given a file it opens that file alone, with
-the sidebar and surrounding chrome hidden — the shape to use as your $EDITOR.
+named in ~/.gote/config.yml, or the ~/.gote/docs document store when no valid default
+is configured. Given a directory it lists every matching file found by a recursive
+scan, to the depth given as a second argument. Given a file it opens that file alone,
+with the sidebar and surrounding chrome hidden — the shape to use as your $EDITOR.
 
-  gote                  # configured default vault, otherwise ~/.gote docs
+Any text file is a document. Set extensions in the config to narrow that permanently,
+or --ext to narrow one run; --ext with no value widens a narrowed config back again.
+
+  gote                  # configured default vault, otherwise ~/.gote/docs
   gote here             # scan the current directory, config depth
   gote here 3           # scan the current directory, depth 3
   gote ~/notes 4        # scan ~/notes, depth 4
   gote notes.md         # edit one file, nothing else on screen
+  gote --ext=md here    # scan the current directory, markdown only
+  gote --ext=           # every text file, whatever the config says
 
 "here" is a keyword, not a path: use ./here to scan a directory of that name. A file
 argument that does not exist yet opens an empty buffer, written on ctrl+s.`,
@@ -54,6 +70,12 @@ func init() {
 	rootCmd.SetVersionTemplate("gote {{.Version}}\n")
 	rootCmd.Flags().BoolVarP(&scan, "scan", "s", false, "treat the argument as a directory to scan (implied when it is one)")
 	rootCmd.Flags().IntVarP(&depth, "depth", "d", 0, "scan depth in directory levels (default: config's scan_depth)")
+	// Flags, not PersistentFlags: --ext means nothing to `config` or `update` and has no
+	// business in their help. On the root it already works in either position — `here` is
+	// a positional argument rather than a subcommand, and pflag parses flags interspersed
+	// with positionals, so `gote --ext=md here` and `gote here --ext=md` are the same.
+	rootCmd.Flags().StringSliceVar(&exts, "ext", nil,
+		"limit discovery to these extensions, overriding the config (repeatable, or comma-separated; empty means any text file)")
 }
 
 func Execute() {
@@ -64,7 +86,13 @@ func Execute() {
 
 // runRoot resolves the launch options and starts the TUI.
 func runRoot(cmd *cobra.Command, args []string) error {
-	opts, err := resolveOptions(args, scan, depth, cmd.Flags().Changed("depth"))
+	opts, err := resolveOptions(args, flags{
+		scan:     scan,
+		depth:    depth,
+		depthSet: cmd.Flags().Changed("depth"),
+		exts:     exts,
+		extsSet:  cmd.Flags().Changed("ext"),
+	})
 	if err != nil {
 		return err
 	}
@@ -85,8 +113,12 @@ func runRoot(cmd *cobra.Command, args []string) error {
 // dropped one. Paths are made absolute — the scan root shows in the breadcrumb and the
 // editor saves against the path it was given, neither of which should depend on the
 // cwd once the program is running.
-func resolveOptions(args []string, scan bool, depth int, depthSet bool) (app.Options, error) {
-	opts := app.Options{Depth: depth, DepthSet: depthSet}
+//
+// --ext passes straight through to every mode: it filters the lists, and the app
+// normalizes it (Ctx.New via NewDocFilter), so there is nothing to validate here.
+func resolveOptions(args []string, f flags) (app.Options, error) {
+	scan := f.scan
+	opts := app.Options{Depth: f.depth, DepthSet: f.depthSet, Exts: f.exts, ExtsSet: f.extsSet}
 
 	if len(args) > 1 {
 		n, err := strconv.Atoi(args[1])

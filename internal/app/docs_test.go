@@ -8,6 +8,13 @@ import (
 	"github.com/brohd11/bubblestack/components"
 )
 
+// mdOnly is the filter that reproduces gote's pre-text-discovery behavior, and what
+// a user's `extensions: [md]` config produces.
+var mdOnly = DocFilter{Exts: []string{"md"}}
+
+// anyText is the default filter: no configured extensions, so content decides.
+var anyText = DocFilter{}
+
 // writeTree creates a fixed doc tree under t.TempDir():
 //
 //	a.md  b.txt  F.MD
@@ -32,6 +39,18 @@ func writeTree(t *testing.T) string {
 		}
 	}
 	return root
+}
+
+// write puts content at root/rel, making parents. Returns root for chaining.
+func write(t *testing.T, root, rel string, content []byte) {
+	t.Helper()
+	p := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func docNames(docs []DocFile) []string {
@@ -59,24 +78,64 @@ func equalNames(got []string, want ...string) bool {
 func TestScanDocsDepth(t *testing.T) {
 	root := writeTree(t)
 
-	if got := docNames(ScanDocs(root, 0, "md")); !equalNames(got, "F.MD", "a.md") {
+	if got := docNames(ScanDocs(root, 0, mdOnly)); !equalNames(got, "F.MD", "a.md") {
 		t.Fatalf("depth 0 = %v, want root files only", got)
 	}
-	if got := docNames(ScanDocs(root, 1, "md")); !equalNames(got, "F.MD", "a.md", "c.md") {
+	if got := docNames(ScanDocs(root, 1, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md") {
 		t.Fatalf("depth 1 = %v, want root + one level", got)
 	}
-	if got := docNames(ScanDocs(root, 2, "md")); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
+	if got := docNames(ScanDocs(root, 2, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
 		t.Fatalf("depth 2 = %v, want everything but .hidden", got)
 	}
-	if got := ScanDocs(root, 3, "txt"); len(got) != 1 || got[0].Name != "b.txt" {
+	txt := DocFilter{Exts: []string{"txt"}}
+	if got := ScanDocs(root, 3, txt); len(got) != 1 || got[0].Name != "b.txt" {
 		t.Fatalf("txt scan = %v, want b.txt only", docNames(got))
+	}
+	multi := DocFilter{Exts: []string{"md", "txt"}}
+	if got := docNames(ScanDocs(root, 0, multi)); !equalNames(got, "F.MD", "a.md", "b.txt") {
+		t.Fatalf("multi-extension scan = %v, want both types at the root", got)
+	}
+}
+
+// TestScanDocsAnyText: the default filter takes any text file — b.txt is in, not out —
+// while binaries stay out and extensionless text comes in.
+func TestScanDocsAnyText(t *testing.T) {
+	root := writeTree(t)
+	write(t, root, "Makefile", []byte("all:\n\techo hi\n"))
+	write(t, root, "empty", nil)
+	write(t, root, "logo.png", []byte("\x89PNG\r\n\x1a\n\x00\x00binary"))
+
+	got := docNames(ScanDocs(root, 0, anyText))
+	if !equalNames(got, "F.MD", "Makefile", "a.md", "b.txt", "empty") {
+		t.Fatalf("default scan = %v, want every text file and no binary", got)
+	}
+}
+
+// TestScanDocsSkipsNoiseDirs: with every text file valid, a scan that descended into
+// node_modules or vendor would bury the project's own files.
+func TestScanDocsSkipsNoiseDirs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "main.go", []byte("package main\n"))
+	write(t, root, "node_modules/left-pad/index.js", []byte("module.exports = 1\n"))
+	write(t, root, "vendor/dep/dep.go", []byte("package dep\n"))
+	write(t, root, "build/out.txt", []byte("artifact\n"))
+
+	if got := docNames(ScanDocs(root, 5, anyText)); !equalNames(got, "main.go") {
+		t.Fatalf("scan = %v, want the project's own file only", got)
+	}
+
+	// Scanning from inside a pruned directory must still list it: the prune spares the
+	// walk root, so `gote here` works wherever it is run.
+	inside := filepath.Join(root, "node_modules")
+	if got := docNames(ScanDocs(inside, 5, anyText)); !equalNames(got, "index.js") {
+		t.Fatalf("scan rooted in node_modules = %v, want index.js", got)
 	}
 }
 
 // TestScanDocsPaths: the results are sorted by path and carry absolute paths.
 func TestScanDocsPaths(t *testing.T) {
 	root := writeTree(t)
-	docs := ScanDocs(root, 0, "md")
+	docs := ScanDocs(root, 0, mdOnly)
 	if len(docs) != 2 {
 		t.Fatalf("got %d docs, want 2", len(docs))
 	}
@@ -89,12 +148,16 @@ func TestScanDocsPaths(t *testing.T) {
 // is created rather than an error.
 func TestHomeDocs(t *testing.T) {
 	root := writeTree(t)
-	if got := docNames(HomeDocs(root, "md")); !equalNames(got, "F.MD", "a.md") {
+	if got := docNames(HomeDocs(root, mdOnly)); !equalNames(got, "F.MD", "a.md") {
 		t.Fatalf("home docs = %v, want the flat md files only", got)
+	}
+	write(t, root, "logo.png", []byte("\x89PNG\x00\x00"))
+	if got := docNames(HomeDocs(root, anyText)); !equalNames(got, "F.MD", "a.md", "b.txt") {
+		t.Fatalf("default home docs = %v, want every flat text file and no binary", got)
 	}
 
 	missing := filepath.Join(t.TempDir(), "fresh-store")
-	docs := HomeDocs(missing, "md")
+	docs := HomeDocs(missing, mdOnly)
 	if len(docs) != 0 {
 		t.Fatalf("a fresh store should be empty, got %v", docNames(docs))
 	}
@@ -108,7 +171,7 @@ func TestHomeDocs(t *testing.T) {
 func TestSeedModes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	store := filepath.Join(home, ".gote")
+	store := filepath.Join(home, ".gote", "docs")
 	if err := os.MkdirAll(store, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +192,9 @@ func TestSeedModes(t *testing.T) {
 	if c.Mode != ModeScan {
 		t.Fatal("scan options should set scan mode")
 	}
-	if got := docNames(c.Files); !equalNames(got, "F.MD", "a.md", "c.md") {
+	// The default config sets no extensions, so the seed is every text file: b.txt
+	// is in the depth-1 results now, which is the whole point of the change.
+	if got := docNames(c.Files); !equalNames(got, "F.MD", "a.md", "b.txt", "c.md") {
 		t.Fatalf("scan seed = %v, want depth-1 results", got)
 	}
 
@@ -137,6 +202,57 @@ func TestSeedModes(t *testing.T) {
 	c.Seed()
 	if got := c.Open[c.Files[0].Path]; got != ed {
 		t.Fatal("reseeding must not drop open buffers")
+	}
+}
+
+// TestDocFilterMatch: a configured extension set is taken at face value (no content
+// sniff, so an unreadable path still matches on name), while the zero filter defers
+// entirely to the file's contents.
+func TestDocFilterMatch(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "a.md", []byte("# hi"))
+	write(t, root, "bin.md", []byte("\x00\x00"))
+
+	if !mdOnly.Match(filepath.Join(root, "bin.md"), "bin.md") {
+		t.Fatal("a configured extension is the user's word; it should not be second-guessed by a sniff")
+	}
+	if mdOnly.Match(filepath.Join(root, "a.txt"), "a.txt") {
+		t.Fatal("a name outside the configured set should not match")
+	}
+	if !mdOnly.Match(filepath.Join(root, "A.MD"), "A.MD") {
+		t.Fatal("the extension compare should be case-insensitive")
+	}
+	if !anyText.Match(filepath.Join(root, "a.md"), "a.md") {
+		t.Fatal("the default filter should take a text file")
+	}
+	if anyText.Match(filepath.Join(root, "bin.md"), "bin.md") {
+		t.Fatal("the default filter should reject binary content whatever it is named")
+	}
+}
+
+// TestNewDocFilter: however extensions were written — config.yml or --ext — they mean
+// one thing by the time they reach Match, and an all-empty set is no filter at all.
+func TestNewDocFilter(t *testing.T) {
+	if got := NewDocFilter([]string{"MD", ".Txt", "  yml  "}); !equalNames(got.Exts, "md", "txt", "yml") {
+		t.Fatalf("exts = %v, want them lowercased, undotted and trimmed", got.Exts)
+	}
+	// `gote --ext=` reaches here as [""], and must mean "any text file" rather than a
+	// filter matching nothing — which would show an empty list with no way back.
+	for _, in := range [][]string{nil, {}, {""}, {"", "  ", "."}} {
+		if got := NewDocFilter(in); got.Exts != nil {
+			t.Errorf("NewDocFilter(%q).Exts = %v, want nil", in, got.Exts)
+		}
+	}
+}
+
+// TestDefaultExt: "+ new file" follows the filter, so a restricted session cannot
+// create a file it would immediately hide.
+func TestDefaultExt(t *testing.T) {
+	if got := defaultExt(nil); got != "md" {
+		t.Errorf("unfiltered default = %q, want md", got)
+	}
+	if got := defaultExt([]string{"txt", "md"}); got != "txt" {
+		t.Errorf("filtered default = %q, want the first configured extension", got)
 	}
 }
 

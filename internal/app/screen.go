@@ -2,6 +2,7 @@ package app
 
 import (
 	"math"
+	"path/filepath"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -154,10 +155,38 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	return s, act
 }
 
+// previewable reports whether ctrl+p has anything worth showing. The pane is a
+// markdown reader — it joins paragraphs and re-flows to its own width — so pointing it
+// at a .go or .json file destroys exactly the indentation that made the file readable.
+// The unnamed scratch buffer counts as markdown, which is what it has always been.
+func (s *homeScreen) previewable() bool {
+	if s.currentPath == "" {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(s.currentPath)) {
+	case ".md", ".markdown":
+		return true
+	}
+	return false
+}
+
+// enforcePreview closes a pane the current document no longer earns — the doc switched
+// to a non-markdown file, or a save-as renamed the open one out of markdown underneath
+// it. Called wherever currentPath moves; a no-op when the pane is already off.
+func (s *homeScreen) enforcePreview() {
+	if s.preview != previewOff && !s.previewable() {
+		s.setPreview(previewOff)
+	}
+}
+
 // cyclePreview steps ctrl+p through the panes: off → the reader → off. Every rung is
 // a layout change, so nothing here touches the router's stack and there is no
-// navigation state to keep in sync.
+// navigation state to keep in sync. On a file the reader would mangle, ctrl+p does
+// nothing at all.
 func (s *homeScreen) cyclePreview() core.Action {
+	if !s.previewable() {
+		return core.Action{}
+	}
 	switch s.preview {
 	case previewOff:
 		s.setPreview(previewPane)
@@ -495,6 +524,8 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	s.editor = ed
 	s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
 	cmd := s.editorPanel.SetChild(ed)
+	// After SetChild, so the layout setPreview rebuilds is sized around the new buffer.
+	s.enforcePreview()
 	s.modular.FocusSlot(s.editorSlot())
 	return core.Async(cmd)
 }
@@ -511,7 +542,7 @@ func (s *homeScreen) newFile(sh *core.Shared) core.Action {
 	if !ok {
 		row = 0 // the selected row is on-page by construction; never die on it
 	}
-	edit := components.NewLineEdit("name (a/b.md nests dirs)", 0, sh.BodyY()+row, sidebarWidth,
+	edit := components.NewLineEdit("name (a/b nests dirs)", 0, sh.BodyY()+row, sidebarWidth,
 		s.createFile, nil)
 	edit.Crumb = "new file"
 	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
@@ -530,13 +561,13 @@ func (s *homeScreen) createFile(sh *core.Shared, name string) core.Action {
 	c := Of(sh)
 	base := c.ScanDir
 	if c.Mode == ModeHome {
-		dir, err := Dir()
+		dir, err := DocsDir()
 		if err != nil {
 			return core.Replace(errPopup("new file", err))
 		}
 		base = dir
 	}
-	path, err := newDocPath(base, name, c.Ext)
+	path, err := newDocPath(base, name, c.NewExt)
 	if err != nil {
 		return core.Replace(errPopup("new file", err))
 	}
@@ -574,6 +605,7 @@ func (s *homeScreen) editorOpts() components.EditorOpts {
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	Of(sh).RekeyDoc(s.currentPath, path, s.editor)
 	s.currentPath = path
+	s.enforcePreview() // a save-as can rename markdown out of markdown under an open pane
 	return core.PropagateAll(ReseedMsg{})
 }
 
@@ -608,6 +640,7 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 	if !s.sidebar {
 		s.setSidebar(true)
 	}
+	s.enforcePreview()
 	s.modular.FocusSlot(0)
 	s.refreshPreview()
 	return core.Seq(core.Async(cmd), core.PropagateAll(ReseedMsg{}))

@@ -28,18 +28,131 @@ func TestLoadConfigFile(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte("extension: txt\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte("extensions: [MD, .txt]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Extension != "txt" {
-		t.Fatalf("extension = %q, want txt", cfg.Extension)
+	if !reflect.DeepEqual(cfg.Extensions, []string{"md", "txt"}) {
+		t.Fatalf("extensions = %v, want them lowercased and undotted", cfg.Extensions)
 	}
 	if want := DefaultConfig().ScanDepth; cfg.ScanDepth != want {
 		t.Fatalf("scan depth = %d, want the default %d", cfg.ScanDepth, want)
+	}
+}
+
+// TestLoadConfigNoExtensions: the unconfigured default is no filter at all — every
+// text file is a document.
+func TestLoadConfigNoExtensions(t *testing.T) {
+	cfg := writeConfig(t, "scan_depth: 2\n")
+	if len(cfg.Extensions) != 0 || len(cfg.Filter().Exts) != 0 {
+		t.Fatalf("extensions = %v, want none — the default filter takes any text file", cfg.Extensions)
+	}
+}
+
+// TestLoadConfigDroppedExtensionKey: the extension scalar this schema used to carry is
+// gone. A config still holding it must load clean and simply not act on it — an
+// unknown key that errored would lock a user out of their vaults over a dead setting.
+func TestLoadConfigDroppedExtensionKey(t *testing.T) {
+	cfg := writeConfig(t, "extension: txt\nscan_depth: 3\n")
+	if len(cfg.Extensions) != 0 {
+		t.Fatalf("extensions = %v, want the dead key to have no effect", cfg.Extensions)
+	}
+	if cfg.ScanDepth != 3 {
+		t.Fatalf("scan depth = %d, want the rest of the file to still load", cfg.ScanDepth)
+	}
+}
+
+// writeConfig puts raw at ~/.gote/config.yml under a temp HOME and loads it.
+func writeConfig(t *testing.T, raw string) Config {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".gote")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// TestEnsureConfig: a missing config is materialized with the defaults, so `gote config`
+// always opens a real schema; an existing one is returned untouched.
+func TestEnsureConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".gote", "config.yml")
+
+	path, err := EnsureConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("EnsureConfig should have written the file: %v", err)
+	}
+	if !strings.Contains(string(raw), "scan_depth:") {
+		t.Fatalf("a materialized config should show the schema:\n%s", raw)
+	}
+
+	if err := os.WriteFile(path, []byte("scan_depth: 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureConfig(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil || string(raw) != "scan_depth: 9\n" {
+		t.Fatalf("an existing config must not be rewritten, got %q (%v)", raw, err)
+	}
+}
+
+// TestDirLayout: the doc store sits one level below the config home. That gap is the
+// whole point — discovery reads DocsDir and so cannot reach config.yml.
+func TestDirLayout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs, err := DocsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath, err := ConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if docs != filepath.Join(dir, "docs") || cfgPath != filepath.Join(dir, "config.yml") {
+		t.Fatalf("layout = docs %q, config %q, under %q", docs, cfgPath, dir)
+	}
+
+	// The seed creates the store, and config.yml — a text file the default filter would
+	// otherwise happily take — is not in it.
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs.md"), []byte("not a doc either"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := docNames(HomeDocs(docs, DocFilter{})); len(got) != 0 {
+		t.Fatalf("the store = %v, want it empty — nothing in the config home is a document", got)
+	}
+	if st, err := os.Stat(docs); err != nil || !st.IsDir() {
+		t.Fatal("seeding should create the doc store")
 	}
 }
 

@@ -89,6 +89,48 @@ func TestConfiguredDefaultVaultAndCLIOverride(t *testing.T) {
 	}
 }
 
+// TestExtFlagOverridesConfig: --ext replaces the config's extensions for one run, in
+// both directions — it narrows an unconfigured gote, and widens a configured one back
+// to any text file. The new-file extension follows it, so a narrowed session cannot
+// create a file it would then hide.
+func TestExtFlagOverridesConfig(t *testing.T) {
+	scan := t.TempDir()
+	for _, name := range []string{"a.md", "b.txt", "c.go"} {
+		if err := os.WriteFile(filepath.Join(scan, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	launch := Options{Mode: ModeScan, Dir: scan}
+
+	unset := New("dev", DefaultConfig(), launch)
+	if len(unset.Files) != 3 || unset.NewExt != "md" {
+		t.Fatalf("no flag = %d files, new ext %q; want all 3 and md", len(unset.Files), unset.NewExt)
+	}
+
+	narrowed := launch
+	narrowed.Exts, narrowed.ExtsSet = []string{".TXT"}, true
+	c := New("dev", DefaultConfig(), narrowed)
+	if len(c.Files) != 1 || c.Files[0].Name != "b.txt" {
+		t.Fatalf("--ext=.TXT seeded %v, want b.txt alone (normalized on the way in)", docNames(c.Files))
+	}
+	if c.NewExt != "txt" {
+		t.Fatalf("new-file extension = %q, want it to follow the flag", c.NewExt)
+	}
+
+	// A config that restricts, widened back by `gote --ext=` — which arrives as [""].
+	cfg := DefaultConfig()
+	cfg.Extensions = []string{"md"}
+	if got := New("dev", cfg, launch); len(got.Files) != 1 {
+		t.Fatalf("config alone seeded %v, want a.md alone", docNames(got.Files))
+	}
+	widened := launch
+	widened.Exts, widened.ExtsSet = []string{""}, true
+	c = New("dev", cfg, widened)
+	if len(c.Files) != 3 || c.NewExt != "md" {
+		t.Fatalf("--ext= seeded %v (new ext %q), want every text file back", docNames(c.Files), c.NewExt)
+	}
+}
+
 func TestAddAndSwitchVault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

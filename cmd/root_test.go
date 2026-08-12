@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/brohd11/gote/internal/app"
@@ -32,12 +33,15 @@ func TestResolveOptions(t *testing.T) {
 		scan     bool
 		depth    int
 		depthSet bool
+		exts     []string
+		extsSet  bool
 
 		wantMode  app.Mode
 		wantDir   string
 		wantFile  string
 		wantDepth int
 		wantSet   bool
+		wantExts  []string
 		wantErr   bool
 	}{
 		{name: "bare", wantMode: app.ModeHome},
@@ -81,11 +85,30 @@ func TestResolveOptions(t *testing.T) {
 		{name: "non-numeric depth", args: []string{"here", "x"}, wantErr: true},
 		{name: "negative depth", args: []string{"here", "-1"}, wantErr: true},
 		{name: "negative depth flag", args: []string{"here"}, depth: -1, depthSet: true, wantErr: true},
+		{
+			// --ext rides along with every mode; the app normalizes it, so the grammar
+			// passes it through untouched.
+			name: "ext with a scan", args: []string{"here"}, exts: []string{"md"}, extsSet: true,
+			wantMode: app.ModeScan, wantDir: cwd, wantExts: []string{"md"},
+		},
+		{
+			name: "ext on a bare launch", exts: []string{"md", "txt"}, extsSet: true,
+			wantMode: app.ModeHome, wantExts: []string{"md", "txt"},
+		},
+		{
+			// `gote --ext=` — an empty set is set, and means "any text file", which is
+			// how a config that restricts gets widened for one run.
+			name: "empty ext is still set", args: []string{"here"}, exts: []string{""}, extsSet: true,
+			wantMode: app.ModeScan, wantDir: cwd, wantExts: []string{""},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			opts, err := resolveOptions(tc.args, tc.scan, tc.depth, tc.depthSet)
+			opts, err := resolveOptions(tc.args, flags{
+				scan: tc.scan, depth: tc.depth, depthSet: tc.depthSet,
+				exts: tc.exts, extsSet: tc.extsSet,
+			})
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("resolveOptions(%v) should have failed, got %+v", tc.args, opts)
@@ -108,6 +131,10 @@ func TestResolveOptions(t *testing.T) {
 				t.Errorf("depth = %d (set %v), want %d (set %v)",
 					opts.Depth, opts.DepthSet, tc.wantDepth, tc.wantSet)
 			}
+			if !reflect.DeepEqual(opts.Exts, tc.wantExts) || opts.ExtsSet != tc.extsSet {
+				t.Errorf("exts = %v (set %v), want %v (set %v)",
+					opts.Exts, opts.ExtsSet, tc.wantExts, tc.extsSet)
+			}
 		})
 	}
 }
@@ -115,7 +142,7 @@ func TestResolveOptions(t *testing.T) {
 // TestResolveOptionsAbs: paths are absolute by the time they reach the app, so the
 // breadcrumb and the editor's save target don't depend on the cwd afterwards.
 func TestResolveOptionsAbs(t *testing.T) {
-	opts, err := resolveOptions([]string{"root_test.go"}, false, 0, false)
+	opts, err := resolveOptions([]string{"root_test.go"}, flags{})
 	if err != nil {
 		t.Fatal(err)
 	}

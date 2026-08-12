@@ -11,18 +11,78 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 )
 
-// DocFile is one seedable document: a file matching the configured extension.
+// DocFile is one seedable document: a file the configured filter accepts.
 type DocFile struct {
 	Name string // base name, shown in the list
 	Path string // absolute path, the editor's load/save target
 	Root string // origin root used to render stable relative path context
 }
 
-// HomeDocs lists the docs stored flat in dir (the home mode seed), filtered to ext.
+// DocFilter decides which files seed the lists. An empty Exts means any text file,
+// judged by sniffing content (isTextFile) — the default, so a fresh gote lists
+// everything it can actually edit. A non-empty Exts is the user's explicit word, from
+// config.yml's extensions key or the --ext flag, and is taken at face value without
+// sniffing.
+type DocFilter struct {
+	Exts []string // lowercase, no leading dot; see NewDocFilter
+}
+
+// NewDocFilter builds a filter from extension strings however they were written — "MD",
+// ".md" and " md " all mean md, and empties drop out. The single normalization point
+// for both config.yml's extensions key and the --ext flag, so the two cannot drift.
+func NewDocFilter(exts []string) DocFilter { return DocFilter{Exts: normalizeExts(exts)} }
+
+// normalizeExts is NewDocFilter's canonical form, shared with Config so a loaded config
+// holds what it means. An all-empty input returns nil, not an empty slice: the two are
+// the same filter but only one of them compares equal to a zero Config.
+func normalizeExts(exts []string) []string {
+	out := make([]string, 0, len(exts))
+	for _, e := range exts {
+		if e = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(e), ".")); e != "" {
+			out = append(out, e)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// defaultExt is what "+ new file" appends to a name typed without one: the first
+// configured extension, so a filtered session cannot create files it would then hide,
+// and "md" when nothing is configured.
+func defaultExt(exts []string) string {
+	if len(exts) > 0 {
+		return exts[0]
+	}
+	return "md"
+}
+
+// Match reports whether the file at path (with base name name) belongs in a list.
+func (f DocFilter) Match(path, name string) bool {
+	if len(f.Exts) == 0 {
+		return isTextFile(path)
+	}
+	return f.hasExt(name)
+}
+
+// hasExt compares name's extension against the configured set, without the dot and
+// case-insensitively.
+func (f DocFilter) hasExt(name string) bool {
+	ext := strings.TrimPrefix(filepath.Ext(name), ".")
+	for _, want := range f.Exts {
+		if strings.EqualFold(ext, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// HomeDocs lists the docs stored flat in dir (the home mode seed), filtered by f.
 // The directory is created when missing — the first run of a fresh install should
 // still find its store. A listing failure yields an empty list, not an error: the
 // TUI shows an empty list and stays usable.
-func HomeDocs(dir, ext string) []DocFile {
+func HomeDocs(dir string, f DocFilter) []DocFile {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil
 	}
@@ -32,20 +92,36 @@ func HomeDocs(dir, ext string) []DocFile {
 	}
 	var docs []DocFile
 	for _, e := range entries {
-		if e.IsDir() || !matchesExt(e.Name(), ext) {
+		path := filepath.Join(dir, e.Name())
+		if e.IsDir() || !f.Match(path, e.Name()) {
 			continue
 		}
-		docs = append(docs, DocFile{Name: e.Name(), Path: filepath.Join(dir, e.Name()), Root: filepath.Clean(dir)})
+		docs = append(docs, DocFile{Name: e.Name(), Path: path, Root: filepath.Clean(dir)})
 	}
 	sortDocs(docs)
 	return docs
 }
 
+// skipDirs are trees a doc scan never descends into. With every text file valid by
+// default, a depth-5 scan of any real project would otherwise be mostly vendored
+// dependency source and build output. Dot-prefixed names (.git, .venv) need no entry
+// here — the dot rule below already covers them.
+var skipDirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	"target":       true,
+	"dist":         true,
+	"build":        true,
+	"__pycache__":  true,
+	"venv":         true,
+}
+
 // ScanDocs walks root recursively down to depth directory levels below it (0 = root
-// only), collecting files matching ext. Dot-directories are skipped — a scan of ~
-// has no business descending into .git or .config. Unreadable subtrees are skipped,
-// not fatal.
-func ScanDocs(root string, depth int, ext string) []DocFile {
+// only), collecting the files f accepts. Dot-directories and skipDirs are pruned — a
+// scan of ~ has no business descending into .git, and one of a project has none
+// descending into node_modules. Both rules spare the root itself, so scanning from
+// inside such a directory still lists it. Unreadable subtrees are skipped, not fatal.
+func ScanDocs(root string, depth int, f DocFilter) []DocFile {
 	var docs []DocFile
 	root = filepath.Clean(root)
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -53,7 +129,7 @@ func ScanDocs(root string, depth int, ext string) []DocFile {
 			return nil // skip what we can't read
 		}
 		if d.IsDir() {
-			if path != root && strings.HasPrefix(d.Name(), ".") {
+			if path != root && (strings.HasPrefix(d.Name(), ".") || skipDirs[d.Name()]) {
 				return fs.SkipDir
 			}
 			if dirDepth(root, path) > depth {
@@ -61,7 +137,7 @@ func ScanDocs(root string, depth int, ext string) []DocFile {
 			}
 			return nil
 		}
-		if matchesExt(d.Name(), ext) {
+		if f.Match(path, d.Name()) {
 			docs = append(docs, DocFile{Name: d.Name(), Path: path, Root: root})
 		}
 		return nil
@@ -78,12 +154,6 @@ func dirDepth(root, path string) int {
 		return 0
 	}
 	return strings.Count(rel, string(filepath.Separator)) + 1
-}
-
-// matchesExt reports whether name carries the configured extension (compared
-// without the dot, case-insensitively).
-func matchesExt(name, ext string) bool {
-	return strings.EqualFold(strings.TrimPrefix(filepath.Ext(name), "."), ext)
 }
 
 func sortDocs(docs []DocFile) {
@@ -134,9 +204,9 @@ func docItems(docs []DocFile, currentPath string) []list.Item {
 type newFileItem struct{}
 
 func (newFileItem) Title() string       { return "+ new file" }
-func (newFileItem) Description() string { return "type a name (a/b.md nests dirs)" }
+func (newFileItem) Description() string { return "type a name (a/b nests dirs)" }
 func (newFileItem) FilterValue() string { return "new file" }
-func (newFileItem) SuffixText() string  { return "type a name (a/b.md nests dirs)" }
+func (newFileItem) SuffixText() string  { return "type a name (a/b nests dirs)" }
 
 // docRows is the docs panel's full row set: the action row, then the seeded docs.
 // Every (re)build of the list goes through here so the row survives reseeds.
@@ -144,11 +214,12 @@ func docRows(c *Ctx) []list.Item {
 	return append([]list.Item{newFileItem{}}, docItems(c.Files, "")...)
 }
 
-// newDocPath resolves a name typed into the new-file line edit against base. A
-// name without an extension gets the configured one (the docs list filters to it,
-// so an extensionless file would be invisible); "/" in the name nests under base.
-// Absolute names and ones escaping base ("..") are rejected — the line edit must
-// never write outside the doc store.
+// newDocPath resolves a name typed into the new-file line edit against base. A name
+// without an extension gets ext (the config's default_extension) — a convenience, not
+// a necessity now that an extensionless file lists fine, but typing "notes" should
+// still land notes.md; "/" in the name nests under base. Absolute names and ones
+// escaping base ("..") are rejected — the line edit must never write outside the doc
+// store.
 func newDocPath(base, name, ext string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
