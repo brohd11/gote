@@ -672,10 +672,34 @@ func errPopup(title string, err error) *components.DialogScreen {
 // for a doc, left empty for the scratch buffer).
 func (s *homeScreen) editorOpts() components.EditorOpts {
 	return components.EditorOpts{
-		OnExit:    s.editorExit,
-		OnRelease: s.editorRelease,
-		OnSaved:   s.editorSaved,
-		Search:    true,
+		OnExit:       s.editorExit,
+		OnRelease:    s.editorRelease,
+		OnSaved:      s.editorSaved,
+		Search:       true,
+		ContextMenu:  true,
+		ContextItems: s.editorContextItems,
+	}
+}
+
+// editorContextItems are gote's rows on the editor's right-click menu, below the
+// clipboard verbs: the view toggles that otherwise only exist as chords. They are built
+// fresh on every press, which is what lets Disabled track the current document — the
+// preview is a markdown reader and refuses everything else, the same gate ctrl+p uses.
+// Each Pick pops the menu itself (the component's convention). No Hints: the menu
+// dispatches no accelerators, so a key-shaped hint would be a promise it doesn't keep.
+func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
+	return []components.MenuItem{
+		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
+			return core.Seq(core.Pop(), s.cyclePreview())
+		}},
+		{Label: "Toggle wrap", Pick: func(*core.Shared) core.Action {
+			s.editor.ToggleWrap()
+			return core.Pop()
+		}},
+		{Label: "Toggle line numbers", Pick: func(*core.Shared) core.Action {
+			s.editor.ToggleLineNums()
+			return core.Pop()
+		}},
 	}
 }
 

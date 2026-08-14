@@ -434,6 +434,9 @@ func TestHomeEditorSearch(t *testing.T) {
 	if !s.editorOpts().Search {
 		t.Fatal("every editor built by gote should enable shared editor search")
 	}
+	if opts := s.editorOpts(); !opts.ContextMenu || opts.ContextItems == nil {
+		t.Fatalf("every editor built by gote should enable the right-click menu and contribute rows: %+v", opts)
+	}
 	s.openDoc(sh, a)
 	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha body")})
 	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
@@ -1278,5 +1281,88 @@ func TestReselectOpenDocKeepsBuffer(t *testing.T) {
 	}
 	if c := Of(sh); len(c.Open) != 1 {
 		t.Fatalf("re-selecting must not open a second buffer, open = %d", len(c.Open))
+	}
+}
+
+// TestHomeEditorContextItems: gote's rows on the shared editor's right-click menu. The
+// preview row is gated the same way ctrl+p is, so it must go muted for a document the
+// preview refuses.
+func TestHomeEditorContextItems(t *testing.T) {
+	s, sh := newHome(t)
+
+	rows := s.editorContextItems(sh)
+	want := []string{"Toggle preview", "Toggle wrap", "Toggle line numbers"}
+	if len(rows) != len(want) {
+		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
+	}
+	for i, label := range want {
+		if rows[i].Label != label {
+			t.Errorf("row %d is %q, want %q", i, rows[i].Label, label)
+		}
+		if rows[i].Hint != "" {
+			t.Errorf("row %d carries hint %q; the menu dispatches no accelerators", i, rows[i].Hint)
+		}
+	}
+
+	// The scratch buffer is previewable; a .txt doc is not.
+	if rows[0].Disabled {
+		t.Error("the scratch buffer is markdown-previewable, so the row should be live")
+	}
+	s.currentPath = filepath.Join(t.TempDir(), "notes.txt")
+	if !s.editorContextItems(sh)[0].Disabled {
+		t.Error("the preview row should be muted for a document the preview refuses")
+	}
+
+	before := s.editor.WrapMode()
+	if act := rows[1].Pick(sh); act.Msg == nil {
+		t.Error("a row's Pick must pop the menu itself")
+	}
+	if s.editor.WrapMode() == before {
+		t.Error("the wrap row should have toggled the editor's wrap mode")
+	}
+}
+
+// TestHomeEditorRightClickMenu is the end-to-end path a user actually takes: a right
+// click inside the editor column raises the menu over the still-drawn layout, and it is
+// the editor pane — not the sidebar — that claims the gesture.
+func TestHomeEditorRightClickMenu(t *testing.T) {
+	model, _, _ := newHomeRouter(t, Options{})
+	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
+	right := func(x, y int) tea.MouseMsg {
+		return tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonRight, X: x, Y: y}
+	}
+
+	// Render once before clicking, as bubbletea does: ModularScreen publishes each pane's
+	// absolute origin from View, and that origin is what turns the pane-relative click
+	// back into the anchor the overlay is placed at.
+	_ = model.View()
+
+	drive(right(45, 15)) // the editor column
+	menu, ok := model.(core.Router).Top().(*components.MenuScreen)
+	if !ok {
+		t.Fatalf("a right click in the editor should raise the menu, top is %T", model.(core.Router).Top())
+	}
+	view := stripANSI(model.View())
+	for _, want := range []string{"Copy", "Cut", "Paste", "Toggle wrap"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the menu should offer %q:\n%s", want, view)
+		}
+	}
+	// It has to land just under the pointer, not merely exist: same column, one row down
+	// so the clicked text stays readable. The editor receives the click pane-relative, so
+	// a menu placed at the sidebar's left edge is the failure this catches.
+	if x, y := menu.OverlayPos(0, 0); x != 45 || y != 16 {
+		t.Errorf("the menu placed at (%d,%d), want (45,16) — the click column, one row below:\n%s", x, y, view)
+	}
+
+	drive(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatalf("esc should dismiss the menu, top is %T", model.(core.Router).Top())
+	}
+
+	// The sidebar is not the editor: its panels never claimed the right button.
+	drive(right(5, 15))
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatalf("a right click in the sidebar should raise nothing, top is %T", model.(core.Router).Top())
 	}
 }
