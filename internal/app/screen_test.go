@@ -1366,3 +1366,38 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 		t.Fatalf("a right click in the sidebar should raise nothing, top is %T", model.(core.Router).Top())
 	}
 }
+
+// TestHomeEditorMenuQuitGate is the stacking bug the menu's QuitGate exists to prevent:
+// ctrl+c runs ahead of the Filtering gate, so without one the router's walk would reach
+// homeScreen and draw the unsaved-changes confirm on top of the still-open context menu.
+// The first press must close the menu and stop; only the second raises the confirm.
+func TestHomeEditorMenuQuitGate(t *testing.T) {
+	model, _, _ := newHomeRouter(t, Options{})
+	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
+	// The sidebar holds focus at startup, so click into the editor column before typing.
+	drive(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 45, Y: 15})
+	drive(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonNone, X: 45, Y: 15})
+	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved work")}) // dirty the scratch buffer
+	_ = model.View()
+
+	drive(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonRight, X: 45, Y: 15})
+	if _, ok := model.(core.Router).Top().(*components.MenuScreen); !ok {
+		t.Fatalf("the right click should have raised the menu, top is %T", model.(core.Router).Top())
+	}
+
+	drive(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatalf("ctrl+c should close the menu and stop there, top is %T", model.(core.Router).Top())
+	}
+	if view := stripANSI(model.View()); strings.Contains(view, "unsaved changes") {
+		t.Errorf("the confirm should not appear until the menu is gone:\n%s", view)
+	}
+
+	drive(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if _, ok := model.(core.Router).Top().(*components.DialogScreen); !ok {
+		t.Fatalf("the second ctrl+c should raise the dirty-buffer confirm, top is %T", model.(core.Router).Top())
+	}
+	if view := stripANSI(model.View()); !strings.Contains(view, "unsaved changes") {
+		t.Errorf("the confirm should name the unsaved buffer:\n%s", view)
+	}
+}
