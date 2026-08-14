@@ -32,5 +32,9 @@ func runConfig(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return app.Run(version, app.Options{Mode: app.ModeFile, File: path})
+	cfg, err := app.LoadConfig()
+	if err != nil {
+		return err
+	}
+	return app.Run(version, cfg, app.Options{Mode: app.ModeFile, File: path})
 }

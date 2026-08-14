@@ -1055,3 +1055,228 @@ func TestHelpKey(t *testing.T) {
 		t.Fatal("alt+? should push the help overlay even from the editor")
 	}
 }
+
+// renameFixture seeds a scan root with one doc and drives the real router to the docs
+// list with that doc selected — row 0 is always the "+ new file" action, so one down
+// arrow is what puts the selection on a document.
+func renameFixture(t *testing.T, name, body string) (tea.Model, *homeScreen, *core.Shared, string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: dir})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	return model, s, sh, dir
+}
+
+// pressRename sends ctrl+r and returns the line edit it pushed, if any.
+func pressRename(model tea.Model) (tea.Model, *components.LineEditScreen) {
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
+	return model, edit
+}
+
+// TestRenamePrompt: ctrl+r on a doc row raises the line edit prefilled with the doc's
+// path relative to its scan root — the same shape "+ new file" takes, which is what
+// makes the box a move as well as a rename. The "+ new file" row has no path to
+// rename, so the key falls through to the list there and nothing is pushed.
+func TestRenamePrompt(t *testing.T) {
+	model, _, sh, _ := renameFixture(t, filepath.Join("sub", "todo.md"), "")
+
+	model, edit := pressRename(model)
+	if edit == nil {
+		t.Fatal("ctrl+r on a doc row should push the rename line edit")
+	}
+	want := filepath.Join("sub", "todo.md")
+	if got := stripANSI(edit.View(sh)); !strings.Contains(got, want) {
+		t.Fatalf("the box should be prefilled with %q, got:\n%s", want, got)
+	}
+
+	// esc back to the list, up onto "+ new file", and the key is inert there.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if _, edit := pressRename(model); edit != nil {
+		t.Fatal("ctrl+r on the + new file row should do nothing")
+	}
+}
+
+// TestRenameMovesFile: submitting the box moves the file on disk and reseeds the docs
+// list, and a name typed without an extension picks up the default one just as it does
+// in the new-file box.
+func TestRenameMovesFile(t *testing.T) {
+	model, _, sh, dir := renameFixture(t, "old.md", "body")
+
+	model, edit := pressRename(model)
+	if edit == nil {
+		t.Fatal("no rename box")
+	}
+	edit.SetValue("new") // no extension: NewExt appends .md
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if _, err := os.Stat(filepath.Join(dir, "old.md")); !os.IsNotExist(err) {
+		t.Fatal("the old path should be gone")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "new.md"))
+	if err != nil || string(b) != "body" {
+		t.Fatalf("the file should have moved with its contents, got %q err %v", b, err)
+	}
+	files := Of(sh).Files
+	if len(files) != 1 || files[0].Name != "new.md" {
+		t.Fatalf("the docs list should have reseeded onto new.md, got %+v", files)
+	}
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatal("a successful rename should pop back to the home screen")
+	}
+}
+
+// TestRenameOpenDoc: renaming a doc that is OPEN moves the three places its path is
+// held — the ctx's open set, the screen's current doc, and the editor itself — without
+// touching the buffer, so unsaved edits survive and the next save lands on the new
+// path rather than re-creating the old one.
+func TestRenameOpenDoc(t *testing.T) {
+	model, s, sh, dir := renameFixture(t, "old.md", "body")
+
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})                     // open it
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")}) // dirty it
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})                       // back to the list
+	ed := s.editor
+
+	model, edit := pressRename(model)
+	if edit == nil {
+		t.Fatal("no rename box")
+	}
+	edit.SetValue("new.md")
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	renamed := filepath.Join(dir, "new.md")
+	if s.currentPath != renamed {
+		t.Fatalf("currentPath = %q, want %q", s.currentPath, renamed)
+	}
+	if s.editor != ed {
+		t.Fatal("a rename must not swap the pane's editor")
+	}
+	if !ed.Dirty() || !strings.Contains(ed.Text(), "!") {
+		t.Fatal("the buffer and its unsaved edits must survive the rename")
+	}
+	if got := ed.CrumbLabel(false); got != "new.md" {
+		t.Fatalf("the editor should have followed the file, crumb = %q", got)
+	}
+	c := Of(sh)
+	if c.Open[renamed] != ed {
+		t.Fatal("the new path should resolve to the same buffer")
+	}
+	if _, ok := c.Open[filepath.Join(dir, "old.md")]; ok {
+		t.Fatal("the old path must leave the open set")
+	}
+	if len(c.OpenOrder) != 1 || c.OpenOrder[0] != renamed {
+		t.Fatalf("OpenOrder should hold only the new path, got %v", c.OpenOrder)
+	}
+
+	// And clicking the renamed row afterwards is still just a switch — the sequence the
+	// bug showed up in, where the re-read landed on a file that no longer held the edits.
+	r := model.(core.Router)
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	pump(r, cmd)
+	if s.editor != ed || !ed.Dirty() || !strings.Contains(ed.Text(), "!") {
+		t.Fatalf("activating the renamed row should switch to the live buffer, got %q", ed.Text())
+	}
+}
+
+// TestRenameRefusals: a rename that would clobber another document, and one that tries
+// to escape the doc store, both surface an error popup and leave the disk alone. The
+// popup replaces the line edit rather than stacking on it, so the overlay depth holds.
+func TestRenameRefusals(t *testing.T) {
+	model, _, _, dir := renameFixture(t, "old.md", "body")
+	occupied := filepath.Join(dir, "taken.md")
+	if err := os.WriteFile(occupied, []byte("theirs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, value string }{
+		{"clobber", "taken.md"},
+		{"escape", filepath.Join("..", "elsewhere.md")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, edit := pressRename(model)
+			if edit == nil {
+				t.Fatal("no rename box")
+			}
+			edit.SetValue(tc.value)
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+			if _, ok := m.(core.Router).Top().(*components.DialogScreen); !ok {
+				t.Fatalf("a refused rename should raise an error popup, got %T", m.(core.Router).Top())
+			}
+			if b, err := os.ReadFile(filepath.Join(dir, "old.md")); err != nil || string(b) != "body" {
+				t.Fatalf("the source must be untouched, got %q err %v", b, err)
+			}
+			if b, err := os.ReadFile(occupied); err != nil || string(b) != "theirs" {
+				t.Fatalf("the target must be untouched, got %q err %v", b, err)
+			}
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // dismiss for the next case
+			model = m
+		})
+	}
+}
+
+// TestRenameUnchangedCancels: enter on the untouched prefill is a no-op, not a rename
+// onto the file's own path (which renameDoc would refuse as occupied).
+func TestRenameUnchangedCancels(t *testing.T) {
+	model, _, _, dir := renameFixture(t, "old.md", "body")
+
+	model, edit := pressRename(model)
+	if edit == nil {
+		t.Fatal("no rename box")
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatalf("an unchanged name should just pop, got %T", model.(core.Router).Top())
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "old.md")); err != nil || string(b) != "body" {
+		t.Fatalf("the file must be untouched, got %q err %v", b, err)
+	}
+}
+
+// TestReselectOpenDocKeepsBuffer: activating a doc that is already open is a SWITCH, not
+// an open. The pane swaps back to the buffer it already holds, so unsaved edits, the
+// cursor and the undo history are all still there — the file is read once, on first open.
+// The cmds must be pumped for this to mean anything: the read only happens when the cmd
+// SetChild returns is actually run, which is why the bug survived the other rename tests.
+func TestReselectOpenDocKeepsBuffer(t *testing.T) {
+	model, s, sh, _ := renameFixture(t, "old.md", "body")
+	r := model.(core.Router)
+
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open it
+	pump(r, cmd)
+	ed := s.editor
+	if got := ed.Text(); got != "body" {
+		t.Fatalf("the first open should load the file, buffer = %q", got)
+	}
+
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")}) // dirty it
+	pump(r, cmd)
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to the list
+	pump(r, cmd)
+
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter}) // activate the same row again
+	pump(r, cmd)
+
+	if s.editor != ed {
+		t.Fatal("re-selecting an open doc should keep its editor instance")
+	}
+	if got := ed.Text(); got != "!body" {
+		t.Fatalf("the unsaved edit should have survived the switch, buffer = %q", got)
+	}
+	if !ed.Dirty() {
+		t.Fatal("the dirty flag should have survived the switch")
+	}
+	if c := Of(sh); len(c.Open) != 1 {
+		t.Fatalf("re-selecting must not open a second buffer, open = %d", len(c.Open))
+	}
+}

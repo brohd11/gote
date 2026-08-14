@@ -9,11 +9,12 @@ import (
 	"github.com/brohd11/gote/internal/app"
 )
 
-// TestResolveOptions covers gote's whole argument grammar: which of the three modes
+// TestResolveOptions covers gote's whole argument grammar: which of the four modes
 // each invocation lands in, where the scan roots, and which typos are refused rather
 // than silently reinterpreted. The mode dispatch is the part worth pinning — an
-// argument becomes a file by NOT being a directory, so a rule that stops firing turns
-// a scan into an editor session on a directory path.
+// argument becomes a vault by NOT being on disk and a file by NOT being a directory,
+// so a rule that stops firing turns a scan into an editor session on a directory path,
+// or a vault into an empty buffer.
 func TestResolveOptions(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "note.md")
@@ -25,6 +26,34 @@ func TestResolveOptions(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// The bare name a vault is reached by, and a same-named file next to the test
+	// binary that must go on winning over it.
+	const vaultName = "main-vault"
+	shadowed := filepath.Join(cwd, "shadow-vault")
+	if err := os.WriteFile(shadowed, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(shadowed) })
+
+	// vaults maps a configured name to its resolved path; the empty string stands for
+	// a vault that IS configured but whose path has gone bad (a launch error, not a
+	// fall-through to a file of that name).
+	vaults := map[string]string{
+		vaultName:      dir,
+		"shadow-vault": dir,
+		"broken-vault": "",
+	}
+	lookupVault := func(name string) (string, bool, error) {
+		path, configured := vaults[name]
+		if !configured {
+			return "", false, nil
+		}
+		if path == "" {
+			return "", true, os.ErrNotExist
+		}
+		return path, true, nil
 	}
 
 	tests := []struct {
@@ -39,6 +68,7 @@ func TestResolveOptions(t *testing.T) {
 		wantMode  app.Mode
 		wantDir   string
 		wantFile  string
+		wantVault string
 		wantDepth int
 		wantSet   bool
 		wantExts  []string
@@ -101,6 +131,35 @@ func TestResolveOptions(t *testing.T) {
 			name: "empty ext is still set", args: []string{"here"}, exts: []string{""}, extsSet: true,
 			wantMode: app.ModeScan, wantDir: cwd, wantExts: []string{""},
 		},
+		{
+			// The new rung: nothing on disk by that name, but the config knows it.
+			name: "vault name", args: []string{vaultName},
+			wantMode: app.ModeVault, wantVault: vaultName, wantDir: dir,
+		},
+		{
+			// A vault is a recursive root like any other, so the depth applies.
+			name: "vault with depth", args: []string{vaultName, "3"},
+			wantMode: app.ModeVault, wantVault: vaultName, wantDir: dir, wantDepth: 3, wantSet: true,
+		},
+		{
+			// The filesystem wins: a real file of that name still opens as a file.
+			name: "file shadows a vault name", args: []string{"shadow-vault"},
+			wantMode: app.ModeFile, wantFile: shadowed,
+		},
+		{
+			// ...and ./name is the escape hatch, exactly as it is for "here".
+			name: "dot-slash never names a vault", args: []string{"./" + vaultName},
+			wantMode: app.ModeFile, wantFile: filepath.Join(cwd, vaultName),
+		},
+		{
+			// Configured but broken: a launch error, not a silent empty buffer.
+			name: "broken vault", args: []string{"broken-vault"}, wantErr: true,
+		},
+		{
+			// An unconfigured name keeps nano's contract.
+			name: "unknown name is still a new file", args: []string{"no-such-vault"},
+			wantMode: app.ModeFile, wantFile: filepath.Join(cwd, "no-such-vault"),
+		},
 	}
 
 	for _, tc := range tests {
@@ -108,7 +167,7 @@ func TestResolveOptions(t *testing.T) {
 			opts, err := resolveOptions(tc.args, flags{
 				scan: tc.scan, depth: tc.depth, depthSet: tc.depthSet,
 				exts: tc.exts, extsSet: tc.extsSet,
-			})
+			}, lookupVault)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("resolveOptions(%v) should have failed, got %+v", tc.args, opts)
@@ -127,6 +186,9 @@ func TestResolveOptions(t *testing.T) {
 			if opts.File != tc.wantFile {
 				t.Errorf("file = %q, want %q", opts.File, tc.wantFile)
 			}
+			if opts.Vault != tc.wantVault {
+				t.Errorf("vault = %q, want %q", opts.Vault, tc.wantVault)
+			}
 			if opts.Depth != tc.wantDepth || opts.DepthSet != tc.wantSet {
 				t.Errorf("depth = %d (set %v), want %d (set %v)",
 					opts.Depth, opts.DepthSet, tc.wantDepth, tc.wantSet)
@@ -142,7 +204,7 @@ func TestResolveOptions(t *testing.T) {
 // TestResolveOptionsAbs: paths are absolute by the time they reach the app, so the
 // breadcrumb and the editor's save target don't depend on the cwd afterwards.
 func TestResolveOptionsAbs(t *testing.T) {
-	opts, err := resolveOptions([]string{"root_test.go"}, flags{})
+	opts, err := resolveOptions([]string{"root_test.go"}, flags{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

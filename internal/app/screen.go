@@ -30,6 +30,10 @@ var (
 	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
 	lineNumsKey = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
 	helpKey     = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
+	// The docs list's own key, not the screen's: it acts on the selected row, so it
+	// belongs to the panel that has one (ListPanelOpts.OnKey) and must not fire from
+	// the editor. ctrl+r is free everywhere — gote, the editor, and the router's globals.
+	renameKey = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "rename"))
 )
 
 // The preview modes ctrl+p cycles through. The render shows up as a pane beside the
@@ -95,6 +99,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// a core.Borderer child).
 	s.docsPanel = components.NewCompactListPanel(docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
+		OnKey:    s.docsKey,
+		Help:     []key.Binding{renameKey},
 		Border:   true,
 	})
 	s.openPanel = components.NewCompactListPanel(nil, "Open", components.ListPanelOpts{
@@ -515,8 +521,10 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 	return s.openDoc(sh, di.doc.Path)
 }
 
-// openDoc switches the editor pane to path (creating or reusing its buffer, so
-// unsaved edits survive) and moves focus to it.
+// openDoc switches the editor pane to path and moves focus to it. An already-open doc is
+// a switch, not an open: Ctx.OpenDoc hands back the existing editor and the pane swap
+// leaves it exactly as it stands — unsaved edits, cursor, scroll and undo history all
+// intact — because EditorScreen reads its file only on the first Init.
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
 	ed := c.OpenDoc(path, s.editorOpts())
@@ -575,6 +583,82 @@ func (s *homeScreen) createFile(sh *core.Shared, name string) core.Action {
 		return core.Replace(errPopup("new file", err))
 	}
 	return core.Seq(core.Pop(), core.PropagateAll(ReseedMsg{}), s.openDoc(sh, path))
+}
+
+// docsKey is the docs panel's OnKey (ListPanelOpts.OnKey): ctrl+r renames the selected
+// doc. The hook fires only while the panel is focused and only when it is not running a
+// /-filter, so neither the editor nor a filter query can lose the chord. Reporting
+// false hands the key back to the list — which is what leaves the "+ new file" row
+// inert, since an action row has no path to rename.
+func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Action, bool) {
+	if !core.MatchKey(k, renameKey) {
+		return core.Action{}, false
+	}
+	di, ok := it.(docItem)
+	if !ok {
+		return core.Action{}, false
+	}
+	return s.renameFile(sh, di.doc), true
+}
+
+// renameFile pushes the floating line edit over the selected docs row, prefilled with
+// the doc's path relative to its origin root — the same shape createFile's box takes,
+// so editing the directory part moves the file as well as renaming it. The anchor math
+// is newFile's, for the same reasons documented there.
+func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
+	rel, err := filepath.Rel(doc.Root, doc.Path)
+	if err != nil {
+		rel = doc.Name // an unrelatable root still renames in place
+	}
+	l := s.docsPanel.List()
+	row, ok := components.CompactListItemRow(l, l.Index())
+	if !ok {
+		row = 0
+	}
+	edit := components.NewLineEdit("new name", 0, sh.BodyY()+row, sidebarWidth,
+		func(sh *core.Shared, name string) core.Action { return s.submitRename(sh, doc, rel, name) }, nil)
+	edit.SetValue(rel)
+	edit.Crumb = "rename"
+	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
+	return core.Push(edit)
+}
+
+// submitRename is the rename box's OnDone: resolve the typed path against the doc's
+// own root, move the file, then catch the app up with where it now lives. Blank input
+// and an unchanged name cancel quietly. Errors surface as a popup swapped in over the
+// line edit, so the overlay's stack depth holds (createFile's precedent).
+//
+// A doc that is OPEN needs three things pointed at the new path, and each is the only
+// home of one fact: the editor knows where to save (SetPath, which also moves its title
+// and re-picks the highlighter for a changed extension), the ctx keys the open set by
+// path (RekeyDoc — the same call a save-as makes), and the screen tracks which doc the
+// pane is showing. The buffer itself is never touched, so unsaved edits and undo
+// history survive a rename exactly as they survive a save-as.
+func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string) core.Action {
+	name = strings.TrimSpace(name)
+	if name == "" || name == rel {
+		return core.Pop()
+	}
+	c := Of(sh)
+	path, err := newDocPath(doc.Root, name, c.NewExt)
+	if err != nil {
+		return core.Replace(errPopup("rename", err))
+	}
+	if path == doc.Path {
+		return core.Pop()
+	}
+	if err := renameDoc(doc.Path, path); err != nil {
+		return core.Replace(errPopup("rename", err))
+	}
+	if ed := c.Open[doc.Path]; ed != nil {
+		ed.SetPath(path)
+		c.RekeyDoc(doc.Path, path, ed)
+		if s.currentPath == doc.Path {
+			s.currentPath = path
+			s.enforcePreview() // a rename can take a file out of markdown under a live pane
+		}
+	}
+	return core.Seq(core.Pop(), core.PropagateAll(ReseedMsg{}))
 }
 
 // errPopup builds the error dialog a failed new-file submit is replaced with.

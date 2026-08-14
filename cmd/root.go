@@ -38,13 +38,14 @@ type flags struct {
 const hereArg = "here"
 
 var rootCmd = &cobra.Command{
-	Use:   "gote [here|dir|file] [depth]",
+	Use:   "gote [here|dir|file|vault] [depth]",
 	Short: "A simple text editor (TUI)",
 	Long: `gote is a simple TUI text editor. With no arguments it opens the default vault
 named in ~/.gote/config.yml, or the ~/.gote/docs document store when no valid default
 is configured. Given a directory it lists every matching file found by a recursive
-scan, to the depth given as a second argument. Given a file it opens that file alone,
-with the sidebar and surrounding chrome hidden — the shape to use as your $EDITOR.
+scan, to the depth given as a second argument. Given the name of a configured vault it
+opens that vault. Given a file it opens that file alone, with the sidebar and
+surrounding chrome hidden — the shape to use as your $EDITOR.
 
 Any text file is a document. Set extensions in the config to narrow that permanently,
 or --ext to narrow one run; --ext with no value widens a narrowed config back again.
@@ -53,12 +54,15 @@ or --ext to narrow one run; --ext with no value widens a narrowed config back ag
   gote here             # scan the current directory, config depth
   gote here 3           # scan the current directory, depth 3
   gote ~/notes 4        # scan ~/notes, depth 4
+  gote main-vault       # open the configured vault named main-vault
   gote notes.md         # edit one file, nothing else on screen
   gote --ext=md here    # scan the current directory, markdown only
   gote --ext=           # every text file, whatever the config says
 
-"here" is a keyword, not a path: use ./here to scan a directory of that name. A file
-argument that does not exist yet opens an empty buffer, written on ctrl+s.`,
+"here" is a keyword, not a path: use ./here to scan a directory of that name. A vault
+name is only consulted for an argument that names nothing on disk, so ./main-vault
+still reaches a file of that name. A file argument that does not exist yet opens an
+empty buffer, written on ctrl+s.`,
 	Version:       version,
 	Args:          cobra.MaximumNArgs(2),
 	SilenceUsage:  true,
@@ -84,19 +88,25 @@ func Execute() {
 	}
 }
 
-// runRoot resolves the launch options and starts the TUI.
+// runRoot resolves the launch options and starts the TUI. The config is loaded here
+// rather than inside app.Run because the argument grammar consults it: a bare argument
+// naming nothing on disk may still name a configured vault.
 func runRoot(cmd *cobra.Command, args []string) error {
+	cfg, err := app.LoadConfig()
+	if err != nil {
+		return err
+	}
 	opts, err := resolveOptions(args, flags{
 		scan:     scan,
 		depth:    depth,
 		depthSet: cmd.Flags().Changed("depth"),
 		exts:     exts,
 		extsSet:  cmd.Flags().Changed("ext"),
-	})
+	}, func(name string) (string, bool, error) { return app.LookupVault(cfg, name) })
 	if err != nil {
 		return err
 	}
-	return app.Run(version, opts)
+	return app.Run(version, cfg, opts)
 }
 
 // resolveOptions turns the CLI surface into the app's launch options. It is the whole
@@ -106,17 +116,26 @@ func runRoot(cmd *cobra.Command, args []string) error {
 //   - no argument: config chooses the default vault later, or (with --scan) scan cwd
 //   - "here": a scan of the cwd
 //   - a directory (or --scan, or a trailing separator): a scan of it
+//   - a name that is nothing on disk but IS a configured vault: that vault
 //   - anything else, existing or not: that file, in the minimal editor
 //
-// The second argument is the scan depth, overriding --depth; it is meaningless for a
-// file and rejected there rather than ignored, since a rejected typo beats a silently
-// dropped one. Paths are made absolute — the scan root shows in the breadcrumb and the
-// editor saves against the path it was given, neither of which should depend on the
-// cwd once the program is running.
+// The vault rung sits below the filesystem on purpose: everything that already names
+// something real keeps meaning what it meant, so the reading can only change for an
+// argument that used to open an empty buffer. ./main-vault is the way to reach a local
+// file that shares a vault's name, the same escape hatch ./here has. lookupVault
+// reports (path, configured, err); a configured vault whose path has gone bad is a
+// launch error rather than a silent fall-through to a file of that name.
+//
+// The second argument is the scan depth, overriding --depth; it applies to a vault as
+// it does to any other recursive root, and is meaningless for a file — rejected there
+// rather than ignored, since a rejected typo beats a silently dropped one. Paths are
+// made absolute — the scan root shows in the breadcrumb and the editor saves against
+// the path it was given, neither of which should depend on the cwd once the program is
+// running.
 //
 // --ext passes straight through to every mode: it filters the lists, and the app
 // normalizes it (Ctx.New via NewDocFilter), so there is nothing to validate here.
-func resolveOptions(args []string, f flags) (app.Options, error) {
+func resolveOptions(args []string, f flags, lookupVault func(string) (string, bool, error)) (app.Options, error) {
 	scan := f.scan
 	opts := app.Options{Depth: f.depth, DepthSet: f.depthSet, Exts: f.exts, ExtsSet: f.extsSet}
 
@@ -164,11 +183,28 @@ func resolveOptions(args []string, f flags) (app.Options, error) {
 		opts.Mode, opts.Dir = app.ModeScan, abs
 		return opts, nil
 	}
+	if lookupVault != nil && !exists(arg) {
+		path, configured, err := lookupVault(arg)
+		if err != nil {
+			return opts, err
+		}
+		if configured {
+			opts.Mode, opts.Vault, opts.Dir = app.ModeVault, arg, path
+			return opts, nil
+		}
+	}
 	if len(args) > 1 {
 		return opts, fmt.Errorf("a depth applies only to a directory scan, and %q is a file", arg)
 	}
 	opts.Mode, opts.File = app.ModeFile, abs
 	return opts, nil
+}
+
+// exists reports whether arg names anything at all on disk, which is what keeps the
+// vault rung from stealing an argument that already means a file.
+func exists(arg string) bool {
+	_, err := os.Lstat(arg)
+	return err == nil
 }
 
 // isDirArg reports whether arg names a directory to scan: one that is a directory on

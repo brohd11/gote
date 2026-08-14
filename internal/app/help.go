@@ -38,6 +38,7 @@ func (s *homeScreen) helpText() string {
 		key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit (confirms unsaved changes)")),
 		sidebarKey, actionsKey, previewKey, wrapKey, lineNumsKey, helpKey,
 	})
+	writeSection("docs list", []key.Binding{renameKey})
 	writeSection("editor", s.editor.HelpBindings())
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()

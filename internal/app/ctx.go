@@ -43,8 +43,9 @@ type Ctx struct {
 }
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
-// fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile. A zero
-// Options is the default launch — Config.Default's vault when valid, else ~/.gote/docs.
+// fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile, Vault and
+// Dir for ModeVault. A zero Options is the default launch — Config.Default's vault when
+// valid, else ~/.gote/docs.
 //
 // Depth carries DepthSet rather than treating 0 as "unset", because 0 is a meaningful
 // depth: `gote here 0` lists the current directory alone. Unset means the config's
@@ -53,8 +54,9 @@ type Ctx struct {
 // config back to every text file for one run.
 type Options struct {
 	Mode     Mode
-	Dir      string // ModeScan root, absolute
+	Dir      string // ModeScan root, or ModeVault's already-resolved root, absolute
 	File     string // ModeFile path, absolute
+	Vault    string // ModeVault's configured name; Dir carries its resolved path
 	Depth    int    // scan depth, honored only when DepthSet
 	DepthSet bool
 	Exts     []string // --ext; replaces Config.Extensions, honored only when ExtsSet
@@ -86,6 +88,11 @@ func New(version string, cfg Config, opts Options) *Ctx {
 		c.ScanDir = opts.Dir
 	case ModeFile:
 		c.FilePath = opts.File
+	case ModeVault:
+		// Named on the command line. The CLI resolved and validated the path already
+		// (cmd.resolveOptions' vault lookup), so a bad name never reaches here — it is
+		// a launch error, not a screen that silently lists nothing.
+		c.VaultName, c.ScanDir = opts.Vault, opts.Dir
 	case ModeHome:
 		if cfg.Default != "" {
 			if path, err := vaultPath(cfg, cfg.Default); err == nil {
@@ -131,6 +138,17 @@ func vaultPath(cfg Config, name string) (string, error) {
 		return "", fmt.Errorf("vault %q: %w", name, err)
 	}
 	return path, nil
+}
+
+// LookupVault is vaultPath for the CLI, which must tell "no such vault" (fall through
+// to the next reading of the argument) apart from "that vault is broken" (a launch
+// error) — an error alone cannot carry that difference, so ok does.
+func LookupVault(cfg Config, name string) (path string, ok bool, err error) {
+	if _, ok := cfg.Vaults[name]; !ok {
+		return "", false, nil
+	}
+	path, err = vaultPath(cfg, name)
+	return path, true, err
 }
 
 // AddVault validates and persists a new named vault. Config is replaced in memory

@@ -240,6 +240,21 @@ func newDocPath(base, name, ext string) (string, error) {
 	return path, nil
 }
 
+// renameDoc moves a doc from old to newPath, making parent dirs as needed (the rename
+// box takes a path, so it nests the same way "+ new file" does). An occupied target is
+// refused rather than clobbered — createDoc's non-destructive rule, which matters more
+// here: a rename that overwrote would destroy a document that is not the one being
+// renamed. Lstat, not Stat, so a dangling symlink still counts as occupied.
+func renameDoc(old, newPath string) error {
+	if _, err := os.Lstat(newPath); err == nil {
+		return fmt.Errorf("%q already exists", filepath.Base(newPath))
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(old, newPath)
+}
+
 // createDoc writes an empty doc at path, making parent dirs as needed, without
 // clobbering: an existing file is left alone (the editor opens it either way).
 func createDoc(path string) error {
