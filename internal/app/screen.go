@@ -254,7 +254,7 @@ func (s *homeScreen) cyclePreview() core.Action {
 // callers disagree about where it lives: alt+p hands over the editor's live buffer, while
 // the --preview launch reads the file off disk (see homeScreen.Init).
 func (s *homeScreen) previewScreen(src func() string) *previewDoc {
-	return &previewDoc{components.NewDocScreen(components.DocOpts{
+	return &previewDoc{minimal: s.minimal, DocScreen: components.NewDocScreen(components.DocOpts{
 		Title:  "preview · " + s.previewName(),
 		Crumb:  "preview",
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
@@ -270,14 +270,43 @@ func (s *homeScreen) previewScreen(src func() string) *previewDoc {
 // previewDoc is the full-screen reader: bubblestack's read-only DocScreen plus the chrome
 // mask that makes it one. The router asks only the TOP screen for its mask, so without
 // this the breadcrumb (and, in ModeFile, everything homeScreen.ChromeMask had just
-// suppressed) would come back the moment the reader was pushed. The help bar stays: one
-// dim line naming the way out is not noise, it is the exit.
-type previewDoc struct{ *components.DocScreen }
+// suppressed) would come back the moment the reader was pushed.
+//
+// The help bar follows the launch it was opened from: an ordinary launch keeps it (one
+// dim line naming the way out is not noise, it is the exit), while a ModeFile launch
+// drops it, because the editor underneath has none either — a reader that grew chrome
+// its own screen doesn't have would read as a different app. There the exit (esc, or
+// alt+p again) goes unlabeled, which is the price of the chrome-free pair.
+//
+// Status is masked in both cases, as it is on homeScreen: the reader paints the message
+// itself so its body never changes height (View/HelpView, see status.go).
+type previewDoc struct {
+	*components.DocScreen
+	minimal bool
+	h       int // the body height the router last handed down, for statusOver
+}
 
 func (p *previewDoc) ChromeMask() core.ChromeMask {
 	mask := core.FullscreenMask()
-	mask.Help, mask.Status = false, false
+	mask.Help = p.minimal
 	return mask
+}
+
+func (p *previewDoc) SetSize(sh *core.Shared, width, bodyHeight int) {
+	p.h = bodyHeight
+	p.DocScreen.SetSize(sh, width, bodyHeight)
+}
+
+func (p *previewDoc) View(sh *core.Shared) string {
+	body := p.DocScreen.View(sh)
+	if p.minimal {
+		return statusOver(sh, body, p.h)
+	}
+	return body
+}
+
+func (p *previewDoc) HelpView(sh *core.Shared) string {
+	return statusBar(sh, p.DocScreen.HelpView(sh))
 }
 
 // Update keeps the wrapper on the stack. DocScreen.Update answers with its own pointer,
@@ -399,8 +428,20 @@ func (s *homeScreen) syncPreviewScroll() {
 	panel.ScrollTo(int(math.Round((1-w)*float64(anchored) + w*ends)))
 }
 
-func (s *homeScreen) View(sh *core.Shared) string     { return s.modular.View(sh) }
-func (s *homeScreen) HelpView(sh *core.Shared) string { return s.modular.HelpView(sh) }
+// View and HelpView both route through the status helpers (status.go): the router's own
+// status row is masked away, so this screen is the one that has to find the message a
+// home. In minimal mode there is no help bar, so the body's last row takes it.
+func (s *homeScreen) View(sh *core.Shared) string {
+	body := s.modular.View(sh)
+	if s.minimal {
+		return statusOver(sh, body, s.h)
+	}
+	return body
+}
+
+func (s *homeScreen) HelpView(sh *core.Shared) string {
+	return statusBar(sh, s.modular.HelpView(sh))
+}
 
 func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 	s.sh = sh
@@ -478,17 +519,18 @@ func (s *homeScreen) dirtyDocs(sh *core.Shared) []string {
 }
 
 // ChromeMask hides persistent router chrome in minimal mode, giving the editor the
-// whole terminal in steady state. The status line remains eligible but has zero height
-// unless transient feedback (such as a clipboard result) is present. The router asks
-// the top screen per render, so a pushed overlay is unaffected and no state is left to
-// restore.
+// whole terminal in steady state. The router asks the top screen per render, so a pushed
+// overlay is unaffected and no state is left to restore.
+//
+// Status is masked in BOTH modes — not because gote has no status line, but because the
+// router draws it as a row taken off the body, which makes every pane jump when a
+// clipboard result appears and jump back when it clears. This screen paints it itself
+// (View/HelpView, see status.go) in space the frame already spends.
 func (s *homeScreen) ChromeMask() core.ChromeMask {
 	if s.minimal {
-		mask := core.FullscreenMask()
-		mask.Status = false // normally zero-height; clipboard feedback may appear briefly
-		return mask
+		return core.FullscreenMask()
 	}
-	return core.ChromeMask{}
+	return core.ChromeMask{Status: true}
 }
 
 // CrumbLabel contributes the active store, ad-hoc scan, or named vault.

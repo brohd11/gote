@@ -871,12 +871,17 @@ func TestLaunchPreview(t *testing.T) {
 	if !strings.Contains(preview, "Heading") || strings.Contains(preview, "# Heading") {
 		t.Fatalf("-P should boot into the rendered document, frame:\n%s", preview)
 	}
-	// gote's own chrome is masked away; what remains is the reader's one-line exit hint.
+	// A ModeFile launch is chrome-free, and the reader pushed over it matches: no
+	// breadcrumb, no help bar of gote's and none of its own either.
 	if strings.Contains(preview, "sidebar") || strings.Contains(preview, "docs") {
 		t.Fatalf("the reader should mask gote's breadcrumb and help bar, frame:\n%s", preview)
 	}
-	if !strings.Contains(preview, "esc back") {
-		t.Fatalf("the reader should still say how to leave, frame:\n%s", preview)
+	if strings.Contains(preview, "esc back") {
+		t.Fatalf("a minimal launch's reader should grow no help bar of its own, frame:\n%s", preview)
+	}
+	// Only minimal drops it — pushed from the ordinary launch, the exit hint stays.
+	if mask := (&previewDoc{minimal: false}).ChromeMask(); mask.Help {
+		t.Fatal("the ordinary launch's reader should keep its help bar — it is the exit")
 	}
 
 	// Everything that opens no markdown document launches exactly as it always did.
@@ -986,11 +991,12 @@ func TestMinimalMode(t *testing.T) {
 }
 
 // TestNonMinimalKeepsChrome: the mask is opt-in per launch, not a global — the ordinary
-// launch must still draw its breadcrumb and help bar.
+// launch must still draw its breadcrumb and help bar. Status is the one exception, masked
+// in every mode because the screen paints it itself (see TestStatusCostsNoRows).
 func TestNonMinimalKeepsChrome(t *testing.T) {
 	s, _ := newHome(t)
-	if mask := s.ChromeMask(); mask != (core.ChromeMask{}) {
-		t.Fatalf("the doc-list launch should mask nothing, got %+v", mask)
+	if mask := s.ChromeMask(); mask != (core.ChromeMask{Status: true}) {
+		t.Fatalf("the doc-list launch should mask nothing but the status row, got %+v", mask)
 	}
 }
 
@@ -1054,6 +1060,81 @@ func TestMinimalFrame(t *testing.T) {
 	}
 	if !strings.Contains(ordLines[len(ordLines)-1], "sidebar") {
 		t.Fatalf("the ordinary launch's last row should be the help bar, got %q", ordLines[len(ordLines)-1])
+	}
+}
+
+// TestStatusCostsNoRows is the regression this whole status.go exists for. The router
+// draws its status line as a row taken OFF the body (belowChrome feeds bodyHeightFor),
+// so a clipboard message used to shove every pane up a line and drop it back five
+// seconds later. gote masks that row and paints the message in space the frame already
+// spends: the help bar's blank padding row, or — where the help bar is masked too — the
+// body's own last row. The proof is that nothing above the row it lands on moves.
+func TestStatusCostsNoRows(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "note.md")
+	if err := os.WriteFile(file, []byte("minimal content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+
+	const rows, cols = 24, 80
+	// render draws one frame through the REAL router, with status set before the resize
+	// so the layout is computed with it in hand — the ordering that used to lose a row.
+	render := func(opts Options, status string) []string {
+		t.Helper()
+		sh := core.NewShared(New("test", DefaultConfig(), opts))
+		sh.Chrome = &core.Chrome{Breadcrumb: core.NewBreadcrumbPane(), Status: components.NewStatusLine()}
+		r := core.NewRouter(sh, []core.TabEntry{
+			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+		})
+		pump(r, r.Init()) // the editor's file read is async; without this the buffer is empty
+		if status != "" {
+			sh.WriteStatus(status)
+		}
+		r.Update(tea.WindowSizeMsg{Width: cols, Height: rows})
+		return strings.Split(stripANSI(r.View()), "\n")
+	}
+
+	for _, tc := range []struct {
+		name string
+		opts Options
+		// lands is the row the message is expected to take: the help bar's padding row
+		// for a launch that has a help bar, the very last row for one that doesn't.
+		lands int
+	}{
+		{"ordinary launch", Options{}, rows - 2},
+		{"minimal launch", Options{Mode: ModeFile, File: file}, rows - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quiet := render(tc.opts, "")
+			noisy := render(tc.opts, "copied 12 characters")
+
+			if len(quiet) != rows || len(noisy) != rows {
+				t.Fatalf("both frames should fill the terminal: quiet %d rows, noisy %d, want %d",
+					len(quiet), len(noisy), rows)
+			}
+			if !strings.Contains(noisy[tc.lands], "copied 12 characters") {
+				t.Fatalf("the message should land on row %d, got %q\nframe:\n%s",
+					tc.lands, noisy[tc.lands], strings.Join(noisy, "\n"))
+			}
+			// Every row the message did NOT land on must be untouched — that is the
+			// eyesore: panes climbing a line and dropping back.
+			for i := range quiet {
+				if i == tc.lands {
+					continue
+				}
+				if quiet[i] != noisy[i] {
+					t.Errorf("row %d moved when the status appeared:\n quiet %q\n noisy %q", i, quiet[i], noisy[i])
+				}
+			}
+
+			// A message wider than the terminal must be cut, not wrapped: core's status
+			// style sets no width, and a wrapped line costs the row this all saves.
+			long := render(tc.opts, strings.Repeat("save failed: /very/long/path ", 6))
+			if len(long) != rows {
+				t.Fatalf("an over-wide message must be clamped, not wrapped: %d rows, want %d", len(long), rows)
+			}
+		})
 	}
 }
 
