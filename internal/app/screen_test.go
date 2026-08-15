@@ -422,6 +422,27 @@ func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
 	}
 }
 
+// TestHomeLeavesClipboardChordsToTheEditor: alt+c/alt+x/alt+v are the editor's clipboard
+// verbs, so gote's own alt keys (alt+z wrap, alt+p full preview) must not grow into them.
+// The cut is the observable half — the clipboard write itself is async and would shell out
+// to pbcopy, so the returned command is left unrun.
+func TestHomeLeavesClipboardChordsToTheEditor(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha beta")})
+
+	_, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Alt: true})
+	if act.Cmd == nil {
+		t.Fatal("alt+x should reach the editor and return its clipboard command")
+	}
+	if got := s.editor.Text(); got != "" {
+		t.Fatalf("alt+x through the home screen left %q, want the line cut", got)
+	}
+	if s.editor.WrapMode() {
+		t.Fatal("a clipboard chord must not toggle wrap")
+	}
+}
+
 // TestHomeEditorSearch pins gote's opt-in wiring and the per-buffer ownership of
 // queries. Each open path retains its own EditorScreen, so switching documents must
 // swap both the text and its active search rather than leaking one global filter.
