@@ -1,7 +1,6 @@
 package app
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -38,15 +37,9 @@ func vaultItems(sh *core.Shared) []list.Item {
 		Desc: "save and open a document folder",
 		Pick: func(*core.Shared) core.Action { return core.Push(newVaultForm()) },
 	}}
-	names := make([]string, 0, len(c.Config.Vaults))
-	for name := range c.Config.Vaults {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		name := name
-		v := c.Config.Vaults[name]
-		desc := v.Path
+	for _, entry := range VaultList(c.Config) {
+		name := entry.Name
+		desc := entry.Path
 		if c.Mode == ModeVault && c.VaultName == name {
 			desc += "  · active"
 		}

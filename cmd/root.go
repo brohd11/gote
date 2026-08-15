@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,9 +19,11 @@ import (
 var version = "dev"
 
 var (
-	scan  bool
-	depth int
-	exts  []string
+	scan    bool
+	depth   int
+	exts    []string
+	vault   bool
+	preview bool
 )
 
 // flags is the parsed flag state the argument grammar reads, kept as a struct so
@@ -31,6 +34,8 @@ type flags struct {
 	depthSet bool
 	exts     []string
 	extsSet  bool
+	vault    bool
+	preview  bool
 }
 
 // hereArg is the keyword that means "scan the current directory". It wins over a
@@ -58,11 +63,15 @@ or --ext to narrow one run; --ext with no value widens a narrowed config back ag
   gote notes.md         # edit one file, nothing else on screen
   gote --ext=md here    # scan the current directory, markdown only
   gote --ext=           # every text file, whatever the config says
+  gote --vault mv       # the vault named mv, even when ./mv exists
+  gote --vault          # list the configured vaults
+  gote -P notes.md      # read one markdown file, full screen
 
 "here" is a keyword, not a path: use ./here to scan a directory of that name. A vault
 name is only consulted for an argument that names nothing on disk, so ./main-vault
-still reaches a file of that name. A file argument that does not exist yet opens an
-empty buffer, written on ctrl+s.`,
+still reaches a file of that name; --vault is the way back, reading its argument as a
+vault name and nothing else. A file argument that does not exist yet opens an empty
+buffer, written on ctrl+s.`,
 	Version:       version,
 	Args:          cobra.MaximumNArgs(2),
 	SilenceUsage:  true,
@@ -80,6 +89,13 @@ func init() {
 	// with positionals, so `gote --ext=md here` and `gote here --ext=md` are the same.
 	rootCmd.Flags().StringSliceVar(&exts, "ext", nil,
 		"limit discovery to these extensions, overriding the config (repeatable, or comma-separated; empty means any text file)")
+	// No shorthand: cobra hands -v to --version because Version is set, and it does that
+	// only when nothing else has claimed the letter. Taking it here would silently strip
+	// -v from --version rather than collide loudly.
+	rootCmd.Flags().BoolVar(&vault, "vault", false,
+		"read the argument as a configured vault name rather than a path; with no name, or one that matches no vault, list the vaults instead")
+	rootCmd.Flags().BoolVarP(&preview, "preview", "P", false,
+		"open a markdown file straight into the full-screen reader (ignored for anything else)")
 }
 
 func Execute() {
@@ -96,17 +112,52 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	opts, err := resolveOptions(args, flags{
+	opts, list, err := resolveOptions(args, flags{
 		scan:     scan,
 		depth:    depth,
 		depthSet: cmd.Flags().Changed("depth"),
 		exts:     exts,
 		extsSet:  cmd.Flags().Changed("ext"),
+		vault:    vault,
+		preview:  preview,
 	}, func(name string) (string, bool, error) { return app.LookupVault(cfg, name) })
+	// Printed before the error is returned: an unnamed vault lists and succeeds, a
+	// misnamed one lists and fails, and both want the list. Cobra writes its Error: line
+	// to stderr after RunE returns, so on a terminal the list reads first.
+	if list {
+		printVaults(cmd.OutOrStdout(), app.VaultList(cfg))
+	}
 	if err != nil {
 		return err
 	}
+	if list {
+		return nil
+	}
 	return app.Run(version, cfg, opts)
+}
+
+// printVaults writes the configured vaults as name and path columns, marking the config's
+// default. Paths print as config.yml writes them, ~ and all: this listing is also what a
+// misspelled name gets, so it has to render a vault whose directory has gone missing.
+func printVaults(w io.Writer, entries []app.VaultEntry) {
+	if len(entries) == 0 {
+		fmt.Fprintln(w, "No vaults are configured. Add one from the Vaults menu, or run `gote config`.")
+		return
+	}
+	width := 0
+	for _, e := range entries {
+		if n := len(e.Name); n > width {
+			width = n
+		}
+	}
+	fmt.Fprintln(w, "Configured vaults:")
+	for _, e := range entries {
+		line := fmt.Sprintf("  %-*s  %s", width, e.Name, e.Path)
+		if e.Default {
+			line += "  · default"
+		}
+		fmt.Fprintln(w, line)
+	}
 }
 
 // resolveOptions turns the CLI surface into the app's launch options. It is the whole
@@ -126,6 +177,13 @@ func runRoot(cmd *cobra.Command, args []string) error {
 // reports (path, configured, err); a configured vault whose path has gone bad is a
 // launch error rather than a silent fall-through to a file of that name.
 //
+// --vault replaces that whole ladder with its one rung: the argument is a vault name,
+// the filesystem is never consulted, and "here" is not a keyword. It is the way to reach
+// a vault the cwd shadows, and it turns the one reading that cannot fail — an unknown
+// name opening an empty buffer — into a listing, reported by the returned listVaults so
+// the caller does the printing. A name that IS configured but broken still errors
+// without a listing: it matched, and the path is the problem.
+//
 // The second argument is the scan depth, overriding --depth; it applies to a vault as
 // it does to any other recursive root, and is meaningless for a file — rejected there
 // rather than ignored, since a rejected typo beats a silently dropped one. Paths are
@@ -135,22 +193,48 @@ func runRoot(cmd *cobra.Command, args []string) error {
 //
 // --ext passes straight through to every mode: it filters the lists, and the app
 // normalizes it (Ctx.New via NewDocFilter), so there is nothing to validate here.
-func resolveOptions(args []string, f flags, lookupVault func(string) (string, bool, error)) (app.Options, error) {
+func resolveOptions(args []string, f flags, lookupVault func(string) (string, bool, error)) (opts app.Options, listVaults bool, err error) {
 	scan := f.scan
-	opts := app.Options{Depth: f.depth, DepthSet: f.depthSet, Exts: f.exts, ExtsSet: f.extsSet}
+	// Preview rides along unjudged: it asks for a reader the launch may have nothing to
+	// show in, and the app is where that is known, so no rung below has to consider it.
+	opts = app.Options{Depth: f.depth, DepthSet: f.depthSet, Exts: f.exts, ExtsSet: f.extsSet, Preview: f.preview}
+
+	if f.vault && scan {
+		return opts, false, fmt.Errorf("--scan cannot be combined with --vault")
+	}
 
 	if len(args) > 1 {
 		n, err := strconv.Atoi(args[1])
 		if err != nil {
-			return opts, fmt.Errorf("depth %q is not a number", args[1])
+			return opts, false, fmt.Errorf("depth %q is not a number", args[1])
 		}
 		if n < 0 {
-			return opts, fmt.Errorf("depth %d is negative", n)
+			return opts, false, fmt.Errorf("depth %d is negative", n)
 		}
 		opts.Depth, opts.DepthSet = n, true
 	}
 	if opts.Depth < 0 {
-		return opts, fmt.Errorf("depth %d is negative", opts.Depth)
+		return opts, false, fmt.Errorf("depth %d is negative", opts.Depth)
+	}
+
+	if f.vault {
+		if len(args) == 0 || args[0] == "" {
+			return opts, true, nil
+		}
+		name := args[0]
+		var path string
+		configured := false
+		if lookupVault != nil {
+			var err error
+			if path, configured, err = lookupVault(name); err != nil {
+				return opts, false, err
+			}
+		}
+		if !configured {
+			return opts, true, fmt.Errorf("vault %q is not configured", name)
+		}
+		opts.Mode, opts.Vault, opts.Dir = app.ModeVault, name, path
+		return opts, false, nil
 	}
 
 	if len(args) == 0 {
@@ -158,46 +242,46 @@ func resolveOptions(args []string, f flags, lookupVault func(string) (string, bo
 			opts.Mode = app.ModeScan
 			dir, err := os.Getwd()
 			if err != nil {
-				return opts, err
+				return opts, false, err
 			}
 			opts.Dir = dir
 		}
-		return opts, nil
+		return opts, false, nil
 	}
 
 	arg := args[0]
 	if arg == hereArg {
 		dir, err := os.Getwd()
 		if err != nil {
-			return opts, err
+			return opts, false, err
 		}
 		opts.Mode, opts.Dir = app.ModeScan, dir
-		return opts, nil
+		return opts, false, nil
 	}
 
 	abs, err := filepath.Abs(arg)
 	if err != nil {
-		return opts, err
+		return opts, false, err
 	}
 	if isDirArg(arg, scan) {
 		opts.Mode, opts.Dir = app.ModeScan, abs
-		return opts, nil
+		return opts, false, nil
 	}
 	if lookupVault != nil && !exists(arg) {
 		path, configured, err := lookupVault(arg)
 		if err != nil {
-			return opts, err
+			return opts, false, err
 		}
 		if configured {
 			opts.Mode, opts.Vault, opts.Dir = app.ModeVault, arg, path
-			return opts, nil
+			return opts, false, nil
 		}
 	}
 	if len(args) > 1 {
-		return opts, fmt.Errorf("a depth applies only to a directory scan, and %q is a file", arg)
+		return opts, false, fmt.Errorf("a depth applies only to a directory scan, and %q is a file", arg)
 	}
 	opts.Mode, opts.File = app.ModeFile, abs
-	return opts, nil
+	return opts, false, nil
 }
 
 // exists reports whether arg names anything at all on disk, which is what keeps the

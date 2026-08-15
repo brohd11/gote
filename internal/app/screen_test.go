@@ -728,34 +728,143 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 	}
 }
 
-// TestPreviewOverlayRendersBuffer: the overlay renders the LIVE buffer, not a snapshot
+// altP is the full-screen reader's key. A terminal cannot deliver ctrl+shift+p — v1
+// bubbletea attaches shift to navigation keys only — so alt+p is what opens the reader.
+var altP = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p"), Alt: true}
+
+// TestPreviewOverlayRendersBuffer: the reader renders the LIVE buffer, not a snapshot
 // taken when it was built.
 func TestPreviewOverlayRendersBuffer(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- bullet")})
 
-	doc := s.previewScreen()
+	doc := s.previewScreen(s.editor.Text)
 	doc.SetSize(sh, 80, 24)
 	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• bullet") {
-		t.Fatalf("the overlay should render the live buffer, got:\n%s", v)
+		t.Fatalf("the reader should render the live buffer, got:\n%s", v)
 	}
 	if !strings.Contains(doc.Title, "a.md") {
-		t.Errorf("the overlay should name the doc, got %q", doc.Title)
+		t.Errorf("the reader should name the doc, got %q", doc.Title)
 	}
 }
 
-// TestPreviewOverlayCloses: ctrl+p and esc both pop the parked overlay, which is why
-// the home screen tracks only the pane — an esc it never sees cannot desync it.
+// TestPreviewOverlayCloses: alt+p and esc both pop the reader, which is why the home
+// screen tracks only the pane — an esc it never sees cannot desync it.
 func TestPreviewOverlayCloses(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
 
-	for _, key := range []tea.KeyMsg{{Type: tea.KeyCtrlP}, {Type: tea.KeyEsc}} {
-		doc := s.previewScreen()
+	for _, key := range []tea.KeyMsg{altP, {Type: tea.KeyEsc}} {
+		doc := s.previewScreen(s.editor.Text)
 		if _, a := doc.Update(sh, key); msgType(a) != "core.popMsg" {
-			t.Errorf("%s should pop the overlay, got %s", key, msgType(a))
+			t.Errorf("%s should pop the reader, got %s", key, msgType(a))
+		}
+	}
+}
+
+// TestPreviewOverlayKeepsWrapper: DocScreen.Update answers with its own pointer, so
+// without the wrapper's override the router would store that back and the reader would
+// lose its chrome mask on the first keystroke it received.
+func TestPreviewOverlayKeepsWrapper(t *testing.T) {
+	s, sh := newHome(t)
+	doc := s.previewScreen(s.editor.Text)
+
+	next, _ := doc.Update(sh, tea.KeyMsg{Type: tea.KeyDown})
+	if _, ok := next.(*previewDoc); !ok {
+		t.Fatalf("the reader should stay a *previewDoc, got %T", next)
+	}
+	if mask := doc.ChromeMask(); !mask.Breadcrumb || mask.Help {
+		t.Errorf("the reader should mask the breadcrumb and keep the help bar, got %+v", mask)
+	}
+}
+
+// TestFullPreviewKey: alt+p pushes the reader over a markdown doc, and does nothing at
+// all over a file its renderer would mangle — the same gate ctrl+p uses.
+func TestFullPreviewKey(t *testing.T) {
+	s, sh := newHome(t)
+	dir := t.TempDir()
+
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+	if _, a := s.Update(sh, altP); msgType(a) != "core.pushMsg" {
+		t.Errorf("alt+p should push the reader on a markdown doc, got %q", msgType(a))
+	}
+	s.openDoc(sh, filepath.Join(dir, "a.go"))
+	if _, a := s.Update(sh, altP); msgType(a) != "" {
+		t.Errorf("alt+p should do nothing on a .go file, got %q", msgType(a))
+	}
+}
+
+// TestLaunchPreviewReadsDisk is the race the launch reader is shaped around: the editor
+// loads its file from a cmd, so at Init the buffer is still empty. The reader must show
+// the document anyway, which is why the launch source reads the file rather than the
+// buffer. Nothing here pumps the editor's load — that is the point.
+func TestLaunchPreviewReadsDisk(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "note.md")
+	if err := os.WriteFile(file, []byte("- from disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, sh := newHomeWith(t, Options{Mode: ModeFile, File: file, Preview: true})
+
+	if got := s.editor.Text(); got != "" {
+		t.Fatalf("this test is only meaningful with an unloaded buffer, got %q", got)
+	}
+	doc := s.previewScreen(func() string { return fileText(file) })
+	doc.SetSize(sh, 80, 24)
+	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• from disk") {
+		t.Fatalf("the launch reader should render the file on disk, got:\n%s", v)
+	}
+}
+
+// TestLaunchPreview: -P on a markdown file boots into the reader — the rendered document
+// with gote's chrome masked away — while every launch that opens no document ignores it.
+func TestLaunchPreview(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "note.md")
+	if err := os.WriteFile(file, []byte("# Heading\n\nbody text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "note.go")
+	if err := os.WriteFile(other, []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	frame := func(opts Options) string {
+		t.Helper()
+		sh := core.NewShared(New("test", DefaultConfig(), opts))
+		sh.Chrome = &core.Chrome{Breadcrumb: core.NewBreadcrumbPane()}
+		r := core.NewRouter(sh, []core.TabEntry{
+			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+		})
+		// Threaded, not pumped: the launch push rides the same batch as the editor's file
+		// read, and a push changes the STACK — which a discarded model copy would drop.
+		var m tea.Model = r
+		m = pumpModel(m, r.Init())
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		return stripANSI(m.View())
+	}
+
+	// The renderer is the tell: it eats the "#", where the editor would show it raw.
+	preview := frame(Options{Mode: ModeFile, File: file, Preview: true})
+	if !strings.Contains(preview, "Heading") || strings.Contains(preview, "# Heading") {
+		t.Fatalf("-P should boot into the rendered document, frame:\n%s", preview)
+	}
+	// gote's own chrome is masked away; what remains is the reader's one-line exit hint.
+	if strings.Contains(preview, "sidebar") || strings.Contains(preview, "docs") {
+		t.Fatalf("the reader should mask gote's breadcrumb and help bar, frame:\n%s", preview)
+	}
+	if !strings.Contains(preview, "esc back") {
+		t.Fatalf("the reader should still say how to leave, frame:\n%s", preview)
+	}
+
+	// Everything that opens no markdown document launches exactly as it always did.
+	for name, opts := range map[string]Options{
+		"non-markdown file": {Mode: ModeFile, File: other, Preview: true},
+		"no file at all":    {Preview: true},
+	} {
+		if got := frame(opts); strings.Contains(got, "Heading") {
+			t.Errorf("%s should launch normally, frame:\n%s", name, got)
 		}
 	}
 }
@@ -925,6 +1034,27 @@ func TestMinimalFrame(t *testing.T) {
 	if !strings.Contains(ordLines[len(ordLines)-1], "sidebar") {
 		t.Fatalf("the ordinary launch's last row should be the help bar, got %q", ordLines[len(ordLines)-1])
 	}
+}
+
+// pumpModel is pump for a flow whose messages move the navigation STACK. Router is a
+// value model, so a push only survives if the model each Update returns is threaded
+// into the next one; pump's screen-level mutations survive a discarded copy, a push
+// does not.
+func pumpModel(m tea.Model, cmd tea.Cmd) tea.Model {
+	for depth := 0; cmd != nil && depth < 8; depth++ {
+		msg := cmd()
+		if msg == nil {
+			return m
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				m = pumpModel(m, c)
+			}
+			return m
+		}
+		m, cmd = m.Update(msg)
+	}
+	return m
 }
 
 // pump runs cmd — flattening the batches Init and Update hand back — and feeds every
@@ -1291,7 +1421,7 @@ func TestHomeEditorContextItems(t *testing.T) {
 	s, sh := newHome(t)
 
 	rows := s.editorContextItems(sh)
-	want := []string{"Toggle preview", "Toggle wrap", "Toggle line numbers"}
+	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers"}
 	if len(rows) != len(want) {
 		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
 	}
@@ -1304,17 +1434,18 @@ func TestHomeEditorContextItems(t *testing.T) {
 		}
 	}
 
-	// The scratch buffer is previewable; a .txt doc is not.
-	if rows[0].Disabled {
-		t.Error("the scratch buffer is markdown-previewable, so the row should be live")
+	// The scratch buffer is previewable; a .txt doc is not. Both preview rows are gated.
+	if rows[0].Disabled || rows[1].Disabled {
+		t.Error("the scratch buffer is markdown-previewable, so the rows should be live")
 	}
 	s.currentPath = filepath.Join(t.TempDir(), "notes.txt")
-	if !s.editorContextItems(sh)[0].Disabled {
-		t.Error("the preview row should be muted for a document the preview refuses")
+	muted := s.editorContextItems(sh)
+	if !muted[0].Disabled || !muted[1].Disabled {
+		t.Error("the preview rows should be muted for a document the preview refuses")
 	}
 
 	before := s.editor.WrapMode()
-	if act := rows[1].Pick(sh); act.Msg == nil {
+	if act := rows[2].Pick(sh); act.Msg == nil {
 		t.Error("a row's Pick must pop the menu itself")
 	}
 	if s.editor.WrapMode() == before {

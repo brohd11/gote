@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/brohd11/gote/internal/app"
@@ -64,6 +65,8 @@ func TestResolveOptions(t *testing.T) {
 		depthSet bool
 		exts     []string
 		extsSet  bool
+		vault    bool
+		preview  bool
 
 		wantMode  app.Mode
 		wantDir   string
@@ -72,6 +75,7 @@ func TestResolveOptions(t *testing.T) {
 		wantDepth int
 		wantSet   bool
 		wantExts  []string
+		wantList  bool
 		wantErr   bool
 	}{
 		{name: "bare", wantMode: app.ModeHome},
@@ -160,14 +164,71 @@ func TestResolveOptions(t *testing.T) {
 			name: "unknown name is still a new file", args: []string{"no-such-vault"},
 			wantMode: app.ModeFile, wantFile: filepath.Join(cwd, "no-such-vault"),
 		},
+		{
+			// --vault: the same name, reached the same way, but by the vault rung alone.
+			name: "vault flag", args: []string{vaultName}, vault: true,
+			wantMode: app.ModeVault, wantVault: vaultName, wantDir: dir,
+		},
+		{
+			// The point of the flag: the file that shadows the name no longer wins.
+			name: "vault flag beats a shadowing file", args: []string{"shadow-vault"}, vault: true,
+			wantMode: app.ModeVault, wantVault: "shadow-vault", wantDir: dir,
+		},
+		{
+			// Still a recursive root, so the depth still applies.
+			name: "vault flag with depth", args: []string{vaultName, "3"}, vault: true,
+			wantMode: app.ModeVault, wantVault: vaultName, wantDir: dir, wantDepth: 3, wantSet: true,
+		},
+		{
+			// Nothing to open and nothing wrong: the listing is the whole point.
+			name: "vault flag alone", vault: true, wantList: true,
+		},
+		{
+			// A typo lists too, but fails — the reading that used to open an empty buffer.
+			name: "vault flag with unknown name", args: []string{"no-such-vault"}, vault: true,
+			wantList: true, wantErr: true,
+		},
+		{
+			// "here" is a keyword only on the filesystem ladder, which --vault leaves.
+			name: "vault flag does not know here", args: []string{hereArg}, vault: true,
+			wantList: true, wantErr: true,
+		},
+		{
+			// Configured but broken: the name matched, so there is nothing to list.
+			name: "vault flag with broken vault", args: []string{"broken-vault"}, vault: true,
+			wantErr: true,
+		},
+		{
+			// Two readings of one argument; refusing beats picking one.
+			name: "vault flag with scan", args: []string{vaultName}, vault: true, scan: true,
+			wantErr: true,
+		},
+		{
+			// -P is a request, not an assertion about the target: the grammar passes it
+			// through untouched and the app decides whether it has a document to read.
+			name: "preview flag on a file", args: []string{file}, preview: true,
+			wantMode: app.ModeFile, wantFile: file,
+		},
+		{
+			name: "preview flag on a scan", args: []string{hereArg}, preview: true,
+			wantMode: app.ModeScan, wantDir: cwd,
+		},
+		{
+			name: "preview flag on a vault", args: []string{vaultName}, preview: true,
+			wantMode: app.ModeVault, wantVault: vaultName, wantDir: dir,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			opts, err := resolveOptions(tc.args, flags{
+			opts, list, err := resolveOptions(tc.args, flags{
 				scan: tc.scan, depth: tc.depth, depthSet: tc.depthSet,
-				exts: tc.exts, extsSet: tc.extsSet,
+				exts: tc.exts, extsSet: tc.extsSet, vault: tc.vault, preview: tc.preview,
 			}, lookupVault)
+			// Asserted before the error bail-out: a misnamed vault both lists and fails.
+			if list != tc.wantList {
+				t.Errorf("listVaults = %v, want %v", list, tc.wantList)
+			}
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("resolveOptions(%v) should have failed, got %+v", tc.args, opts)
@@ -193,6 +254,9 @@ func TestResolveOptions(t *testing.T) {
 				t.Errorf("depth = %d (set %v), want %d (set %v)",
 					opts.Depth, opts.DepthSet, tc.wantDepth, tc.wantSet)
 			}
+			if opts.Preview != tc.preview {
+				t.Errorf("preview = %v, want %v", opts.Preview, tc.preview)
+			}
 			if !reflect.DeepEqual(opts.Exts, tc.wantExts) || opts.ExtsSet != tc.extsSet {
 				t.Errorf("exts = %v (set %v), want %v (set %v)",
 					opts.Exts, opts.ExtsSet, tc.wantExts, tc.extsSet)
@@ -204,11 +268,36 @@ func TestResolveOptions(t *testing.T) {
 // TestResolveOptionsAbs: paths are absolute by the time they reach the app, so the
 // breadcrumb and the editor's save target don't depend on the cwd afterwards.
 func TestResolveOptionsAbs(t *testing.T) {
-	opts, err := resolveOptions([]string{"root_test.go"}, flags{}, nil)
+	opts, _, err := resolveOptions([]string{"root_test.go"}, flags{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.Mode != app.ModeFile || !filepath.IsAbs(opts.File) {
 		t.Fatalf("a relative file should resolve to an absolute path, got %+v", opts)
+	}
+}
+
+// TestPrintVaults pins the listing a bare --vault prints: aligned to the longest name,
+// the configured default marked, and an empty config saying so rather than printing a
+// header over nothing.
+func TestPrintVaults(t *testing.T) {
+	var b strings.Builder
+	printVaults(&b, []app.VaultEntry{
+		{Name: "archive", Path: "~/old/notes"},
+		{Name: "main-vault", Path: "~/notes", Default: true},
+		{Name: "work", Path: "~/src/work-docs"},
+	})
+	want := "Configured vaults:\n" +
+		"  archive     ~/old/notes\n" +
+		"  main-vault  ~/notes  · default\n" +
+		"  work        ~/src/work-docs\n"
+	if b.String() != want {
+		t.Errorf("printVaults wrote:\n%s\nwant:\n%s", b.String(), want)
+	}
+
+	b.Reset()
+	printVaults(&b, nil)
+	if !strings.Contains(b.String(), "No vaults are configured") {
+		t.Errorf("an empty config should say so, got %q", b.String())
 	}
 }

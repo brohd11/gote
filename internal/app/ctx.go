@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -34,6 +35,7 @@ type Ctx struct {
 	Depth     int
 	Filter    DocFilter // which files the lists seed from
 	NewExt    string    // extension "+ new file" appends to an extensionless name
+	Preview   bool      // --preview: boot straight into the full-screen reader
 	Files     []DocFile
 	Config    Config
 
@@ -61,6 +63,7 @@ type Options struct {
 	DepthSet bool
 	Exts     []string // --ext; replaces Config.Extensions, honored only when ExtsSet
 	ExtsSet  bool
+	Preview  bool // --preview; a request the launch honors only when it opens a document
 }
 
 // New builds the context from the loaded config and the CLI's launch options, and
@@ -71,6 +74,7 @@ func New(version string, cfg Config, opts Options) *Ctx {
 		Mode:      opts.Mode,
 		Filter:    cfg.Filter(),
 		Depth:     cfg.ScanDepth,
+		Preview:   opts.Preview,
 		Config:    cfg,
 		Open:      map[string]*components.EditorScreen{},
 		OpenRoots: map[string]string{},
@@ -149,6 +153,27 @@ func LookupVault(cfg Config, name string) (path string, ok bool, err error) {
 	}
 	path, err = vaultPath(cfg, name)
 	return path, true, err
+}
+
+// VaultEntry is one configured vault as a caller outside the TUI sees it: the name it
+// is reached by and the path exactly as config.yml writes it. Unnormalized on purpose —
+// a vault whose directory has gone missing must still appear in the listing that
+// explains why, which normalizeVaultPath would turn into an error instead.
+type VaultEntry struct {
+	Name    string
+	Path    string
+	Default bool
+}
+
+// VaultList returns every configured vault sorted by name. Sorted here rather than at
+// each call site so the CLI listing and the TUI vault menu cannot drift apart.
+func VaultList(cfg Config) []VaultEntry {
+	entries := make([]VaultEntry, 0, len(cfg.Vaults))
+	for name, v := range cfg.Vaults {
+		entries = append(entries, VaultEntry{Name: name, Path: v.Path, Default: name == cfg.Default})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return entries
 }
 
 // AddVault validates and persists a new named vault. Config is replaced in memory

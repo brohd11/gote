@@ -2,6 +2,7 @@ package app
 
 import (
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -25,6 +26,11 @@ var (
 	sidebarKey = key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "sidebar"))
 	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
+	// The full-screen reader gets its own key rather than a third rung on ctrl+p: full
+	// screen is a place you go, not a state you cycle past on the way back to the editor.
+	// alt+p and not ctrl+shift+p — bubbletea v1 attaches shift only to navigation keys, so
+	// a terminal delivers ctrl+shift+p as a bare "P" typed into the buffer.
+	fullPreviewKey = key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "full preview"))
 	// alt+z, not ctrl+w: ctrl+w is the editor's own delete-word-back (and readline's),
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
@@ -39,8 +45,8 @@ var (
 // The preview modes ctrl+p cycles through. The render shows up as a pane beside the
 // editor rather than as an overlay over it: side by side is the shape a preview
 // actually gets used in, and it is the only shape that lets it be read against the
-// SOURCE. The full-width overlay is still built (previewScreen) but parked off the
-// cycle.
+// SOURCE. The full-width reader is alt+p's (previewScreen), off this cycle entirely —
+// it is a pushed screen with no layout state, so there is nothing here to track.
 const (
 	previewOff  = iota // editor only
 	previewPane        // the custom reader, live, beside the editor
@@ -57,22 +63,23 @@ type ReseedMsg struct{}
 // instance so the router never re-Inits it (a re-Init would re-run the editor's file
 // load over a dirty buffer).
 type homeScreen struct {
-	modular      *components.ModularScreen
-	docsPanel    *components.CompactListPanel
-	openPanel    *components.CompactListPanel
-	editorPanel  *components.ScreenPanel
-	previewPanel *components.ScrollContainer // the live preview pane
-	editor       *components.EditorScreen    // the editor pane's live child (ScreenPanel exposes none)
-	currentPath  string                      // the doc the editor pane is showing; "" = the scratch buffer
-	sidebar      bool
-	minimal      bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
-	preview      int          // previewOff/previewPane
-	previewSrc   string       // the buffer text the pane was last rendered from
-	previewW     int          // the width it was last rendered at (a resize must re-wrap)
-	previewMap   []int        // that render's source line → pane row map (RenderMarkdownMapped)
-	previewAt    int          // the editor scroll offset the pane was last synced to; -1 re-syncs
-	sh           *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
-	w, h         int
+	modular       *components.ModularScreen
+	docsPanel     *components.CompactListPanel
+	openPanel     *components.CompactListPanel
+	editorPanel   *components.ScreenPanel
+	previewPanel  *components.ScrollContainer // the live preview pane
+	editor        *components.EditorScreen    // the editor pane's live child (ScreenPanel exposes none)
+	currentPath   string                      // the doc the editor pane is showing; "" = the scratch buffer
+	sidebar       bool
+	minimal       bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
+	launchPreview bool         // --preview: push the reader from Init, once
+	preview       int          // previewOff/previewPane
+	previewSrc    string       // the buffer text the pane was last rendered from
+	previewW      int          // the width it was last rendered at (a resize must re-wrap)
+	previewMap    []int        // that render's source line → pane row map (RenderMarkdownMapped)
+	previewAt     int          // the editor scroll offset the pane was last synced to; -1 re-syncs
+	sh            *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
+	w, h          int
 }
 
 var _ core.Screen = (*homeScreen)(nil)
@@ -116,15 +123,45 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	} else {
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
+	// --preview needs a document to read, and ModeFile is the only launch that opens one
+	// here — so a vault or scan launch never sets this, which is how the flag comes to be
+	// silently ignored for every target that is not a single markdown file.
+	s.launchPreview = c.Preview && minimal && s.previewable()
 	s.editorPanel = components.NewScreenPanel(s.editor)
 	s.previewPanel = components.NewScrollContainer("preview")
 	s.modular = s.buildModular()
 	return s
 }
 
+// Init stashes Shared, boots the layout, and — for a --preview launch — pushes the reader
+// over it. The push travels as an Action through the cmd queue, which the router resolves
+// against the stack the same way it resolves one returned from Update.
+//
+// The reader renders the file off DISK rather than the editor's buffer, because at this
+// point the buffer is still empty: EditorScreen.Init dispatches its read as a cmd, and
+// DocScreen renders once and re-renders only on a width change, so a reader built on the
+// buffer would race that read and could stay blank. Disk is exactly the content the read
+// is about to deliver. Every later alt+p renders the live buffer.
 func (s *homeScreen) Init(sh *core.Shared) tea.Cmd {
 	s.sh = sh
-	return s.modular.Init(sh)
+	cmd := s.modular.Init(sh)
+	if !s.launchPreview {
+		return cmd
+	}
+	s.launchPreview = false
+	path := s.currentPath
+	doc := s.previewScreen(func() string { return fileText(path) })
+	return tea.Batch(cmd, func() tea.Msg { return core.Push(doc) })
+}
+
+// fileText reads a document for the launch reader. An unreadable path renders as an empty
+// page — the same thing the editor about to open behind it will show for a new file.
+func fileText(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // Update intercepts the wrapper's own keys, then delegates to the current modular
@@ -145,6 +182,12 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		}
 		if core.MatchKey(k, previewKey) {
 			return s, s.cyclePreview()
+		}
+		if core.MatchKey(k, fullPreviewKey) {
+			if !s.previewable() {
+				return s, core.Action{}
+			}
+			return s, core.Push(s.previewScreen(s.editor.Text))
 		}
 		if core.MatchKey(k, wrapKey) {
 			s.editor.ToggleWrap()
@@ -198,32 +241,51 @@ func (s *homeScreen) cyclePreview() core.Action {
 		s.setPreview(previewPane)
 	case previewPane:
 		s.setPreview(previewOff)
-		// The parked overlay hangs off this rung: uncomment to make the cycle
-		// off → pane → full-width overlay → off again.
-		// return core.Push(s.previewScreen())
 	}
 	return core.Action{}
 }
 
-// previewScreen is the PARKED full-width overlay over the live buffer — built and
-// tested, but off the ctrl+p cycle while the side-by-side pane is being lived with.
-// Re-enable it from the previewPane rung of cyclePreview.
+// previewScreen is alt+p's full-width reader, pushed over whatever the editor is doing.
+// alt+p and esc both pop it, which is why the home screen tracks only the pane — an esc
+// it never sees cannot desync it, and the pane it was opened over is still there
+// underneath on the way back.
 //
-// It renders the LIVE buffer rather than a snapshot, so it is the same document the
-// pane shows; ctrl+p and esc both pop it, which is why the home screen tracks only
-// the pane — an esc it never sees cannot desync it.
-func (s *homeScreen) previewScreen() *components.DocScreen {
-	return components.NewDocScreen(components.DocOpts{
+// src is the document to render, deferred rather than passed as a string because the two
+// callers disagree about where it lives: alt+p hands over the editor's live buffer, while
+// the --preview launch reads the file off disk (see homeScreen.Init).
+func (s *homeScreen) previewScreen(src func() string) *previewDoc {
+	return &previewDoc{components.NewDocScreen(components.DocOpts{
 		Title:  "preview · " + s.previewName(),
 		Crumb:  "preview",
-		Render: func(width int) string { return components.RenderMarkdown(s.editor.Text(), width) },
+		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
 		OnKey: func(_ *core.Shared, k string) (core.Action, bool) {
-			if core.MatchKey(k, previewKey) {
+			if core.MatchKey(k, fullPreviewKey) {
 				return core.Pop(), true
 			}
 			return core.Action{}, false
 		},
-	})
+	})}
+}
+
+// previewDoc is the full-screen reader: bubblestack's read-only DocScreen plus the chrome
+// mask that makes it one. The router asks only the TOP screen for its mask, so without
+// this the breadcrumb (and, in ModeFile, everything homeScreen.ChromeMask had just
+// suppressed) would come back the moment the reader was pushed. The help bar stays: one
+// dim line naming the way out is not noise, it is the exit.
+type previewDoc struct{ *components.DocScreen }
+
+func (p *previewDoc) ChromeMask() core.ChromeMask {
+	mask := core.FullscreenMask()
+	mask.Help, mask.Status = false, false
+	return mask
+}
+
+// Update keeps the wrapper on the stack. DocScreen.Update answers with its own pointer,
+// which the router stores back — dropping this type, and with it the mask, on the first
+// keystroke the reader received.
+func (p *previewDoc) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
+	_, act := p.DocScreen.Update(sh, msg)
+	return p, act
 }
 
 // previewName labels the preview with the doc being edited, or the scratch buffer.
@@ -691,6 +753,9 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 	return []components.MenuItem{
 		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.cyclePreview())
+		}},
+		{Label: "Full preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
+			return core.Seq(core.Pop(), core.Push(s.previewScreen(s.editor.Text)))
 		}},
 		{Label: "Toggle wrap", Pick: func(*core.Shared) core.Action {
 			s.editor.ToggleWrap()

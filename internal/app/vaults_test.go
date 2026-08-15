@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/brohd11/bubblestack/components"
@@ -28,6 +29,32 @@ func TestVaultItemsSortedAndActive(t *testing.T) {
 	}
 	if got := items[1].(components.Item).Desc; got != "/alpha  · active" {
 		t.Fatalf("active vault description = %q", got)
+	}
+}
+
+// TestVaultList pins what the CLI listing reads: name order, the config's default
+// marked, and the path left exactly as written — a vault whose directory has gone
+// missing still has to appear in the listing that explains a misspelled name.
+func TestVaultList(t *testing.T) {
+	cfg := Config{
+		Default: "alpha",
+		Vaults: map[string]VaultConfig{
+			"zeta":  {Path: "/zeta"},
+			"alpha": {Path: "~/alpha"},
+			"mid":   {Path: "/gone/missing"},
+		},
+	}
+	got := VaultList(cfg)
+	want := []VaultEntry{
+		{Name: "alpha", Path: "~/alpha", Default: true},
+		{Name: "mid", Path: "/gone/missing"},
+		{Name: "zeta", Path: "/zeta"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("VaultList = %+v, want %+v", got, want)
+	}
+	if VaultList(Config{}) == nil {
+		t.Error("an empty config should list no vaults, not nil")
 	}
 }
 

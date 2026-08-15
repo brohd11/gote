@@ -36,7 +36,7 @@ func (s *homeScreen) helpText() string {
 	}
 	writeSection("general", []key.Binding{
 		key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit (confirms unsaved changes)")),
-		sidebarKey, actionsKey, previewKey, wrapKey, lineNumsKey, helpKey,
+		sidebarKey, actionsKey, previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey,
 	})
 	writeSection("docs list", []key.Binding{renameKey})
 	writeSection("editor", s.editor.HelpBindings())
