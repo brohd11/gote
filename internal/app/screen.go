@@ -332,17 +332,9 @@ func (s *homeScreen) setPreview(mode int) {
 	if s.preview == mode {
 		return
 	}
-	s.modular.SetFocused(false)
 	s.preview = mode
-	s.modular = s.buildModular()
-	if s.w > 0 {
-		s.modular.SetSize(s.sh, s.w, s.h)
-	}
-	s.modular.FocusSlot(s.editorSlot())
-	// Clearing the skip-cache is what makes REOPENING the pane work: the buffer has not
-	// changed since it was last up, so without this it would come back blank.
-	s.previewSrc, s.previewW, s.previewMap = "", 0, nil
-	s.previewAt = -1 // the pane re-syncs to wherever the editor is scrolled
+	s.rebuildModular(s.sh, s.editorSlot())
+	s.resetPreviewCache()
 	s.refreshPreview()
 	s.syncPreviewScroll()
 }
@@ -599,16 +591,10 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	s.docsPanel.SetItems(docRows(c))
 	s.openPanel.SetItems(nil)
 	s.preview = previewOff
-	s.previewSrc, s.previewW, s.previewMap = "", 0, nil
-	s.previewAt = -1
+	s.resetPreviewCache()
 	s.minimal = false
 	s.sidebar = true
-	s.modular.SetFocused(false)
-	s.modular = s.buildModular()
-	if s.w > 0 {
-		s.modular.SetSize(sh, s.w, s.h)
-	}
-	s.modular.FocusSlot(0)
+	s.rebuildModular(sh, 0)
 	return core.Seq(core.Async(cmd), core.ResetToRoot())
 }
 
@@ -642,23 +628,28 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	return core.Async(cmd)
 }
 
-// newFile pushes the floating line edit over the selected docs row. Anchor math:
-// the docs panel is column 0 row 0 of the layout, so its outer top-left is
-// (0, BodyY); its border takes one row, and the LineEdit anchor sits one row
-// above the covered row (its own top border) — the two cancel, so the anchor is
-// BodyY + the list-relative row. x=0 and width=sidebarWidth land the box's
-// borders exactly on the panel's own.
-func (s *homeScreen) newFile(sh *core.Shared) core.Action {
+// rowLineEdit builds a floating line edit sitting exactly over the selected docs row —
+// the shape both the new-file and rename boxes take. Anchor math: the docs panel is
+// column 0 row 0 of the layout, so its outer top-left is (0, BodyY); its border takes
+// one row, and the LineEdit anchor sits one row above the covered row (its own top
+// border) — the two cancel, so the anchor is BodyY + the list-relative row. x=0 and
+// width=sidebarWidth land the box's borders exactly on the panel's own.
+func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder, crumb string,
+	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
 	l := s.docsPanel.List()
 	row, ok := components.CompactListItemRow(l, l.Index())
 	if !ok {
 		row = 0 // the selected row is on-page by construction; never die on it
 	}
-	edit := components.NewLineEdit("name (a/b nests dirs)", 0, sh.BodyY()+row, sidebarWidth,
-		s.createFile, nil)
-	edit.Crumb = "new file"
+	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row, sidebarWidth, onDone, nil)
+	edit.Crumb = crumb
 	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
-	return core.Push(edit)
+	return edit
+}
+
+// newFile pushes the row-anchored line edit that names a document into being.
+func (s *homeScreen) newFile(sh *core.Shared) core.Action {
+	return core.Push(s.rowLineEdit(sh, "name (a/b nests dirs)", "new file", s.createFile))
 }
 
 // createFile is the line edit's OnDone: resolve the typed name against the doc
@@ -705,25 +696,17 @@ func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Acti
 	return s.renameFile(sh, di.doc), true
 }
 
-// renameFile pushes the floating line edit over the selected docs row, prefilled with
-// the doc's path relative to its origin root — the same shape createFile's box takes,
-// so editing the directory part moves the file as well as renaming it. The anchor math
-// is newFile's, for the same reasons documented there.
+// renameFile pushes the same row-anchored line edit newFile does, prefilled with the
+// doc's path relative to its origin root — so editing the directory part moves the file
+// as well as renaming it.
 func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
 	rel, err := filepath.Rel(doc.Root, doc.Path)
 	if err != nil {
 		rel = doc.Name // an unrelatable root still renames in place
 	}
-	l := s.docsPanel.List()
-	row, ok := components.CompactListItemRow(l, l.Index())
-	if !ok {
-		row = 0
-	}
-	edit := components.NewLineEdit("new name", 0, sh.BodyY()+row, sidebarWidth,
-		func(sh *core.Shared, name string) core.Action { return s.submitRename(sh, doc, rel, name) }, nil)
+	edit := s.rowLineEdit(sh, "new name", "rename",
+		func(sh *core.Shared, name string) core.Action { return s.submitRename(sh, doc, rel, name) })
 	edit.SetValue(rel)
-	edit.Crumb = "rename"
-	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
 	return core.Push(edit)
 }
 
@@ -895,12 +878,39 @@ func (s *homeScreen) setSidebar(visible bool) {
 	if s.minimal {
 		return
 	}
-	s.modular.SetFocused(false)
 	s.sidebar = visible
+	s.rebuildModular(s.sh, noFocus)
+}
+
+// noFocus tells rebuildModular to leave focus where the fresh layout auto-places it
+// (its first focusable slot) instead of moving it somewhere specific.
+const noFocus = -1
+
+// rebuildModular swaps in a layout built from the current sidebar/preview flags. The
+// order matters and is why this is one helper rather than four lines at each caller:
+// the outgoing screen's focused panel is blurred BEFORE it is discarded (otherwise a
+// panel keeps a focus ring it can never clear), the new screen only takes a size once
+// one is known, and focus is placed last, after the slots it names exist.
+//
+// focus is a slot index, or noFocus to accept the auto-focused first slot.
+func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) {
+	s.modular.SetFocused(false)
 	s.modular = s.buildModular()
 	if s.w > 0 {
-		s.modular.SetSize(s.sh, s.w, s.h)
+		s.modular.SetSize(sh, s.w, s.h)
 	}
+	if focus != noFocus {
+		s.modular.FocusSlot(focus)
+	}
+}
+
+// resetPreviewCache drops the memo of what the preview pane last rendered. Clearing it
+// is what makes REOPENING the pane work: the buffer has not changed since the pane was
+// last up, so the skip-on-unchanged check would otherwise bring it back blank. The
+// scroll anchor goes with it so the pane re-syncs to wherever the editor is scrolled.
+func (s *homeScreen) resetPreviewCache() {
+	s.previewSrc, s.previewW, s.previewMap = "", 0, nil
+	s.previewAt = -1
 }
 
 // buildModular lays the current combination out: the sidebar column is optional

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/core"
 
 	"github.com/charmbracelet/bubbles/key"
 )
@@ -34,8 +35,14 @@ func (s *homeScreen) helpText() string {
 		}
 		b.WriteString("\n")
 	}
+	// The quit row is assembled from the shared keymap rather than spelled out, so
+	// rebinding core.Keys.Quit reaches this overlay too. ctrl+c is not in that keymap —
+	// the router answers it directly (bubblestack/core/router_keys.go) — so it is named
+	// here alongside. The description is gote's own: quitting dirty prompts first.
+	quitKey := core.Hint("quit (confirms unsaved changes)",
+		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
 	writeSection("general", []key.Binding{
-		key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit (confirms unsaved changes)")),
+		quitKey,
 		sidebarKey, actionsKey, previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey,
 	})
 	writeSection("docs list", []key.Binding{renameKey})

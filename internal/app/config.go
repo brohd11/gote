@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/brohd11/goutil/configdir"
+	"github.com/brohd11/goutil/strutil"
 )
 
 // Config is the parsed ~/.gote/config.yml. A missing file yields the defaults, so a
@@ -39,13 +40,10 @@ func DefaultConfig() Config {
 	return Config{ScanDepth: 5, Vaults: map[string]VaultConfig{}}
 }
 
-// Dir is ~/.gote, gote's config home.
+// Dir is ~/.gote, gote's config home. The ~/.<app> convention itself is
+// goutil/configdir's; this pins gote's own name.
 func Dir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".gote"), nil
+	return configdir.Dir("gote")
 }
 
 // DocsDir is ~/.gote/docs, the home-mode document store. It sits one level below the
@@ -93,14 +91,10 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return cfg, nil
-	}
-	if err != nil {
-		return cfg, err
-	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	// Load unmarshals over the defaults, so keys the file omits keep them. A missing file
+	// is not an error and leaves them all in place; a malformed one may have half-written
+	// cfg before failing, so the defaults are rebuilt rather than returned half-parsed.
+	if err := configdir.Load(path, &cfg); err != nil {
 		return DefaultConfig(), err
 	}
 	normalizeExtensions(&cfg)
@@ -120,68 +114,30 @@ func normalizeExtensions(cfg *Config) {
 	cfg.Extensions = normalizeExts(cfg.Extensions)
 }
 
-// SaveConfig writes the complete gote config atomically. The temp file lives beside
-// config.yml so rename stays on one filesystem and a failed write cannot truncate a
-// working config.
+// SaveConfig writes the complete gote config atomically — a failed write cannot truncate
+// a working config. The atomic-write mechanics are goutil/configdir's (ported from this
+// very function when the four apps' copies were collapsed into one).
 func SaveConfig(cfg Config) error {
 	dir, err := Dir()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, "config-*.yml")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		_ = f.Close()
-		if !ok {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if err := f.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, filepath.Join(dir, "config.yml")); err != nil {
-		return err
-	}
-	ok = true
-	return nil
+	return configdir.SaveAtomic(dir, "config.yml", cfg)
 }
 
 // normalizeVaultPath accepts the shell-friendly forms users type into the New Vault
-// form and returns the stable absolute path stored in YAML. Only the current user's
-// home shorthand is expanded; ~other-user is rejected rather than guessed.
+// form and returns the stable absolute path stored in YAML. Tilde handling is the
+// shared strutil.ExpandHome's — only the current user's home shorthand is expanded and
+// ~other-user is rejected rather than guessed — and the required/absolute/must-be-a-
+// directory checks around it are this form's own.
 func normalizeVaultPath(raw string) (string, error) {
 	p := strings.TrimSpace(raw)
 	if p == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	if p == "~" || strings.HasPrefix(p, "~"+string(filepath.Separator)) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		p = filepath.Join(home, strings.TrimPrefix(p, "~"+string(filepath.Separator)))
-	} else if strings.HasPrefix(p, "~") {
-		return "", fmt.Errorf("only ~/ paths are supported")
+	p, err := strutil.ExpandHome(p)
+	if err != nil {
+		return "", err
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
