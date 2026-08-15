@@ -39,9 +39,9 @@ type Ctx struct {
 	Files     []DocFile
 	Config    Config
 
-	Open      map[string]*components.EditorScreen
-	OpenOrder []string          // Open's insertion order, for the open-docs list
-	OpenRoots map[string]string // path's origin root; stable across mode switches
+	// open is the set of open buffers — the editor per path, their order, and each
+	// path's origin root. One type because the three always move together; see openset.go.
+	open openSet
 }
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
@@ -70,14 +70,13 @@ type Options struct {
 // performs the initial seed so the first screen has rows to show.
 func New(version string, cfg Config, opts Options) *Ctx {
 	c := &Ctx{
-		Version:   version,
-		Mode:      opts.Mode,
-		Filter:    cfg.Filter(),
-		Depth:     cfg.ScanDepth,
-		Preview:   opts.Preview,
-		Config:    cfg,
-		Open:      map[string]*components.EditorScreen{},
-		OpenRoots: map[string]string{},
+		Version: version,
+		Mode:    opts.Mode,
+		Filter:  cfg.Filter(),
+		Depth:   cfg.ScanDepth,
+		Preview: opts.Preview,
+		Config:  cfg,
+		open:    newOpenSet(),
 	}
 	if opts.DepthSet {
 		c.Depth = opts.Depth
@@ -217,9 +216,7 @@ func (c *Ctx) SwitchVault(name string) error {
 	if err != nil {
 		return err
 	}
-	c.Open = map[string]*components.EditorScreen{}
-	c.OpenOrder = nil
-	c.OpenRoots = map[string]string{}
+	c.open.reset()
 	c.Mode, c.VaultName, c.ScanDir = ModeVault, name, path
 	c.FilePath = ""
 	c.Seed()
@@ -231,19 +228,20 @@ func (c *Ctx) SwitchVault(name string) error {
 // newly created editors, since an already-open doc keeps its existing editor — and its
 // buffer — untouched. See homeScreen.editorOpts for what gote passes.
 func (c *Ctx) OpenDoc(path string, opts components.EditorOpts) *components.EditorScreen {
-	if ed, ok := c.Open[path]; ok {
+	if ed, ok := c.open.get(path); ok {
 		return ed
-	}
-	if c.OpenRoots == nil {
-		c.OpenRoots = map[string]string{}
 	}
 	opts.Path = path
 	ed := components.NewEditorScreen(opts)
-	c.Open[path] = ed
-	c.OpenRoots[path] = c.rootForPath(path)
-	c.OpenOrder = append(c.OpenOrder, path)
+	c.open.add(path, c.rootForPath(path), ed)
 	return ed
 }
+
+// Doc returns the editor open for path, if there is one.
+func (c *Ctx) Doc(path string) (*components.EditorScreen, bool) { return c.open.get(path) }
+
+// EachDoc visits every open buffer in opening order.
+func (c *Ctx) EachDoc(fn func(path string, ed *components.EditorScreen)) { c.open.each(fn) }
 
 // RekeyDoc re-files ed under newPath after a save-as, keeping Open and OpenOrder
 // consistent with a buffer that renamed itself. old == "" registers a buffer that was
@@ -256,76 +254,19 @@ func (c *Ctx) RekeyDoc(old, newPath string, ed *components.EditorScreen) {
 	if newPath == "" || ed == nil {
 		return
 	}
-	if old == newPath && c.Open[newPath] == ed {
+	if cur, ok := c.open.get(newPath); old == newPath && ok && cur == ed {
 		return
 	}
-	root := c.OpenRoots[old]
-	if root == "" {
-		root = filepath.Dir(newPath)
-	}
-	delete(c.Open, old)
-	delete(c.OpenRoots, old)
-	c.Open[newPath] = ed
-	if c.OpenRoots == nil {
-		c.OpenRoots = map[string]string{}
-	}
-	c.OpenRoots[newPath] = root
-
-	at := -1
-	filtered := c.OpenOrder[:0]
-	for _, p := range c.OpenOrder {
-		switch p {
-		case old:
-			at = len(filtered)
-			filtered = append(filtered, newPath) // in place, so the row stays put
-		case newPath:
-			if at < 0 && old == "" {
-				at = len(filtered) // an untracked buffer taking an open path's slot
-				filtered = append(filtered, newPath)
-			}
-		default:
-			filtered = append(filtered, p)
-		}
-	}
-	c.OpenOrder = filtered
-	if at < 0 {
-		c.OpenOrder = append(c.OpenOrder, newPath)
-	}
+	c.open.rekey(old, newPath, ed)
 }
 
 // OpenDocs lists the open buffers in opening order, for the open-docs list.
-func (c *Ctx) OpenDocs() []DocFile {
-	docs := make([]DocFile, 0, len(c.OpenOrder))
-	for _, path := range c.OpenOrder {
-		docs = append(docs, DocFile{Name: docName(path), Path: path, Root: c.OpenRoots[path]})
-	}
-	return docs
-}
+func (c *Ctx) OpenDocs() []DocFile { return c.open.docs() }
 
 // CloseDoc removes path from the open set (an empty or unknown path is a no-op,
 // which makes the scratch editor's exit free) and returns the doc to switch to:
 // the one after it in open order, else the new last, else "" when none remain.
-func (c *Ctx) CloseDoc(path string) (next string) {
-	if _, ok := c.Open[path]; !ok {
-		return ""
-	}
-	delete(c.Open, path)
-	delete(c.OpenRoots, path)
-	for i, p := range c.OpenOrder {
-		if p != path {
-			continue
-		}
-		c.OpenOrder = append(c.OpenOrder[:i], c.OpenOrder[i+1:]...)
-		switch {
-		case i < len(c.OpenOrder):
-			return c.OpenOrder[i]
-		case len(c.OpenOrder) > 0:
-			return c.OpenOrder[len(c.OpenOrder)-1]
-		}
-		return ""
-	}
-	return ""
-}
+func (c *Ctx) CloseDoc(path string) (next string) { return c.open.remove(path) }
 
 // rootForPath records where a document came from when it first enters Open. Seeded
 // docs carry an exact root; other paths use the active mode, while a standalone or

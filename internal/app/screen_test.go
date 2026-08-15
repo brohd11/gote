@@ -211,7 +211,7 @@ func TestEditorExitClosesDoc(t *testing.T) {
 
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // clean buffer: closes b
 	s.Receive(sh, ReseedMsg{})                   // the router applies the hook's broadcast
-	if _, ok := c.Open[b]; ok {
+	if _, ok := c.open.byPath[b]; ok {
 		t.Fatal("the exited doc must leave the open set")
 	}
 	if s.currentPath != a {
@@ -250,7 +250,7 @@ func TestEditorEscReleasesFocus(t *testing.T) {
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("esc should hand focus to the docs list, got %s", got)
 	}
-	if _, ok := c.Open[path]; !ok {
+	if _, ok := c.open.byPath[path]; !ok {
 		t.Fatal("esc must not close the buffer")
 	}
 	if s.currentPath != path {
@@ -940,10 +940,10 @@ func TestEditorSavedRekeys(t *testing.T) {
 		t.Fatal("a save must not swap the pane's editor")
 	}
 	c := Of(sh)
-	if c.Open[renamed] != ed {
+	if c.open.byPath[renamed] != ed {
 		t.Fatal("the new path should resolve to the same buffer")
 	}
-	if _, ok := c.Open[old]; ok {
+	if _, ok := c.open.byPath[old]; ok {
 		t.Fatal("the old path must leave the open set")
 	}
 	// The close path keys off currentPath, so the rename is what keeps ctrl+x working.
@@ -970,7 +970,7 @@ func TestMinimalMode(t *testing.T) {
 	if s.currentPath != file {
 		t.Fatalf("the editor should boot on %q, got %q", file, s.currentPath)
 	}
-	if Of(sh).Open[file] != s.editor {
+	if Of(sh).open.byPath[file] != s.editor {
 		t.Fatal("the minimal buffer should be registered in the open set, as a picked doc is")
 	}
 	if mask := s.ChromeMask(); !mask.Help || !mask.Breadcrumb {
@@ -1225,7 +1225,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	if act := s.requestVaultSwitch(sh, "notes"); msgType(act) != "core.pushMsg" {
 		t.Fatalf("dirty switch should push the unsaved popup, got %s", msgType(act))
 	}
-	if c.Mode == ModeVault || s.editor != oldEditor || c.Open[oldPath] != oldEditor {
+	if c.Mode == ModeVault || s.editor != oldEditor || c.open.byPath[oldPath] != oldEditor {
 		t.Fatal("requesting a dirty switch mutated the session before confirmation")
 	}
 
@@ -1236,8 +1236,8 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
 		t.Fatalf("active vault = mode %v name %q dir %q", c.Mode, c.VaultName, c.ScanDir)
 	}
-	if len(c.Open) != 0 || len(c.OpenOrder) != 0 || len(c.OpenRoots) != 0 {
-		t.Fatalf("confirmed switch left open state: %v %v %v", c.Open, c.OpenOrder, c.OpenRoots)
+	if len(c.open.byPath) != 0 || len(c.open.order) != 0 || len(c.open.roots) != 0 {
+		t.Fatalf("confirmed switch left open state: %v %v %v", c.open.byPath, c.open.order, c.open.roots)
 	}
 	if s.editor == oldEditor || s.editor.Dirty() || s.currentPath != "" {
 		t.Fatal("confirmed switch should install a fresh clean scratch editor")
@@ -1402,14 +1402,14 @@ func TestRenameOpenDoc(t *testing.T) {
 		t.Fatalf("the editor should have followed the file, crumb = %q", got)
 	}
 	c := Of(sh)
-	if c.Open[renamed] != ed {
+	if c.open.byPath[renamed] != ed {
 		t.Fatal("the new path should resolve to the same buffer")
 	}
-	if _, ok := c.Open[filepath.Join(dir, "old.md")]; ok {
+	if _, ok := c.open.byPath[filepath.Join(dir, "old.md")]; ok {
 		t.Fatal("the old path must leave the open set")
 	}
-	if len(c.OpenOrder) != 1 || c.OpenOrder[0] != renamed {
-		t.Fatalf("OpenOrder should hold only the new path, got %v", c.OpenOrder)
+	if len(c.open.order) != 1 || c.open.order[0] != renamed {
+		t.Fatalf("OpenOrder should hold only the new path, got %v", c.open.order)
 	}
 
 	// And clicking the renamed row afterwards is still just a switch — the sequence the
@@ -1511,8 +1511,8 @@ func TestReselectOpenDocKeepsBuffer(t *testing.T) {
 	if !ed.Dirty() {
 		t.Fatal("the dirty flag should have survived the switch")
 	}
-	if c := Of(sh); len(c.Open) != 1 {
-		t.Fatalf("re-selecting must not open a second buffer, open = %d", len(c.Open))
+	if c := Of(sh); len(c.open.byPath) != 1 {
+		t.Fatalf("re-selecting must not open a second buffer, open = %d", len(c.open.byPath))
 	}
 }
 

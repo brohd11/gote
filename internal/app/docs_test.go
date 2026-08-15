@@ -200,7 +200,7 @@ func TestSeedModes(t *testing.T) {
 
 	ed := c.OpenDoc(c.Files[0].Path, components.EditorOpts{})
 	c.Seed()
-	if got := c.Open[c.Files[0].Path]; got != ed {
+	if got := c.open.byPath[c.Files[0].Path]; got != ed {
 		t.Fatal("reseeding must not drop open buffers")
 	}
 }

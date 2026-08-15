@@ -13,13 +13,13 @@ import (
 // and unknown/empty paths are no-ops (the scratch editor's exit rides on the last one).
 func TestCloseDoc(t *testing.T) {
 	newCtx := func(paths ...string) *Ctx {
-		c := &Ctx{Open: map[string]*components.EditorScreen{}}
+		c := &Ctx{open: newOpenSet()}
 		for _, p := range paths {
 			c.OpenDoc(p, components.EditorOpts{})
 		}
 		return c
 	}
-	order := func(c *Ctx) []string { return append([]string{}, c.OpenOrder...) }
+	order := func(c *Ctx) []string { return append([]string{}, c.open.order...) }
 
 	c := newCtx("a", "b", "c")
 	if next := c.CloseDoc("b"); next != "c" {
@@ -28,7 +28,7 @@ func TestCloseDoc(t *testing.T) {
 	if got := order(c); len(got) != 2 || got[0] != "a" || got[1] != "c" {
 		t.Fatalf("open order after close = %v, want [a c]", got)
 	}
-	if _, ok := c.Open["b"]; ok {
+	if _, ok := c.open.byPath["b"]; ok {
 		t.Fatal("the closed doc must leave the open set")
 	}
 
@@ -159,10 +159,10 @@ func TestAddAndSwitchVault(t *testing.T) {
 	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
 		t.Fatalf("switched context = %+v", c)
 	}
-	if len(c.Open) != 0 || len(c.OpenOrder) != 0 || len(c.OpenRoots) != 0 {
-		t.Fatalf("switch should close open session: open=%v order=%v roots=%v", c.Open, c.OpenOrder, c.OpenRoots)
+	if len(c.open.byPath) != 0 || len(c.open.order) != 0 || len(c.open.roots) != 0 {
+		t.Fatalf("switch should close open session: open=%v order=%v roots=%v", c.open.byPath, c.open.order, c.open.roots)
 	}
-	if c.Open[filepath.Join(home, "old.md")] == old {
+	if c.open.byPath[filepath.Join(home, "old.md")] == old {
 		t.Fatal("old editor survived vault switch")
 	}
 }
@@ -172,13 +172,13 @@ func TestAddAndSwitchVault(t *testing.T) {
 // rows around it.
 func TestRekeyDoc(t *testing.T) {
 	newCtx := func(paths ...string) *Ctx {
-		c := &Ctx{Open: map[string]*components.EditorScreen{}}
+		c := &Ctx{open: newOpenSet()}
 		for _, p := range paths {
 			c.OpenDoc(p, components.EditorOpts{})
 		}
 		return c
 	}
-	order := func(c *Ctx) []string { return append([]string{}, c.OpenOrder...) }
+	order := func(c *Ctx) []string { return append([]string{}, c.open.order...) }
 	eq := func(t *testing.T, got, want []string) {
 		t.Helper()
 		if len(got) != len(want) {
@@ -193,13 +193,13 @@ func TestRekeyDoc(t *testing.T) {
 
 	// A rename keeps the row where it was, so the selection doesn't jump.
 	c := newCtx("a", "b", "c")
-	ed := c.Open["b"]
+	ed := c.open.byPath["b"]
 	c.RekeyDoc("b", "b2", ed)
 	eq(t, order(c), []string{"a", "b2", "c"})
-	if c.Open["b2"] != ed {
+	if c.open.byPath["b2"] != ed {
 		t.Fatal("the renamed path should answer with the same editor")
 	}
-	if _, ok := c.Open["b"]; ok {
+	if _, ok := c.open.byPath["b"]; ok {
 		t.Fatal("the old path must leave the open set")
 	}
 
@@ -208,25 +208,25 @@ func TestRekeyDoc(t *testing.T) {
 	scratch := components.NewEditorScreen(components.EditorOpts{})
 	c.RekeyDoc("", "fresh.md", scratch)
 	eq(t, order(c), []string{"a", "fresh.md"})
-	if c.Open["fresh.md"] != scratch {
+	if c.open.byPath["fresh.md"] != scratch {
 		t.Fatal("saving the scratch buffer should register it")
 	}
 
 	// Saving onto a path another buffer holds leaves one row for it, not two.
 	c = newCtx("a", "b")
-	ed = c.Open["a"]
+	ed = c.open.byPath["a"]
 	c.RekeyDoc("a", "b", ed)
 	eq(t, order(c), []string{"b"})
-	if c.Open["b"] != ed {
+	if c.open.byPath["b"] != ed {
 		t.Fatal("the saved buffer should be the one the path resolves to")
 	}
 
 	// The ordinary same-path save changes nothing.
 	c = newCtx("a", "b")
-	ed = c.Open["a"]
+	ed = c.open.byPath["a"]
 	c.RekeyDoc("a", "a", ed)
 	eq(t, order(c), []string{"a", "b"})
-	if c.Open["a"] != ed {
+	if c.open.byPath["a"] != ed {
 		t.Fatal("a same-path save must leave the entry alone")
 	}
 }
@@ -235,11 +235,10 @@ func TestOpenDocsKeepOriginRoot(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes", "todo.md")
 	c := &Ctx{
-		Mode:      ModeScan,
-		ScanDir:   root,
-		Files:     []DocFile{{Name: "todo.md", Path: path, Root: root}},
-		Open:      map[string]*components.EditorScreen{},
-		OpenRoots: map[string]string{},
+		Mode:    ModeScan,
+		ScanDir: root,
+		Files:   []DocFile{{Name: "todo.md", Path: path, Root: root}},
+		open:    newOpenSet(),
 	}
 	ed := c.OpenDoc(path, components.EditorOpts{})
 
@@ -256,7 +255,7 @@ func TestOpenDocsKeepOriginRoot(t *testing.T) {
 		t.Fatalf("rekeyed open doc = %v, want path %q rooted at %q", docs, renamed, root)
 	}
 	c.CloseDoc(renamed)
-	if _, ok := c.OpenRoots[renamed]; ok {
+	if _, ok := c.open.roots[renamed]; ok {
 		t.Fatal("closing a doc must remove its origin root")
 	}
 }
