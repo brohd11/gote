@@ -204,9 +204,9 @@ func docItems(docs []DocFile, currentPath string) []list.Item {
 type newFileItem struct{}
 
 func (newFileItem) Title() string       { return "+ new file" }
-func (newFileItem) Description() string { return "type a name (a/b nests dirs)" }
+func (newFileItem) Description() string { return "(rel/path)" }
 func (newFileItem) FilterValue() string { return "new file" }
-func (newFileItem) SuffixText() string  { return "type a name (a/b nests dirs)" }
+func (newFileItem) SuffixText() string  { return "(rel/path)" }
 
 // docRows is the docs panel's full row set: the action row, then the seeded docs.
 // Every (re)build of the list goes through here so the row survives reseeds.

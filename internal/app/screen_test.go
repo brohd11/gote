@@ -139,6 +139,44 @@ func TestHomePaneNavigation(t *testing.T) {
 	}
 }
 
+// TestHomeShiftTabLeavesEditor is the gote-side regression for shift+tab joining
+// PaneNext: on the editor pane it must move focus like shift+→ instead of typing the
+// tab its standalone key handler still maps it to. Bare tab keeps typing — that
+// split is the whole reason the alias could be given up.
+func TestHomeShiftTabLeavesEditor(t *testing.T) {
+	s, sh := newHome(t)
+
+	shiftTab := tea.KeyMsg{Type: tea.KeyShiftTab}
+	s.Update(sh, shiftTab) // docs → open
+	s.Update(sh, shiftTab) // open → editor
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("two shift+tab steps should reach the editor pane, got %s", got)
+	}
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	s.Update(sh, shiftTab) // must escape, not indent
+	if got := focusedPane(s, sh); got != "list" {
+		t.Fatalf("shift+tab must escape the capturing editor pane, got %s", got)
+	}
+
+	// Back to the editor (the cycle wraps through both lists) and type on: the two
+	// runes must be adjacent. A tab would have expanded to editorTabWidth spaces
+	// between them, exactly as TestHomePaneNavigation asserts for bare tab.
+	s.Update(sh, shiftTab)
+	s.Update(sh, shiftTab)
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("the cycle should return to the editor, got %s", got)
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	v := stripANSI(s.View(sh))
+	if strings.Contains(v, "hi    X") {
+		t.Fatalf("shift+tab typed a tab instead of moving panes; render:\n%s", v)
+	}
+	if !strings.Contains(v, "hiX") {
+		t.Fatalf("the buffer should read hiX; render:\n%s", v)
+	}
+}
+
 // TestThemeChangeKeepsEditor drives the framework's real theme broadcast through
 // the router. gote's root is stateful: rebuilding it used to leave the replacement
 // ScreenPanel uninitialized, so both the editor and its unsaved buffer disappeared
