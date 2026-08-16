@@ -50,7 +50,7 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 // one row, and the LineEdit anchor sits one row above the covered row (its own top
 // border) — the two cancel, so the anchor is BodyY + the list-relative row. x=0 and
 // width=sidebarWidth land the box's borders exactly on the panel's own.
-func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder, crumb string,
+func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
 	l := s.docsPanel.List()
 	row, ok := components.CompactListItemRow(l, l.Index())
@@ -58,14 +58,13 @@ func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder, crumb string,
 		row = 0 // the selected row is on-page by construction; never die on it
 	}
 	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row, sidebarWidth, onDone, nil)
-	edit.Crumb = crumb
 	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
 	return edit
 }
 
 // newFile pushes the row-anchored line edit that names a document into being.
 func (s *homeScreen) newFile(sh *core.Shared) core.Action {
-	return core.Push(s.rowLineEdit(sh, "name (a/b nests dirs)", "new file", s.createFile))
+	return core.Push(s.rowLineEdit(sh, "name (a/b nests dirs)", s.createFile))
 }
 
 // createFile is the line edit's OnDone: resolve the typed name against the doc
@@ -120,7 +119,7 @@ func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
 	if err != nil {
 		rel = doc.Name // an unrelatable root still renames in place
 	}
-	edit := s.rowLineEdit(sh, "new name", "rename",
+	edit := s.rowLineEdit(sh, "new name",
 		func(sh *core.Shared, name string) core.Action { return s.submitRename(sh, doc, rel, name) })
 	edit.SetValue(rel)
 	return core.Push(edit)
