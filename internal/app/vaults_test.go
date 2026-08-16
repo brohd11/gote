@@ -102,8 +102,23 @@ func TestSubmitNewVaultValidation(t *testing.T) {
 	if act := submitNewVault(sh, form); act.Msg != nil || act.Cmd == nil {
 		t.Fatalf("blank path should refocus without navigating, got %+v", act)
 	}
-	form.SetValue("path", filepath.Join(t.TempDir(), "missing"))
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing")
+	form.SetValue("path", missing)
+	if got := msgType(submitNewVault(sh, form)); got != "core.seqMsg" {
+		t.Fatalf("a missing folder should be created and opened, got %s", got)
+	}
+	if info, err := os.Stat(missing); err != nil || !info.IsDir() {
+		t.Fatalf("submitted vault dir = %v, %v; want a directory", info, err)
+	}
+
+	file := filepath.Join(dir, "note.md")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	form.SetValue("name", "other")
+	form.SetValue("path", file)
 	if got := msgType(submitNewVault(sh, form)); got != "core.pushMsg" {
-		t.Fatalf("missing folder should push an error popup, got %s", got)
+		t.Fatalf("a path naming a file should push an error popup, got %s", got)
 	}
 }

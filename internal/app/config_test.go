@@ -224,4 +224,50 @@ func TestNormalizeVaultPath(t *testing.T) {
 	if _, err := normalizeVaultPath(file); err == nil {
 		t.Fatal("a vault path naming a file should fail")
 	}
+	// The reader's must-exist check is what keeps a vanished vault reportable, so it has
+	// to survive the split that lets New Vault create its own directory.
+	if _, err := normalizeVaultPath("~/Gone"); err == nil {
+		t.Fatal("a vault path naming a missing directory should fail")
+	}
+}
+
+// TestEnsureVaultDir covers the New Vault side of the same path: make what is missing,
+// take what is there, and refuse what is not a directory at all.
+func TestEnsureVaultDir(t *testing.T) {
+	home := t.TempDir()
+
+	nested := filepath.Join(home, "a", "b", "c")
+	if err := ensureVaultDir(nested); err != nil {
+		t.Fatalf("ensure missing nested dir: %v", err)
+	}
+	info, err := os.Stat(nested)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("nested vault dir = %v, %v; want a directory", info, err)
+	}
+
+	existing := filepath.Join(home, "Notes")
+	doc := filepath.Join(existing, "note.md")
+	if err := os.Mkdir(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(doc, []byte("kept"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureVaultDir(existing); err != nil {
+		t.Fatalf("adopt existing dir: %v", err)
+	}
+	if got, err := os.ReadFile(doc); err != nil || string(got) != "kept" {
+		t.Fatalf("adopting a folder disturbed its contents: %q, %v", got, err)
+	}
+
+	file := filepath.Join(home, "note.md")
+	if err := os.WriteFile(file, []byte("kept"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureVaultDir(file); err == nil {
+		t.Fatal("a vault path naming a file should fail")
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != "kept" {
+		t.Fatalf("rejected file = %q, %v; want it untouched", got, err)
+	}
 }

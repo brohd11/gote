@@ -175,9 +175,12 @@ func VaultList(cfg Config) []VaultEntry {
 	return entries
 }
 
-// AddVault validates and persists a new named vault. Config is replaced in memory
-// only after the atomic write succeeds, so an error cannot leave the menu ahead of
-// config.yml.
+// AddVault validates and persists a new named vault, creating its directory when it
+// does not exist yet and adopting the folder as it stands when it does. Config is
+// replaced in memory only after the atomic write succeeds, so an error cannot leave the
+// menu ahead of config.yml. The directory is made last of the checks, so a rejected name
+// or a duplicate path leaves nothing behind; only a failed SaveConfig can, and an empty
+// folder is inert.
 func (c *Ctx) AddVault(name, rawPath string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -186,15 +189,20 @@ func (c *Ctx) AddVault(name, rawPath string) error {
 	if _, exists := c.Config.Vaults[name]; exists {
 		return fmt.Errorf("vault %q already exists", name)
 	}
-	path, err := normalizeVaultPath(rawPath)
+	path, err := resolveVaultPath(rawPath)
 	if err != nil {
 		return err
 	}
+	// Compared by resolution alone: a saved vault whose directory has vanished still
+	// owns its path, and must still block a second name claiming it.
 	for other, v := range c.Config.Vaults {
-		otherPath, err := normalizeVaultPath(v.Path)
+		otherPath, err := resolveVaultPath(v.Path)
 		if err == nil && otherPath == path {
 			return fmt.Errorf("%q is already saved as vault %q", path, other)
 		}
+	}
+	if err := ensureVaultDir(path); err != nil {
+		return err
 	}
 	next := c.Config
 	next.Vaults = make(map[string]VaultConfig, len(c.Config.Vaults)+1)

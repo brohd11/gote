@@ -125,12 +125,13 @@ func SaveConfig(cfg Config) error {
 	return configdir.SaveAtomic(dir, "config.yml", cfg)
 }
 
-// normalizeVaultPath accepts the shell-friendly forms users type into the New Vault
-// form and returns the stable absolute path stored in YAML. Tilde handling is the
-// shared strutil.ExpandHome's — only the current user's home shorthand is expanded and
-// ~other-user is rejected rather than guessed — and the required/absolute/must-be-a-
-// directory checks around it are this form's own.
-func normalizeVaultPath(raw string) (string, error) {
+// resolveVaultPath accepts the shell-friendly forms users type into the New Vault form
+// and returns the stable absolute path stored in YAML. Tilde handling is the shared
+// strutil.ExpandHome's — only the current user's home shorthand is expanded and
+// ~other-user is rejected rather than guessed — and the required/absolute checks around
+// it are this form's own. Nothing here touches the filesystem: New Vault resolves a path
+// it is about to create, so existence is a separate question from spelling.
+func resolveVaultPath(raw string) (string, error) {
 	p := strings.TrimSpace(raw)
 	if p == "" {
 		return "", fmt.Errorf("path is required")
@@ -143,7 +144,17 @@ func normalizeVaultPath(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	abs = filepath.Clean(abs)
+	return filepath.Clean(abs), nil
+}
+
+// normalizeVaultPath is resolveVaultPath plus the must-already-be-a-directory check that
+// every reader of a configured vault wants: a vault whose directory has gone missing is
+// a problem to report, not one to paper over.
+func normalizeVaultPath(raw string) (string, error) {
+	abs, err := resolveVaultPath(raw)
+	if err != nil {
+		return "", err
+	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		return "", err
@@ -152,4 +163,21 @@ func normalizeVaultPath(raw string) (string, error) {
 		return "", fmt.Errorf("%q is not a directory", abs)
 	}
 	return abs, nil
+}
+
+// ensureVaultDir adopts an existing folder and creates a missing one, parents included,
+// so New Vault does not send the user out to a shell to mkdir first. A path naming a
+// file is still refused, and refused in this package's words rather than as MkdirAll's
+// ENOTDIR.
+func ensureVaultDir(abs string) error {
+	info, err := os.Stat(abs)
+	switch {
+	case err == nil && info.IsDir():
+		return nil
+	case err == nil:
+		return fmt.Errorf("%q is not a directory", abs)
+	case !os.IsNotExist(err):
+		return err
+	}
+	return os.MkdirAll(abs, 0o755)
 }

@@ -165,6 +165,23 @@ func TestAddAndSwitchVault(t *testing.T) {
 	if c.open.byPath[filepath.Join(home, "old.md")] == old {
 		t.Fatal("old editor survived vault switch")
 	}
+
+	// A path the user has not made yet is the common case for a first vault, so adding
+	// one creates it — and the created directory has to satisfy the switch path's own
+	// must-exist check.
+	fresh := filepath.Join(home, "new", "notes")
+	if err := c.AddVault("fresh", fresh); err != nil {
+		t.Fatalf("add vault at a missing path: %v", err)
+	}
+	if info, err := os.Stat(fresh); err != nil || !info.IsDir() {
+		t.Fatalf("created vault dir = %v, %v; want a directory", info, err)
+	}
+	if err := c.SwitchVault("fresh"); err != nil {
+		t.Fatalf("switch into created vault: %v", err)
+	}
+	if c.ScanDir != fresh {
+		t.Fatalf("scan dir = %q, want %q", c.ScanDir, fresh)
+	}
 }
 
 // TestRekeyDoc covers what a save-as does to the open set: the buffer keeps its
