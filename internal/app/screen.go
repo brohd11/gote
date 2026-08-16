@@ -101,10 +101,11 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
+	// No Help: that field only feeds the bar, and rename is documented in the ? overlay
+	// with the rest. The binding stays live — OnKey (docsKey) is what fires it.
 	s.docsPanel = components.NewCompactListPanel(docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
 		OnKey:    s.docsKey,
-		Help:     []key.Binding{renameKey},
 		Border:   true,
 	})
 	s.openPanel = components.NewCompactListPanel(nil, "Open", components.ListPanelOpts{
@@ -432,9 +433,11 @@ func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) {
 // leaves.
 func (s *homeScreen) buildModular() *components.ModularScreen {
 	opts := components.ModularOpts{
-		// The bar stays lean on purpose: preview/wrap/line-nums still work, but
-		// they are documented in the ? overlay (helpKey) instead of the bar.
-		Help: []key.Binding{sidebarKey, actionsKey, helpKey},
+		// One entry, and it is the pointer at all the others: every app key gote has
+		// is documented in the ? overlay (helpText), so the bar names the way in
+		// rather than reprinting a handful of them beside the framework's own
+		// pane/back/select/filter hints. The keys themselves are untouched.
+		Help: []key.Binding{helpKey},
 	}
 	var cols [][]components.Slot
 	var widths []int

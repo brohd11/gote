@@ -527,6 +527,42 @@ func TestHomeEditorSearch(t *testing.T) {
 	}
 }
 
+// TestHelpOverlayIsTheCompleteReference pins the split the bar and the overlay now make:
+// the bar names only the way in ("? more"), so every app key has to be written in the
+// overlay or it is written nowhere. It also pins the notation — one modifier spelling
+// across gote's own chords and the editor's, which is the point of listing them together.
+func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
+	_, s, sh := newHomeRouter(t, Options{})
+
+	help := s.helpText()
+	for _, want := range []string{
+		"panes", "back", "select", "filter", // navigation, the bar's remaining hints
+		"ctrl+b", "sidebar", "actions", // moved off the bar
+		"ctrl+r", "rename", // the docs list's own key, also off the bar
+		"alt+p", "alt+z", // gote's alt chords
+		"alt+c", "alt+v", "alt+backspace", // the editor's, via HelpBindings
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("the ? overlay is the only place these keys are written; missing %q:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "⌥") {
+		t.Fatalf("alt chords should be spelled \"alt+\" throughout, not ⌥:\n%s", help)
+	}
+
+	// The bar keeps the pointer and drops everything the overlay covers. Checked with the
+	// docs list focused, the state that used to carry the most: rename plus all three.
+	bar := stripANSI(s.HelpView(sh))
+	if !strings.Contains(bar, "more") {
+		t.Fatalf("the bar should still point at the overlay:\n%s", bar)
+	}
+	for _, gone := range []string{"sidebar", "actions", "rename"} {
+		if strings.Contains(bar, gone) {
+			t.Fatalf("%q belongs in the overlay, not the bar:\n%s", gone, bar)
+		}
+	}
+}
+
 func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single.md")
 	model, _, _ := newHomeRouter(t, Options{Mode: ModeFile, File: path})
@@ -911,7 +947,7 @@ func TestLaunchPreview(t *testing.T) {
 	}
 	// A ModeFile launch is chrome-free, and the reader pushed over it matches: no
 	// breadcrumb, no help bar of gote's and none of its own either.
-	if strings.Contains(preview, "sidebar") || strings.Contains(preview, "docs") {
+	if strings.Contains(preview, "more") || strings.Contains(preview, "docs") {
 		t.Fatalf("the reader should mask gote's breadcrumb and help bar, frame:\n%s", preview)
 	}
 	if strings.Contains(preview, "esc back") {
@@ -1072,7 +1108,9 @@ func TestMinimalFrame(t *testing.T) {
 	if strings.Contains(minimal, "docs") || strings.Contains(minimal, "Docs") {
 		t.Fatalf("no sidebar or breadcrumb should be drawn, frame:\n%s", minimal)
 	}
-	if strings.Contains(minimal, "sidebar") || strings.Contains(minimal, "preview") {
+	// "? more" is the bar's own entry (the app keys live in the ? overlay now), so it is
+	// the string that proves the bar is there — or, here, that it is not.
+	if strings.Contains(minimal, "more") || strings.Contains(minimal, "panes") {
 		t.Fatalf("the help bar should be masked away, frame:\n%s", minimal)
 	}
 
@@ -1096,7 +1134,7 @@ func TestMinimalFrame(t *testing.T) {
 	if !strings.Contains(ordLines[0], "docs") {
 		t.Fatalf("the ordinary launch's top row should be the breadcrumb, got %q", ordLines[0])
 	}
-	if !strings.Contains(ordLines[len(ordLines)-1], "sidebar") {
+	if !strings.Contains(ordLines[len(ordLines)-1], "more") {
 		t.Fatalf("the ordinary launch's last row should be the help bar, got %q", ordLines[len(ordLines)-1])
 	}
 }
