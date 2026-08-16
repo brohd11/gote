@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Document operations driven from the docs list: opening, creating and renaming files, and
@@ -40,8 +41,8 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	cmd := s.editorPanel.SetChild(ed)
 	// After SetChild, so the layout setPreview rebuilds is sized around the new buffer.
 	s.enforcePreview()
-	s.modular.FocusSlot(s.editorSlot())
-	return core.Async(cmd)
+	focus := s.modular.FocusSlot(s.editorSlot())
+	return core.Async(tea.Batch(cmd, focus))
 }
 
 // rowLineEdit builds a floating line edit sitting exactly over the selected docs row —

@@ -206,7 +206,11 @@ type newFileItem struct{}
 func (newFileItem) Title() string       { return "+ new file" }
 func (newFileItem) Description() string { return "(rel/path)" }
 func (newFileItem) FilterValue() string { return "new file" }
-func (newFileItem) SuffixText() string  { return "(rel/path)" }
+
+// No suffix: the hint about what to type belongs in the line edit this row opens, not in
+// the column the doc paths need. It was also the one row whose suffix was pure decoration —
+// every other one names a real directory.
+func (newFileItem) SuffixText() string { return "" }
 
 // docRows is the docs panel's full row set: the action row, then the seeded docs.
 // Every (re)build of the list goes through here so the row survives reseeds.

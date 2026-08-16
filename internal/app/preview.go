@@ -144,7 +144,9 @@ func (s *homeScreen) setPreview(mode int) {
 		return
 	}
 	s.preview = mode
-	s.rebuildModular(s.sh, s.editorSlot())
+	// Focus lands on the editor pane, which has no on-focus work to hand back; dropping
+	// the cmd keeps this off the four-deep enforcePreview/cyclePreview call chain.
+	_ = s.rebuildModular(s.sh, s.editorSlot())
 	s.resetPreviewCache()
 	s.refreshPreview()
 	s.syncPreviewScroll()

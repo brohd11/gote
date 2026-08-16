@@ -97,9 +97,9 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 		s.setSidebar(true)
 	}
 	s.enforcePreview()
-	s.modular.FocusSlot(0)
+	focus := s.modular.FocusSlot(0)
 	s.refreshPreview()
-	return core.Seq(core.Async(cmd), core.PropagateAll(ReseedMsg{}))
+	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.PropagateAll(ReseedMsg{}))
 }
 
 // editorRelease is the editor pane's OnRelease hook (esc): hand the keys back to the
@@ -112,6 +112,5 @@ func (s *homeScreen) editorRelease(*core.Shared) core.Action {
 	if !s.sidebar {
 		s.setSidebar(true)
 	}
-	s.modular.FocusSlot(0)
-	return core.Action{}
+	return core.Async(s.modular.FocusSlot(0))
 }

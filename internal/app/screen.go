@@ -375,8 +375,8 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	s.resetPreviewCache()
 	s.minimal = false
 	s.sidebar = true
-	s.rebuildModular(sh, 0)
-	return core.Seq(core.Async(cmd), core.ResetToRoot())
+	focus := s.rebuildModular(sh, 0)
+	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.ResetToRoot())
 }
 
 // editorSlot is the editor pane's flat slot index in the current layout.
@@ -414,15 +414,23 @@ const noFocus = -1
 // one is known, and focus is placed last, after the slots it names exist.
 //
 // focus is a slot index, or noFocus to accept the auto-focused first slot.
-func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) {
+//
+// It returns the focused panel's on-focus cmd (components.FocusNotifier) for the caller
+// to emit. Only for an explicit focus: the noFocus path is auto-focused by the new
+// ModularScreen's constructor, which has no cmd lane, and re-Initing the rebuilt screen
+// to drain one is exactly what this wrapper exists to avoid (it would re-read the
+// editor's file over a dirty buffer). A panel that cares picks itself up on its next
+// message instead.
+func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) tea.Cmd {
 	s.modular.SetFocused(false)
 	s.modular = s.buildModular()
 	if s.w > 0 {
 		s.modular.SetSize(sh, s.w, s.h)
 	}
 	if focus != noFocus {
-		s.modular.FocusSlot(focus)
+		return s.modular.FocusSlot(focus)
 	}
+	return nil
 }
 
 // buildModular lays the current combination out: the sidebar column is optional
