@@ -45,9 +45,10 @@ const hereArg = "here"
 var rootCmd = &cobra.Command{
 	Use:   "gote [here|dir|file|vault] [depth]",
 	Short: "A simple text editor (TUI)",
-	Long: `gote is a simple TUI text editor. With no arguments it opens the default vault
-named in ~/.gote/config.yml, or the ~/.gote/docs document store when no valid default
-is configured. Given a directory it lists every matching file found by a recursive
+	Long: `gote is a simple TUI text editor. With no arguments it opens what the "default"
+key in ~/.gote/config.yml names — a directory path, or a configured vault's name — and
+the ~/.gote/docs document store when no valid default is configured. Given a directory
+it lists every matching file found by a recursive
 scan, to the depth given as a second argument. Given the name of a configured vault it
 opens that vault. Given a file it opens that file alone, with the sidebar and
 surrounding chrome hidden — the shape to use as your $EDITOR.
@@ -55,7 +56,7 @@ surrounding chrome hidden — the shape to use as your $EDITOR.
 Any text file is a document. Set extensions in the config to narrow that permanently,
 or --ext to narrow one run; --ext with no value widens a narrowed config back again.
 
-  gote                  # configured default vault, otherwise ~/.gote/docs
+  gote                  # the config's default dir or vault, otherwise ~/.gote/docs
   gote here             # scan the current directory, config depth
   gote here 3           # scan the current directory, depth 3
   gote ~/notes 4        # scan ~/notes, depth 4
@@ -108,6 +109,11 @@ func Execute() {
 // rather than inside app.Run because the argument grammar consults it: a bare argument
 // naming nothing on disk may still name a configured vault.
 func runRoot(cmd *cobra.Command, args []string) error {
+	// Best-effort, and deliberately before the load: the file is where the schema is
+	// documented, so a user who never runs `gote config` should still end up with one to
+	// read. A failed write (a read-only home, say) is not a reason to refuse an editor,
+	// and LoadConfig treats the still-missing file as the defaults anyway.
+	_, _ = app.EnsureConfig()
 	cfg, err := app.LoadConfig()
 	if err != nil {
 		return err

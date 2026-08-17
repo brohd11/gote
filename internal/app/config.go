@@ -12,11 +12,15 @@ import (
 
 // Config is the parsed ~/.gote/config.yml. A missing file yields the defaults, so a
 // fresh install needs no setup.
+// Nothing is omitempty: the written file is the only place the schema is visible, so
+// every key appears even when its value is empty. An unset extensions list renders as
+// "extensions: []" and an empty vault map as "vaults: {}", which reads as "this key
+// exists and takes a list" rather than not appearing at all.
 type Config struct {
-	Extensions []string               `yaml:"extensions,omitempty"` // restrict the lists to these; empty (the default) means any text file
-	ScanDepth  int                    `yaml:"scan_depth,omitempty"` // default recursive scan depth (default 5)
-	Default    string                 `yaml:"default,omitempty"`    // optional named vault used by a bare launch
-	Vaults     map[string]VaultConfig `yaml:"vaults,omitempty"`
+	Extensions []string               `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
+	ScanDepth  int                    `yaml:"scan_depth"` // default recursive scan depth (default 5)
+	Default    string                 `yaml:"default"`    // what a bare launch opens: a directory path, or a named vault
+	Vaults     map[string]VaultConfig `yaml:"vaults"`
 }
 
 // Filter is the discovery filter the config asks for: the configured extensions, or
@@ -31,14 +35,24 @@ type VaultConfig struct {
 	Open []string `yaml:"open"`
 }
 
-// DefaultConfig is what a missing ~/.gote/config.yml means. Extensions is empty on
-// purpose — unconfigured, gote lists every text file it finds, and narrowing that is
-// the opt-in. ScanDepth is the depth `gote here` (and a bare directory argument) scans
-// to when none is given on the command line — deep enough that a project's docs turn
-// up without asking for it.
+// DefaultConfig is what a missing ~/.gote/config.yml means, and — since EnsureConfig
+// writes exactly this — what a fresh one says. Extensions is left nil on purpose:
+// unconfigured, gote lists every text file it finds, and narrowing that is the opt-in.
+// (Nil rather than an empty slice because normalizeExts collapses an empty list back to
+// nil, and a loaded config must still equal this one.) ScanDepth is the depth `gote here`
+// (and a bare directory argument) scans to when none is given on the command line — deep
+// enough that a project's docs turn up without asking for it.
+//
+// Default names the home store it already resolves to, so seeding it changes nothing
+// about how gote launches (resolveDefault maps that path back to ModeHome). It is there
+// to show the user the key exists and what shape its value takes.
 func DefaultConfig() Config {
-	return Config{ScanDepth: 5, Vaults: map[string]VaultConfig{}}
+	return Config{ScanDepth: 5, Default: defaultDocsRef, Vaults: map[string]VaultConfig{}}
 }
+
+// defaultDocsRef is the home store written the ~ way rather than as this machine's
+// absolute path: a config is something people copy between machines.
+const defaultDocsRef = "~/.gote/docs"
 
 // Dir is ~/.gote, gote's config home. The ~/.<app> convention itself is
 // goutil/configdir's; this pins gote's own name.
@@ -147,10 +161,10 @@ func resolveVaultPath(raw string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-// normalizeVaultPath is resolveVaultPath plus the must-already-be-a-directory check that
-// every reader of a configured vault wants: a vault whose directory has gone missing is
-// a problem to report, not one to paper over.
-func normalizeVaultPath(raw string) (string, error) {
+// normalizeDirPath is resolveVaultPath plus the must-already-be-a-directory check that
+// every reader of a configured root wants: a vault (or a default) whose directory has
+// gone missing is a problem to report, not one to paper over.
+func normalizeDirPath(raw string) (string, error) {
 	abs, err := resolveVaultPath(raw)
 	if err != nil {
 		return "", err

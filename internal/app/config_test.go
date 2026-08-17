@@ -102,8 +102,12 @@ func TestEnsureConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureConfig should have written the file: %v", err)
 	}
-	if !strings.Contains(string(raw), "scan_depth:") {
-		t.Fatalf("a materialized config should show the schema:\n%s", raw)
+	// The whole point of materializing it: the file is where the schema is documented, so
+	// every key has to be in it — an omitted one is a setting the user cannot discover.
+	for _, key := range []string{"extensions:", "scan_depth:", "default:", "vaults:"} {
+		if !strings.Contains(string(raw), key) {
+			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
+		}
 	}
 
 	if err := os.WriteFile(path, []byte("scan_depth: 9\n"), 0o644); err != nil {
@@ -115,6 +119,25 @@ func TestEnsureConfig(t *testing.T) {
 	raw, err = os.ReadFile(path)
 	if err != nil || string(raw) != "scan_depth: 9\n" {
 		t.Fatalf("an existing config must not be rewritten, got %q (%v)", raw, err)
+	}
+}
+
+// TestDefaultConfigRoundTrip: the materialized file is exactly marshal(DefaultConfig()),
+// so writing it and reading it back has to land on DefaultConfig() again. The trap is
+// Extensions: normalizeExts collapses an empty list to nil, so seeding it as an empty
+// slice would make a fresh config differ from the defaults it was written from.
+func TestDefaultConfigRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, err := EnsureConfig(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, DefaultConfig()) {
+		t.Fatalf("round trip = %#v, want %#v", got, DefaultConfig())
 	}
 }
 
@@ -207,26 +230,26 @@ func TestConfigVaultRoundTrip(t *testing.T) {
 	}
 }
 
-func TestNormalizeVaultPath(t *testing.T) {
+func TestNormalizeDirPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	notes := filepath.Join(home, "Notes")
 	if err := os.Mkdir(notes, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := normalizeVaultPath("~/Notes"); err != nil || got != notes {
+	if got, err := normalizeDirPath("~/Notes"); err != nil || got != notes {
 		t.Fatalf("normalize ~/Notes = %q, %v; want %q", got, err, notes)
 	}
 	file := filepath.Join(home, "note.md")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := normalizeVaultPath(file); err == nil {
+	if _, err := normalizeDirPath(file); err == nil {
 		t.Fatal("a vault path naming a file should fail")
 	}
 	// The reader's must-exist check is what keeps a vanished vault reportable, so it has
 	// to survive the split that lets New Vault create its own directory.
-	if _, err := normalizeVaultPath("~/Gone"); err == nil {
+	if _, err := normalizeDirPath("~/Gone"); err == nil {
 		t.Fatal("a vault path naming a missing directory should fail")
 	}
 }

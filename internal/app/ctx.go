@@ -46,8 +46,8 @@ type Ctx struct {
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
 // fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile, Vault and
-// Dir for ModeVault. A zero Options is the default launch — Config.Default's vault when
-// valid, else ~/.gote/docs.
+// Dir for ModeVault. A zero Options is the default launch — the directory or vault
+// Config.Default names when it resolves, else ~/.gote/docs (see resolveDefault).
 //
 // Depth carries DepthSet rather than treating 0 as "unset", because 0 is a meaningful
 // depth: `gote here 0` lists the current directory alone. Unset means the config's
@@ -97,11 +97,7 @@ func New(version string, cfg Config, opts Options) *Ctx {
 		// a launch error, not a screen that silently lists nothing.
 		c.VaultName, c.ScanDir = opts.Vault, opts.Dir
 	case ModeHome:
-		if cfg.Default != "" {
-			if path, err := vaultPath(cfg, cfg.Default); err == nil {
-				c.Mode, c.VaultName, c.ScanDir = ModeVault, cfg.Default, path
-			}
-		}
+		c.Mode, c.VaultName, c.ScanDir = resolveDefault(cfg)
 	}
 	c.Seed()
 	return c
@@ -130,13 +126,54 @@ func (c *Ctx) Seed() {
 	}
 }
 
+// resolveDefault turns Config.Default into the launch a bare `gote` gets. The value is
+// read as a directory path when it is written as one — ~-prefixed, dot-relative, or
+// otherwise containing a separator — and as the name of a configured vault otherwise,
+// which is the same ladder the CLI's bare argument climbs (see cmd.resolveOptions).
+//
+// A default naming ~/.gote/docs resolves back to home mode rather than to a scan of it.
+// The two seed differently — home lists the store flat, a scan walks it to Depth — so
+// spelling out the store gote already opens must not quietly change what it shows.
+//
+// Anything that does not resolve — a directory that is gone, a vault that was never
+// configured — falls back to the home store, the same silent fallback an unconfigured
+// default has always had: a bad default should open the wrong list, not refuse to start.
+func resolveDefault(cfg Config) (mode Mode, name, dir string) {
+	if cfg.Default == "" {
+		return ModeHome, "", ""
+	}
+	if isPathRef(cfg.Default) {
+		path, err := normalizeDirPath(cfg.Default)
+		if err != nil {
+			return ModeHome, "", ""
+		}
+		if docs, err := DocsDir(); err == nil && path == docs {
+			return ModeHome, "", ""
+		}
+		return ModeScan, "", path
+	}
+	path, err := vaultPath(cfg, cfg.Default)
+	if err != nil {
+		return ModeHome, "", ""
+	}
+	return ModeVault, cfg.Default, path
+}
+
+// isPathRef reports whether a config value is written as a directory path rather than as
+// a vault name. A bare word is a name — the same reading `gote main-vault` gives it — and
+// "./notes" is the escape hatch for a directory whose name a vault has claimed.
+func isPathRef(s string) bool {
+	return strings.HasPrefix(s, "~") || strings.HasPrefix(s, ".") ||
+		strings.ContainsRune(s, '/') || strings.ContainsRune(s, filepath.Separator)
+}
+
 // vaultPath resolves and validates one configured vault without changing live state.
 func vaultPath(cfg Config, name string) (string, error) {
 	v, ok := cfg.Vaults[name]
 	if !ok {
 		return "", fmt.Errorf("vault %q is not configured", name)
 	}
-	path, err := normalizeVaultPath(v.Path)
+	path, err := normalizeDirPath(v.Path)
 	if err != nil {
 		return "", fmt.Errorf("vault %q: %w", name, err)
 	}
@@ -157,7 +194,7 @@ func LookupVault(cfg Config, name string) (path string, ok bool, err error) {
 // VaultEntry is one configured vault as a caller outside the TUI sees it: the name it
 // is reached by and the path exactly as config.yml writes it. Unnormalized on purpose —
 // a vault whose directory has gone missing must still appear in the listing that
-// explains why, which normalizeVaultPath would turn into an error instead.
+// explains why, which normalizeDirPath would turn into an error instead.
 type VaultEntry struct {
 	Name    string
 	Path    string

@@ -89,6 +89,65 @@ func TestConfiguredDefaultVaultAndCLIOverride(t *testing.T) {
 	}
 }
 
+// TestConfiguredDefaultPath: the default may also be written as a directory path, which
+// needs no vault entry at all. It scans, so a nested doc turns up — the whole reason to
+// point at a folder rather than list it flat.
+func TestConfiguredDefaultPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	notes := filepath.Join(home, "Notes")
+	if err := os.MkdirAll(filepath.Join(notes, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(notes, "sub", "deep.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, ref := range []string{notes, "~/Notes"} {
+		cfg := DefaultConfig()
+		cfg.Default = ref
+		c := New("dev", cfg, Options{})
+		if c.Mode != ModeScan || c.ScanDir != notes {
+			t.Fatalf("default %q = mode %v dir %q, want a scan of %q", ref, c.Mode, c.ScanDir, notes)
+		}
+		// A path is not a vault: nothing should claim a name the config never gave it.
+		if c.VaultName != "" {
+			t.Fatalf("default %q set vault name %q", ref, c.VaultName)
+		}
+		if len(c.Files) != 1 || c.Files[0].Name != "deep.md" {
+			t.Fatalf("default %q seed = %+v, want the nested doc", ref, c.Files)
+		}
+	}
+
+	// The seeded default names the home store. It has to resolve back to home mode, not to
+	// a recursive scan of it — the two list the same directory differently.
+	seeded := New("dev", DefaultConfig(), Options{})
+	if seeded.Mode != ModeHome || seeded.ScanDir != "" {
+		t.Fatalf("the seeded default = mode %v dir %q, want home", seeded.Mode, seeded.ScanDir)
+	}
+
+	gone := DefaultConfig()
+	gone.Default = "~/Gone"
+	if c := New("dev", gone, Options{}); c.Mode != ModeHome {
+		t.Fatalf("a default naming a missing directory should fall back home, got mode %v", c.Mode)
+	}
+}
+
+// TestIsPathRef pins which spellings are read as a directory rather than as a vault name:
+// a bare word is a name, and ./name is the escape hatch when a vault has claimed it.
+func TestIsPathRef(t *testing.T) {
+	for _, s := range []string{"~/notes", "~", "/abs/notes", "./notes", "../notes", "a/b"} {
+		if !isPathRef(s) {
+			t.Errorf("isPathRef(%q) = false, want a path", s)
+		}
+	}
+	for _, s := range []string{"notes", "main-vault", "my notes", ""} {
+		if isPathRef(s) {
+			t.Errorf("isPathRef(%q) = true, want a vault name", s)
+		}
+	}
+}
+
 // TestExtFlagOverridesConfig: --ext replaces the config's extensions for one run, in
 // both directions — it narrows an unconfigured gote, and widens a configured one back
 // to any text file. The new-file extension follows it, so a narrowed session cannot

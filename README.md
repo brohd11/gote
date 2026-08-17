@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/brohd11/gote/main/install.sh | sh
 
 ### Multi Document
 Default mode, shows a sidebar with docs in a location folder, as well as a list of open docs. 
-`gote` opens the editor in the default location configured in `~/gote/config.yml` and scans the folder recursively for docs.
+`gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs. The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; unset, or pointing at something that isn't there, it falls back to the `~/.gote/docs` store.
 
 `gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.
 
