@@ -61,10 +61,14 @@ func (s *homeScreen) cyclePreview() core.Action {
 // it never sees cannot desync it, and the pane it was opened over is still there
 // underneath on the way back.
 //
-// src is the document to render, deferred rather than passed as a string because the two
-// callers disagree about where it lives: alt+p hands over the editor's live buffer, while
-// the --preview launch reads the file off disk (see homeScreen.Init).
-func (s *homeScreen) previewScreen(src func() string) *previewDoc {
+// Every caller reads the live buffer, the --preview launch included — it seeds the editor
+// before pushing this, so there is no longer a launch that has to render off disk (see
+// homeScreen.Init).
+//
+// The buffer accessor is bound HERE rather than called from inside the render closure: the
+// reader is opened over one document, and a doc swap underneath it must not retarget it.
+func (s *homeScreen) previewScreen() *previewDoc {
+	src := s.editor.Text
 	return &previewDoc{minimal: s.minimal, DocScreen: components.NewDocScreen(components.DocOpts{
 		// Document first, mode second — the editor's own title bar is the filename, and
 		// the reader is a view of the same document, so the two bars line up.

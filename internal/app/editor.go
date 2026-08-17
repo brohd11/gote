@@ -38,7 +38,7 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 			return core.Seq(core.Pop(), s.cyclePreview())
 		}},
 		{Label: "Full preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), core.Push(s.previewScreen(s.editor.Text)))
+			return core.Seq(core.Pop(), core.Push(s.previewScreen()))
 		}},
 		{Label: "Toggle wrap", Pick: func(*core.Shared) core.Action {
 			s.editor.ToggleWrap()

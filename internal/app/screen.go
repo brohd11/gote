@@ -135,24 +135,38 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	return s
 }
 
-// Init stashes Shared, boots the layout, and — for a --preview launch — pushes the reader
-// over it. The push travels as an Action through the cmd queue, which the router resolves
-// against the stack the same way it resolves one returned from Update.
+// Init stashes Shared, boots the layout, and — for a --preview launch — seeds the editor
+// with the file and pushes the reader over it. The push travels as an Action through the
+// cmd queue, which the router resolves against the stack the same way it resolves one
+// returned from Update.
 //
-// The reader renders the file off DISK rather than the editor's buffer, because at this
-// point the buffer is still empty: EditorScreen.Init dispatches its read as a cmd, and
-// DocScreen renders once and re-renders only on a width change, so a reader built on the
-// buffer would race that read and could stay blank. Disk is exactly the content the read
-// is about to deliver. Every later alt+p renders the live buffer.
+// The seeding is the whole reason the read happens HERE rather than being left to
+// EditorScreen.Init, and it has to come BEFORE modular.Init: Init's read returns an
+// editorLoadedMsg, the router delivers a message only to the TOP screen, and this launch
+// is about to make the reader exactly that. Batched together, the push (an instant
+// closure) beats the read (file I/O) every time, so the load landed on the reader, was
+// ignored, and left an empty buffer aimed at the file — which the first save would then
+// have truncated. Seeding first means Init finds the buffer loaded and dispatches nothing,
+// so there is no message to lose rather than one that is harmlessly dropped.
+//
+// It also makes the reader and the buffer the same bytes by construction: the reader now
+// renders the live buffer, as every later alt+p already did, instead of a second
+// independently-read copy of the file.
+//
+// Synchronous, and only on this launch — the reader used to read the file synchronously on
+// its first View anyway, so nothing here got slower.
 func (s *homeScreen) Init(sh *core.Shared) tea.Cmd {
 	s.sh = sh
+	var doc *previewDoc
+	if s.launchPreview {
+		s.launchPreview = false
+		s.editor.SetText(fileText(s.currentPath))
+		doc = s.previewScreen()
+	}
 	cmd := s.modular.Init(sh)
-	if !s.launchPreview {
+	if doc == nil {
 		return cmd
 	}
-	s.launchPreview = false
-	path := s.currentPath
-	doc := s.previewScreen(func() string { return fileText(path) })
 	return tea.Batch(cmd, func() tea.Msg { return core.Push(doc) })
 }
 
@@ -189,7 +203,7 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			if !s.previewable() {
 				return s, core.Action{}
 			}
-			return s, core.Push(s.previewScreen(s.editor.Text))
+			return s, core.Push(s.previewScreen())
 		}
 		if core.MatchKey(k, wrapKey) {
 			s.editor.ToggleWrap()

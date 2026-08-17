@@ -835,7 +835,7 @@ func TestPreviewOverlayRendersBuffer(t *testing.T) {
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- bullet")})
 
-	doc := s.previewScreen(s.editor.Text)
+	doc := s.previewScreen()
 	doc.SetSize(sh, 80, 24)
 	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• bullet") {
 		t.Fatalf("the reader should render the live buffer, got:\n%s", v)
@@ -853,7 +853,7 @@ func TestPreviewOverlayCloses(t *testing.T) {
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
 
 	for _, key := range []tea.KeyMsg{altP, {Type: tea.KeyEsc}} {
-		doc := s.previewScreen(s.editor.Text)
+		doc := s.previewScreen()
 		if _, a := doc.Update(sh, key); msgType(a) != "core.popMsg" {
 			t.Errorf("%s should pop the reader, got %s", key, msgType(a))
 		}
@@ -865,7 +865,7 @@ func TestPreviewOverlayCloses(t *testing.T) {
 // lose its chrome mask on the first keystroke it received.
 func TestPreviewOverlayKeepsWrapper(t *testing.T) {
 	s, sh := newHome(t)
-	doc := s.previewScreen(s.editor.Text)
+	doc := s.previewScreen()
 
 	next, _ := doc.Update(sh, tea.KeyMsg{Type: tea.KeyDown})
 	wrapped, ok := next.(*previewDoc)
@@ -910,24 +910,75 @@ func TestFullPreviewKey(t *testing.T) {
 	}
 }
 
-// TestLaunchPreviewReadsDisk is the race the launch reader is shaped around: the editor
-// loads its file from a cmd, so at Init the buffer is still empty. The reader must show
-// the document anyway, which is why the launch source reads the file rather than the
-// buffer. Nothing here pumps the editor's load — that is the point.
-func TestLaunchPreviewReadsDisk(t *testing.T) {
+// TestLaunchPreviewLoadsTheBuffer: a --preview launch SEEDS the editor rather than
+// leaving it to EditorScreen.Init's async read. That read comes back as a message, the
+// router delivers a message only to the top screen, and this launch pushes the reader on
+// top — so the load used to land there and be dropped, leaving an empty buffer aimed at a
+// file that is not empty (esc out of the reader and the document was gone).
+//
+// Nothing here pumps a cmd: newHomeWith calls Init and discards what it returns, so a
+// buffer with content in it can only have been seeded synchronously. The reader renders
+// that same buffer, which is what makes the two impossible to disagree.
+func TestLaunchPreviewLoadsTheBuffer(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(file, []byte("- from disk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s, sh := newHomeWith(t, Options{Mode: ModeFile, File: file, Preview: true})
 
-	if got := s.editor.Text(); got != "" {
-		t.Fatalf("this test is only meaningful with an unloaded buffer, got %q", got)
+	if got := s.editor.Text(); got != "- from disk" {
+		t.Fatalf("the launch should have seeded the buffer, got %q", got)
 	}
-	doc := s.previewScreen(func() string { return fileText(file) })
+	if s.editor.Dirty() {
+		t.Error("a seeded buffer is a load, not an edit: it must be clean")
+	}
+	doc := s.previewScreen()
 	doc.SetSize(sh, 80, 24)
 	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• from disk") {
-		t.Fatalf("the launch reader should render the file on disk, got:\n%s", v)
+		t.Fatalf("the launch reader should render the document, got:\n%s", v)
+	}
+}
+
+// TestLaunchPreviewEscapeKeepsDocument pins the user-visible outcome through the router,
+// the only path that actually applies the launch push to a stack: esc out of the reader
+// and the document is still in the editor behind it.
+//
+// It does NOT reproduce the original bug, and can't: pumpModel walks a batch in order, so
+// the editor's read is delivered before the push, while real bubbletea runs the two
+// concurrently and the instant push closure beats the file I/O every time. That asymmetry
+// is exactly why the fix does not depend on ordering at all — TestLaunchPreviewLoadsTheBuffer
+// is what pins it, by proving the buffer is seeded with no cmd pumped whatsoever.
+func TestLaunchPreviewEscapeKeepsDocument(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "note.md")
+	if err := os.WriteFile(file, []byte("# Heading\n\nbody text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Built by hand rather than through newHomeRouter: the launch push rides Init's cmd
+	// batch, so it only reaches the stack if that batch is pumped (as TestLaunchPreview
+	// does). The screen is captured on the way past — once the reader is on top, Top() is
+	// the reader, not the editor underneath it.
+	t.Setenv("HOME", t.TempDir())
+	sh := core.NewShared(New("test", DefaultConfig(), Options{Mode: ModeFile, File: file, Preview: true}))
+	var s *homeScreen
+	r := core.NewRouter(sh, []core.TabEntry{
+		{Title: "Editor", New: func(sh *core.Shared) core.Screen {
+			s = NewHomeScreen(sh).(*homeScreen)
+			return s
+		}},
+	})
+	var model tea.Model = r
+	model = pumpModel(model, r.Init())
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	if _, ok := model.(core.Router).Top().(*previewDoc); !ok {
+		t.Fatalf("-P should boot into the reader, got %T", model.(core.Router).Top())
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatalf("esc should pop back to the editor, got %T", model.(core.Router).Top())
+	}
+	if got := s.editor.Text(); got != "# Heading\n\nbody text" {
+		t.Fatalf("the editor behind the reader lost the document: %q", got)
 	}
 }
 
