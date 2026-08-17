@@ -95,17 +95,16 @@ func focusedPane(s *homeScreen, sh *core.Shared) string {
 func TestHomePaneNavigation(t *testing.T) {
 	s, sh := newHome(t)
 
-	shiftRight := tea.KeyMsg{Type: tea.KeyShiftRight}
-	shiftLeft := tea.KeyMsg{Type: tea.KeyShiftLeft}
+	paneNext := tea.KeyMsg{Type: tea.KeyShiftTab}
 
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("focus should start on the docs list, got %s", got)
 	}
-	s.Update(sh, shiftRight) // docs → open, still a list
+	s.Update(sh, paneNext) // docs → open, still a list
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("the first step should land on the open list, got %s", got)
 	}
-	s.Update(sh, shiftRight) // open → editor
+	s.Update(sh, paneNext) // open → editor
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the second step should reach the editor pane, got %s", got)
 	}
@@ -124,13 +123,15 @@ func TestHomePaneNavigation(t *testing.T) {
 		t.Fatalf("tab should have typed a tab between hi and X; render:\n%s", stripANSI(v))
 	}
 
-	s.Update(sh, shiftLeft) // back out of the capturing pane, keyboard-only
+	// Forward off the editor wraps to the docs list: with the cycle forward-only, the
+	// wrap IS the way out of a capturing pane, keyboard-only.
+	s.Update(sh, paneNext)
 	if got := focusedPane(s, sh); got != "list" {
-		t.Fatalf("shift+left must escape the capturing editor pane, got %s", got)
+		t.Fatalf("the cycle must escape the capturing editor pane, got %s", got)
 	}
-	// The cycle wraps: one more forward step from the open list returns to the
-	// editor, and the buffer typed into it is still there.
-	s.Update(sh, shiftRight)
+	// Round again to the editor, and the buffer typed into it is still there.
+	s.Update(sh, paneNext)
+	s.Update(sh, paneNext)
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the cycle should return to the editor, got %s", got)
 	}
@@ -193,8 +194,8 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 	r.Init()
 	var model tea.Model = r
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftRight}) // docs -> open
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftRight}) // open -> editor
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // docs -> open
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // open -> editor
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved theme text")})
 
 	if !strings.Contains(stripANSI(model.View()), "unsaved theme text") {
@@ -226,7 +227,7 @@ func TestHomePaneNavigationWithoutSidebar(t *testing.T) {
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the lone editor pane should hold focus, got %s", got)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftLeft})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("a pane key with nowhere to go should be a no-op, got %s", got)
 	}
@@ -707,11 +708,11 @@ func TestPreviewScrollsByHand(t *testing.T) {
 		t.Fatalf("an unrelated message must not move the pane: %d → %d", byHand, got)
 	}
 
-	// The keyboard path: shift+right walks focus onto the pane, the nav keys scroll it.
+	// The keyboard path: shift+tab walks focus onto the pane, the nav keys scroll it.
 	s.modular.FocusSlot(s.editorSlot())
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if !s.previewPanel.Focused() {
-		t.Fatal("shift+right from the editor should focus the pane")
+		t.Fatal("shift+tab from the editor should focus the pane")
 	}
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyUp})
 	if got := s.previewPanel.ScrollOffset(); got != byHand-1 {
@@ -1264,8 +1265,8 @@ func TestQuitGate(t *testing.T) {
 	}
 
 	// Focus the editor pane and dirty the scratch buffer.
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 
 	if names := s.dirtyDocs(sh); len(names) != 1 || names[0] != "scratch" {
@@ -1355,8 +1356,8 @@ func TestHelpKey(t *testing.T) {
 	}
 
 	// Into the editor pane: ? is text now, so the buffer goes dirty.
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftRight})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	if !s.editor.Dirty() {
 		t.Fatal("? should type into the editor, not open help")
