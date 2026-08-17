@@ -232,6 +232,14 @@ func newDocPath(base, name, ext string) (string, error) {
 	if filepath.IsAbs(name) {
 		return "", fmt.Errorf("%q is absolute; give a name relative to the doc store", name)
 	}
+	// A home path is neither absolute nor an escape by the check below, so without this
+	// it would quietly create a directory literally named "~" inside the store. Refused
+	// rather than expanded: these boxes are confined to the doc store by design, and a
+	// file written to ~ would vanish from the list on the next reseed. (The editor's
+	// save-as box is the one that WRITES anywhere, and it does expand "~".)
+	if strings.HasPrefix(name, "~") {
+		return "", fmt.Errorf("%q is a home path; give a name relative to the doc store", name)
+	}
 	path := filepath.Join(base, name)
 	// path == base happens for "." / "./" — rejecting it also covers the ext
 	// append below, which would otherwise produce a sibling of base, outside it.
@@ -258,6 +266,12 @@ func renameDoc(old, newPath string) error {
 	}
 	return os.Rename(old, newPath)
 }
+
+// deleteDoc removes a doc from disk — os.Remove, not RemoveAll: the lists hold files,
+// and a directory that somehow reached this call must not take its contents with it.
+// A missing file reports its error, which the confirm shows: the row promised a
+// document, so its absence is news rather than a no-op.
+func deleteDoc(path string) error { return os.Remove(path) }
 
 // createDoc writes an empty doc at path, making parent dirs as needed, without
 // clobbering: an existing file is left alone (the editor opens it either way).

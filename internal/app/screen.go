@@ -37,6 +37,10 @@ var (
 	// belongs to the panel that has one (ListPanelOpts.OnKey) and must not fire from
 	// the editor. ctrl+r is free everywhere — gote, the editor, and the router's globals.
 	renameKey = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "rename"))
+	// The docs list's other row key. ctrl+d is NOT free the way ctrl+r is — it is the
+	// editor's forward-delete — but it never has to be: docsKey fires only while the docs
+	// panel is focused and not running a /-filter, so the editor keeps its own chord.
+	deleteKey = key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete"))
 )
 
 // The preview modes ctrl+p cycles through. The render shows up as a pane beside the

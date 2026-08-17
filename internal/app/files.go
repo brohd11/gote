@@ -97,29 +97,29 @@ func (s *homeScreen) createFile(sh *core.Shared, name string) core.Action {
 }
 
 // docsKey is the docs panel's OnKey (ListPanelOpts.OnKey): ctrl+r renames the selected
-// doc. The hook fires only while the panel is focused and only when it is not running a
-// /-filter, so neither the editor nor a filter query can lose the chord. Reporting
-// false hands the key back to the list — which is what leaves the "+ new file" row
-// inert, since an action row has no path to rename.
+// doc, ctrl+d deletes it. The hook fires only while the panel is focused and only when it
+// is not running a /-filter, so neither the editor nor a filter query can lose either
+// chord. Reporting false hands the key back to the list — which is what leaves the
+// "+ new file" row inert for both, since an action row has no file to act on.
 func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Action, bool) {
-	if !core.MatchKey(k, renameKey) {
-		return core.Action{}, false
-	}
 	di, ok := it.(docItem)
 	if !ok {
 		return core.Action{}, false
 	}
-	return s.renameFile(sh, di.doc), true
+	switch {
+	case core.MatchKey(k, renameKey):
+		return s.renameFile(sh, di.doc), true
+	case core.MatchKey(k, deleteKey):
+		return s.deleteFile(sh, di.doc), true
+	}
+	return core.Action{}, false
 }
 
 // renameFile pushes the same row-anchored line edit newFile does, prefilled with the
 // doc's path relative to its origin root — so editing the directory part moves the file
 // as well as renaming it.
 func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
-	rel, err := filepath.Rel(doc.Root, doc.Path)
-	if err != nil {
-		rel = doc.Name // an unrelatable root still renames in place
-	}
+	rel := docRel(doc)
 	edit := s.rowLineEdit(sh, "new name",
 		func(sh *core.Shared, name string) core.Action { return s.submitRename(sh, doc, rel, name) })
 	edit.SetValue(rel)
@@ -162,6 +162,64 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 		}
 	}
 	return core.Seq(core.Pop(), core.PropagateAll(ReseedMsg{}))
+}
+
+// docRel is how a doc is named to the user in the boxes that act on it: its path
+// relative to the origin root, so two "notes.md" in different folders of a scan are told
+// apart. An unrelatable root falls back to the base name — a doc always has one.
+func docRel(doc DocFile) string {
+	rel, err := filepath.Rel(doc.Root, doc.Path)
+	if err != nil {
+		return doc.Name
+	}
+	return rel
+}
+
+// deleteFile raises the delete confirm. A y/n overlay rather than the rename box's
+// silent submit, because this is the one docs-list verb that destroys something: rename
+// is protected by renameDoc refusing an occupied target, but a delete has nothing to
+// refuse. The shape is dirtyPopup's — an overlay DialogScreen with the shared
+// confirm/cancel hints — and not CreatePopup, which builds an acknowledgement.
+//
+// An open doc gets a second line: deleting the file closes its buffer, so unsaved edits
+// go with it, and that is worth saying before the y rather than after.
+func (s *homeScreen) deleteFile(sh *core.Shared, doc DocFile) core.Action {
+	body := "delete " + docRel(doc) + "?"
+	if _, open := Of(sh).Doc(doc.Path); open {
+		body += "\n\nits open buffer closes; unsaved changes are lost"
+	}
+	return core.Push(&components.DialogScreen{
+		Title:   "delete",
+		Render:  func(*core.Shared) string { return body },
+		OnYes:   func(sh *core.Shared) core.Action { return s.submitDelete(sh, doc) },
+		Help:    components.DefaultHelpKeys,
+		Overlay: true,
+	})
+}
+
+// submitDelete is the confirm's OnYes: remove the file, then catch the app up with a
+// document that no longer exists. Errors surface as a popup swapped in over the confirm,
+// so the overlay's stack depth holds (submitRename's precedent).
+//
+// A doc that is OPEN has to leave the open set as well as the disk, or the Open list
+// would keep a row for a file nothing can save — and when it is also the doc in the
+// editor pane, the pane has to move off it, exactly as ctrl+x moves it (showDoc, shared
+// with editorExit). Focus needs no touching: the confirm pops back to the docs list,
+// which is where the key came from.
+func (s *homeScreen) submitDelete(sh *core.Shared, doc DocFile) core.Action {
+	if err := deleteDoc(doc.Path); err != nil {
+		return core.Replace(errPopup("delete", err))
+	}
+	c := Of(sh)
+	act := core.Action{}
+	if _, open := c.Doc(doc.Path); open {
+		next := c.CloseDoc(doc.Path)
+		if doc.Path == s.currentPath {
+			act = core.Async(s.showDoc(c, next))
+			s.refreshPreview()
+		}
+	}
+	return core.Seq(core.Pop(), act, core.PropagateAll(ReseedMsg{}))
 }
 
 // errPopup builds the error dialog a failed new-file submit is replaced with.

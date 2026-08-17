@@ -274,7 +274,10 @@ func TestNewDocPath(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"", "   ", ".", "./", "/etc/x", "../escape", "a/../../escape"} {
+	// "~/x" is neither absolute nor an escape by the prefix rule, so it is refused by
+	// name: these boxes stay inside the doc store, and expanding it would write a file
+	// the list could never show again.
+	for _, name := range []string{"", "   ", ".", "./", "/etc/x", "../escape", "a/../../escape", "~", "~/x.md"} {
 		if got, err := newDocPath(base, name, "md"); err == nil {
 			t.Errorf("newDocPath(%q) = %q, want an error", name, got)
 		}

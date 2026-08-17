@@ -60,9 +60,9 @@ func (s *homeScreen) helpText() string {
 		quitKey,
 		sidebarKey, actionsKey, previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey,
 	})
-	// ctrl+r acts on the selected row, so it is the docs list's key rather than the
-	// screen's — and, off the bar now, this is the only place it is written down.
-	writeSection("docs list", []key.Binding{renameKey})
+	// These act on the selected row, so they are the docs list's keys rather than the
+	// screen's — and, off the bar, this is the only place they are written down.
+	writeSection("docs list", []key.Binding{renameKey, deleteKey})
 	writeSection("editor", s.editor.HelpBindings())
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()

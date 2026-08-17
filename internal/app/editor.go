@@ -83,23 +83,32 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 		return core.Async(tea.Quit)
 	}
 	c := Of(sh)
-	next := c.CloseDoc(s.currentPath)
-	var cmd tea.Cmd
-	if next != "" {
-		s.currentPath = next
-		s.editor = c.OpenDoc(next, s.editorOpts())
+	cmd := s.showDoc(c, c.CloseDoc(s.currentPath))
+	if !s.sidebar {
+		s.setSidebar(true)
+	}
+	focus := s.modular.FocusSlot(0)
+	s.refreshPreview()
+	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.PropagateAll(ReseedMsg{}))
+}
+
+// showDoc points the editor pane at path — an already-open doc, since the caller took it
+// from the open set — or at a fresh scratch buffer when path is "" and no doc remains.
+// Shared by ctrl+x and the docs list's delete: both take a document away from the pane
+// and have to leave it showing something. enforcePreview runs after SetChild, so the
+// layout is rebuilt around the new buffer (openDoc's ordering); the returned cmd is the
+// child's Init and has to reach bubbletea.
+func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
+	if path != "" {
+		s.currentPath = path
+		s.editor = c.OpenDoc(path, s.editorOpts())
 	} else {
 		s.currentPath = ""
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
-	cmd = s.editorPanel.SetChild(s.editor)
-	if !s.sidebar {
-		s.setSidebar(true)
-	}
+	cmd := s.editorPanel.SetChild(s.editor)
 	s.enforcePreview()
-	focus := s.modular.FocusSlot(0)
-	s.refreshPreview()
-	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.PropagateAll(ReseedMsg{}))
+	return cmd
 }
 
 // editorRelease is the editor pane's OnRelease hook (esc): hand the keys back to the

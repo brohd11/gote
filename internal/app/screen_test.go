@@ -538,7 +538,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 	for _, want := range []string{
 		"panes", "back", "select", "filter", // navigation, the bar's remaining hints
 		"ctrl+b", "sidebar", "actions", // moved off the bar
-		"ctrl+r", "rename", // the docs list's own key, also off the bar
+		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", // gote's alt chords
 		"alt+c", "alt+v", "alt+backspace", // the editor's, via HelpBindings
 	} {
@@ -1442,6 +1442,105 @@ func TestRenameMovesFile(t *testing.T) {
 	}
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatal("a successful rename should pop back to the home screen")
+	}
+}
+
+// pressDelete sends ctrl+d and returns the confirm it pushed, if any.
+func pressDelete(model tea.Model) (tea.Model, *components.DialogScreen) {
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	dlg, _ := model.(core.Router).Top().(*components.DialogScreen)
+	return model, dlg
+}
+
+// TestDeletePrompt: ctrl+d on a doc row raises the confirm naming the doc, and esc backs
+// out of it leaving the file alone — the whole point of putting a confirm in front of the
+// one docs-list verb that destroys something. The "+ new file" row has no file to delete,
+// so the key falls through to the list there and nothing is pushed.
+func TestDeletePrompt(t *testing.T) {
+	model, _, sh, dir := renameFixture(t, filepath.Join("sub", "todo.md"), "body")
+
+	model, dlg := pressDelete(model)
+	if dlg == nil {
+		t.Fatal("ctrl+d on a doc row should push the delete confirm")
+	}
+	if got := stripANSI(dlg.View(sh)); !strings.Contains(got, filepath.Join("sub", "todo.md")) {
+		t.Fatalf("the confirm should name the doc, got:\n%s", got)
+	}
+
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatal("esc should back out of the confirm")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sub", "todo.md")); err != nil {
+		t.Fatalf("a cancelled delete must leave the file alone: %v", err)
+	}
+
+	// Up onto "+ new file", where the key is inert.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if _, dlg := pressDelete(model); dlg != nil {
+		t.Fatal("ctrl+d on the + new file row should do nothing")
+	}
+}
+
+// TestDeleteRemovesFile: confirming removes the file from disk and reseeds the docs list
+// off it, popping back to the home screen the way a rename does.
+func TestDeleteRemovesFile(t *testing.T) {
+	model, _, sh, dir := renameFixture(t, "old.md", "body")
+
+	model, dlg := pressDelete(model)
+	if dlg == nil {
+		t.Fatal("no delete confirm")
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+	if _, err := os.Stat(filepath.Join(dir, "old.md")); !os.IsNotExist(err) {
+		t.Fatalf("the file should be gone, stat err = %v", err)
+	}
+	if files := Of(sh).Files; len(files) != 0 {
+		t.Fatalf("the docs list should have reseeded empty, got %+v", files)
+	}
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatal("a completed delete should pop back to the home screen")
+	}
+}
+
+// TestDeleteOpenDoc: deleting the doc the editor pane is showing takes it out of the open
+// set and moves the pane off it — onto the next open doc, and onto a fresh scratch buffer
+// when that was the only one. A file with no buffer left holding it is the point: without
+// the close, the Open list would keep a row for a document that no longer exists.
+func TestDeleteOpenDoc(t *testing.T) {
+	model, s, sh, dir := renameFixture(t, "old.md", "body")
+
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open it
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})   // back to the list
+	ed := s.editor
+
+	model, dlg := pressDelete(model)
+	if dlg == nil {
+		t.Fatal("no delete confirm")
+	}
+	if got := stripANSI(dlg.View(sh)); !strings.Contains(got, "unsaved changes are lost") {
+		t.Fatalf("an open doc's confirm should say the buffer closes, got:\n%s", got)
+	}
+	r := model.(core.Router)
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	pump(r, cmd)
+
+	if _, err := os.Stat(filepath.Join(dir, "old.md")); !os.IsNotExist(err) {
+		t.Fatalf("the file should be gone, stat err = %v", err)
+	}
+	c := Of(sh)
+	if _, open := c.Doc(filepath.Join(dir, "old.md")); open {
+		t.Fatal("the deleted doc must leave the open set")
+	}
+	if len(c.OpenDocs()) != 0 {
+		t.Fatalf("the Open list should be empty, got %+v", c.OpenDocs())
+	}
+	if s.editor == ed || s.currentPath != "" {
+		t.Fatalf("the pane should have swapped to a scratch buffer, currentPath = %q", s.currentPath)
+	}
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatal("a completed delete should pop back to the home screen")
 	}
 }
 
