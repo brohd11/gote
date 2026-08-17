@@ -868,11 +868,29 @@ func TestPreviewOverlayKeepsWrapper(t *testing.T) {
 	doc := s.previewScreen(s.editor.Text)
 
 	next, _ := doc.Update(sh, tea.KeyMsg{Type: tea.KeyDown})
-	if _, ok := next.(*previewDoc); !ok {
+	wrapped, ok := next.(*previewDoc)
+	if !ok {
 		t.Fatalf("the reader should stay a *previewDoc, got %T", next)
 	}
-	if mask := doc.ChromeMask(); !mask.Breadcrumb || mask.Help {
-		t.Errorf("the reader should mask the breadcrumb and keep the help bar, got %+v", mask)
+	// The mask is the thing the wrapper exists to carry, so check it through the value
+	// Update handed back rather than the one we still hold.
+	if mask := wrapped.ChromeMask(); mask != chromeMask(false) {
+		t.Errorf("the reader lost its chrome mask across Update, got %+v", mask)
+	}
+}
+
+// TestReaderWearsTheEditorsChrome: the home screen and the full-screen reader pushed over
+// it must mask identically in each launch mode. Reader-only chrome (or chrome only the
+// editor has) makes alt+p read as leaving the app rather than as a way of looking at the
+// document already open — which is exactly what the reader's own hand-tuned mask used to
+// do. They share chromeMask; this is what keeps them from drifting apart again.
+func TestReaderWearsTheEditorsChrome(t *testing.T) {
+	for _, minimal := range []bool{false, true} {
+		home := (&homeScreen{minimal: minimal}).ChromeMask()
+		reader := (&previewDoc{minimal: minimal}).ChromeMask()
+		if home != reader {
+			t.Errorf("minimal=%v: home masks %+v but the reader masks %+v", minimal, home, reader)
+		}
 	}
 }
 
@@ -957,6 +975,15 @@ func TestLaunchPreview(t *testing.T) {
 	// Only minimal drops it — pushed from the ordinary launch, the exit hint stays.
 	if mask := (&previewDoc{minimal: false}).ChromeMask(); mask.Help {
 		t.Fatal("the ordinary launch's reader should keep its help bar — it is the exit")
+	}
+	// And the breadcrumb goes the same way: masked with the editor's in minimal mode,
+	// kept with it otherwise, so the reader never wears chrome the screen it was opened
+	// over isn't wearing.
+	if mask := (&previewDoc{minimal: false}).ChromeMask(); mask.Breadcrumb {
+		t.Error("the ordinary launch's reader should keep the breadcrumb")
+	}
+	if mask := (&previewDoc{minimal: true}).ChromeMask(); !mask.Breadcrumb {
+		t.Error("a minimal launch's reader should mask the breadcrumb")
 	}
 
 	// Everything that opens no markdown document launches exactly as it always did.

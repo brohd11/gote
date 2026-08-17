@@ -295,20 +295,27 @@ func (s *homeScreen) dirtyDocs(sh *core.Shared) []string {
 	return names
 }
 
-// ChromeMask hides persistent router chrome in minimal mode, giving the editor the
-// whole terminal in steady state. The router asks the top screen per render, so a pushed
-// overlay is unaffected and no state is left to restore.
+// chromeMask is gote's ONE chrome rule, shared by this screen and the full-screen reader
+// pushed over it (previewDoc): minimal mode hides every persistent element, giving the
+// body the whole terminal in steady state; an ordinary launch keeps the breadcrumb and
+// the help bar. The router asks the top screen per render, so a pushed overlay is
+// unaffected and no state is left to restore.
 //
 // Status is masked in BOTH modes — not because gote has no status line, but because the
 // router draws it as a row taken off the body, which makes every pane jump when a
-// clipboard result appears and jump back when it clears. This screen paints it itself
+// clipboard result appears and jump back when it clears. The screens paint it themselves
 // (View/HelpView, see status.go) in space the frame already spends.
-func (s *homeScreen) ChromeMask() core.ChromeMask {
-	if s.minimal {
+//
+// The reader shares this rather than tuning a mask of its own: chrome it showed or hid
+// differently from the screen it was opened over would read as a different app.
+func chromeMask(minimal bool) core.ChromeMask {
+	if minimal {
 		return core.FullscreenMask()
 	}
 	return core.ChromeMask{Status: true}
 }
+
+func (s *homeScreen) ChromeMask() core.ChromeMask { return chromeMask(s.minimal) }
 
 // CrumbLabel contributes the active store, ad-hoc scan, or named vault.
 func (s *homeScreen) CrumbLabel(short bool) string {

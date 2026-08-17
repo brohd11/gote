@@ -66,7 +66,9 @@ func (s *homeScreen) cyclePreview() core.Action {
 // the --preview launch reads the file off disk (see homeScreen.Init).
 func (s *homeScreen) previewScreen(src func() string) *previewDoc {
 	return &previewDoc{minimal: s.minimal, DocScreen: components.NewDocScreen(components.DocOpts{
-		Title:  "preview · " + s.previewName(),
+		// Document first, mode second — the editor's own title bar is the filename, and
+		// the reader is a view of the same document, so the two bars line up.
+		Title:  s.previewName() + " · preview",
 		Crumb:  "preview",
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
 		OnKey: func(_ *core.Shared, k string) (core.Action, bool) {
@@ -78,16 +80,17 @@ func (s *homeScreen) previewScreen(src func() string) *previewDoc {
 	})}
 }
 
-// previewDoc is the full-screen reader: bubblestack's read-only DocScreen plus the chrome
-// mask that makes it one. The router asks only the TOP screen for its mask, so without
-// this the breadcrumb (and, in ModeFile, everything homeScreen.ChromeMask had just
-// suppressed) would come back the moment the reader was pushed.
+// previewDoc is the full-screen reader: bubblestack's read-only DocScreen plus a chrome
+// mask. The mask is needed at all because the router asks only the TOP screen for one —
+// without it, everything homeScreen.ChromeMask had just suppressed would come back the
+// moment the reader was pushed.
 //
-// The help bar follows the launch it was opened from: an ordinary launch keeps it (one
-// dim line naming the way out is not noise, it is the exit), while a ModeFile launch
-// drops it, because the editor underneath has none either — a reader that grew chrome
-// its own screen doesn't have would read as a different app. There the exit (esc, or
-// alt+p again) goes unlabeled, which is the price of the chrome-free pair.
+// It masks by carrying the launch mode down rather than by claiming the whole canvas: the
+// reader is a way of looking at the document the editor underneath is holding, not a
+// different place, so it wears that editor's chrome. In an ordinary launch that means the
+// breadcrumb (which gains a "preview" segment) and the help bar, one dim line naming the
+// way out. A ModeFile launch drops both, because the editor underneath has neither, and
+// the exit (esc, or alt+p again) goes unlabeled — the price of the chrome-free pair.
 //
 // Status is masked in both cases, as it is on homeScreen: the reader paints the message
 // itself so its body never changes height (View/HelpView, see status.go).
@@ -97,11 +100,7 @@ type previewDoc struct {
 	h       int // the body height the router last handed down, for statusOver
 }
 
-func (p *previewDoc) ChromeMask() core.ChromeMask {
-	mask := core.FullscreenMask()
-	mask.Help = p.minimal
-	return mask
-}
+func (p *previewDoc) ChromeMask() core.ChromeMask { return chromeMask(p.minimal) }
 
 func (p *previewDoc) SetSize(sh *core.Shared, width, bodyHeight int) {
 	p.h = bodyHeight
