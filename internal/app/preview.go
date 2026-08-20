@@ -8,6 +8,7 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -75,6 +76,14 @@ func (s *homeScreen) previewScreen() *previewDoc {
 		Title:  s.previewName() + " · preview",
 		Crumb:  "preview",
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
+		// The default DocScreen bar names scroll and back only, so alt+p — the key that
+		// opened this and the one a reader reaches for to close it — went unwritten
+		// everywhere while the OnKey below answered it.
+		Help: []key.Binding{
+			core.Hint("scroll", core.Keys.Up, core.Keys.Down),
+			core.Hint("back", core.Keys.Back),
+			core.Hint("close", fullPreviewKey),
+		},
 		OnKey: func(_ *core.Shared, k string) (core.Action, bool) {
 			if core.MatchKey(k, fullPreviewKey) {
 				return core.Pop(), true

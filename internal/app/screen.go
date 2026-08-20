@@ -131,6 +131,9 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	s.launchPreview = c.Preview && minimal && s.previewable()
 	s.editorPanel = components.NewScreenPanel(s.editor)
 	s.previewPanel = components.NewScrollContainer("preview")
+	// A bare "preview" on the edge, matching the two bordered list panels beside it —
+	// the pane's keys are in the help bar (PanelHelp) where the rest of the screen's are.
+	s.previewPanel.SetKeyHints(false)
 	s.modular = s.buildModular()
 	return s
 }

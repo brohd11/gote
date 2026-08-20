@@ -69,7 +69,7 @@ func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 // every path closes the buffer): the doc leaves the open set and the pane swaps to
 // the next open doc, or to a fresh scratch buffer when none remain. Focus returns to
 // the docs list, unhiding the sidebar first when needed. This is the "done with this
-// buffer" gesture, not an escape hatch — esc (editorRelease) and shift+← both leave
+// buffer" gesture, not an escape hatch — esc (editorRelease) and shift+tab both leave
 // the pane at any time, and unhiding the sidebar is what makes ctrl+x meaningful with
 // it hidden, where there is no other pane to move to. The reseed refreshes both lists:
 // the close shows in Open, and a save-as'd file shows in Docs.
@@ -113,7 +113,7 @@ func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
 
 // editorRelease is the editor pane's OnRelease hook (esc): hand the keys back to the
 // docs list without touching the buffer. The editor captures every printable key, so
-// leaving it otherwise costs the shift+← pane chord or ctrl+x — and ctrl+x CLOSES the
+// leaving it otherwise costs the shift+tab pane chord or ctrl+x — and ctrl+x CLOSES the
 // doc, which is not what "let me go back to the list" should mean. The sidebar is
 // unhidden first for the same reason ctrl+x does it: with it hidden there is no other
 // pane to hand focus to.
