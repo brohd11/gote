@@ -205,7 +205,14 @@ type newFileItem struct{}
 
 func (newFileItem) Title() string       { return "+ new file" }
 func (newFileItem) Description() string { return "(rel/path)" }
-func (newFileItem) FilterValue() string { return "new file" }
+
+// An empty filter value keeps the row out of every search: a filter is a question about
+// which DOCUMENTS you want, and an action row ranked among the answers is noise — worse,
+// it used to answer to "new", "ne" and "ile" and could sort anywhere among the matches,
+// since bubbles orders by fuzzy rank. Nothing matches an empty target, so the row leaves
+// the moment a query has a character in it; an empty query filters nothing and still
+// shows it, which is right — there is nothing to narrow yet.
+func (newFileItem) FilterValue() string { return "" }
 
 // No suffix: the hint about what to type belongs in the line edit this row opens, not in
 // the column the doc paths need. It was also the one row whose suffix was pure decoration —

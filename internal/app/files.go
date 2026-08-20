@@ -47,18 +47,19 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 
 // rowLineEdit builds a floating line edit sitting exactly over the selected docs row —
 // the shape both the new-file and rename boxes take. Anchor math: the docs panel is
-// column 0 row 0 of the layout, so its outer top-left is (0, BodyY); its border takes
-// one row, and the LineEdit anchor sits one row above the covered row (its own top
-// border) — the two cancel, so the anchor is BodyY + the list-relative row. x=0 and
-// width=sidebarWidth land the box's borders exactly on the panel's own.
+// column 0 row 0 of the layout, so its outer top-left is (0, BodyY); RowY gives the row
+// WITHIN the panel (its border, and its filter line when one is live), and the LineEdit
+// anchor sits one row above the row it covers, since it draws its own top border there.
+// The panel owns that offset rather than this file assuming it: the filter line makes it
+// vary, and it used to cancel against the border exactly. x=0 and width=sidebarWidth
+// land the box's borders exactly on the panel's own.
 func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
-	l := s.docsPanel.List()
-	row, ok := components.CompactListItemRow(l, l.Index())
+	row, ok := s.docsPanel.RowY(s.docsPanel.List().Index())
 	if !ok {
-		row = 0 // the selected row is on-page by construction; never die on it
+		row = 1 // the selected row is on-page by construction; never die on it
 	}
-	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row, sidebarWidth, onDone, nil)
+	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row-1, sidebarWidth, onDone, nil)
 	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
 	return edit
 }

@@ -8,10 +8,12 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -1443,6 +1445,117 @@ func TestHelpKey(t *testing.T) {
 
 	if _, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?"), Alt: true}); act.Msg == nil {
 		t.Fatal("alt+? should push the help overlay even from the editor")
+	}
+}
+
+// scanHome seeds a scan root with the named docs and builds the home screen over it.
+func scanHome(t *testing.T, names ...string) (*homeScreen, *core.Shared) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("body"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return newHomeWith(t, Options{Mode: ModeScan, Dir: dir})
+}
+
+// filterList drives a list into an applied filter for query. bubbles computes its
+// matches in a command, so each keystroke's command is run and fed back — under a
+// deadline, because the same batch carries the filter cursor's blink TIMER.
+func filterList(t *testing.T, l *list.Model, query string) {
+	t.Helper()
+	var run func(tea.Cmd)
+	run = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		// Under a deadline, and flattened: the filter's matches and the cursor's blink
+		// TIMER travel in the same batch, so a pump that runs commands straight through
+		// stalls for the blink interval on every keystroke.
+		done := make(chan tea.Msg, 1)
+		go func() { done <- cmd() }()
+		var msg tea.Msg
+		select {
+		case msg = <-done:
+		case <-time.After(50 * time.Millisecond):
+			return
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				run(c)
+			}
+			return
+		}
+		if msg != nil {
+			*l, _ = l.Update(msg)
+		}
+	}
+	*l, _ = l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	for _, r := range query {
+		var cmd tea.Cmd
+		*l, cmd = l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		run(cmd)
+	}
+	var cmd tea.Cmd
+	*l, cmd = l.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	run(cmd)
+}
+
+// rowTitles names the docs list's visible rows.
+func rowTitles(l *list.Model) []string {
+	out := []string{}
+	for _, it := range l.VisibleItems() {
+		if t, ok := it.(interface{ Title() string }); ok {
+			out = append(out, t.Title())
+		}
+	}
+	return out
+}
+
+// TestFilterDropsNewFileRow: the "+ new file" row is an action, not a document, so a
+// query must not rank it among the documents. It used to answer to "new", "ne" and
+// "ile" — and bubbles orders matches by fuzzy rank, so it could land anywhere in them.
+func TestFilterDropsNewFileRow(t *testing.T) {
+	s, _ := scanHome(t, "news.md")
+	l := s.docsPanel.List()
+	if len(rowTitles(l)) != 2 {
+		t.Fatalf("setup: want the action row and one doc, got %v", rowTitles(l))
+	}
+
+	filterList(t, l, "ne")
+	for _, it := range l.VisibleItems() {
+		if _, ok := it.(newFileItem); ok {
+			t.Error(`the "+ new file" row must not survive a filter`)
+		}
+	}
+	if got := rowTitles(l); len(got) != 1 || got[0] != "news.md" {
+		t.Fatalf("the matching document should be the only row, got %v", got)
+	}
+}
+
+// TestRefreshKeepsFilter is the reported sequence: filter the docs list, accept it,
+// then run Actions ▸ ⟳ Refresh (which is a ReseedMsg broadcast). The reseed used to
+// wipe the match set and leave the sidebar blank.
+func TestRefreshKeepsFilter(t *testing.T) {
+	s, sh := scanHome(t, "notes.md", "todo.md")
+	l := s.docsPanel.List()
+
+	filterList(t, l, "note")
+	if got := rowTitles(l); len(got) != 1 || got[0] != "notes.md" {
+		t.Fatalf("setup: want the one matching doc, got %v", got)
+	}
+
+	s.Receive(sh, ReseedMsg{})
+
+	if l.FilterState() == list.Unfiltered {
+		t.Fatal("a refresh must not drop the filter")
+	}
+	if got := rowTitles(l); len(got) != 1 || got[0] != "notes.md" {
+		t.Fatalf("the filtered rows should survive the refresh, got %v", got)
+	}
+	if l.SelectedItem() == nil {
+		t.Fatal("a refreshed filtered list must still have a selection")
 	}
 }
 
