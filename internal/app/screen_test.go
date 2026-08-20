@@ -1524,6 +1524,55 @@ func TestRenameMovesFile(t *testing.T) {
 	}
 }
 
+// TestSaveAsConfirmFlow is the router-level guard for the save-as confirm: the box is
+// seeded with the buffer's own path, so a changed name used to move the document on a
+// bare enter. Driven through the real stack because that is what the confirm relies on —
+// it is pushed OVER the box, so no leaves the typed name intact to fix.
+func TestSaveAsConfirmFlow(t *testing.T) {
+	model, _, _, dir := renameFixture(t, "old.md", "body")
+
+	// Open the doc into the editor pane, then ctrl+s.
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = pumpModel(model, cmd)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
+	if edit == nil {
+		t.Fatal("ctrl+s should raise the save-as box")
+	}
+
+	moved := filepath.Join(dir, "moved.md")
+	edit.SetValue(moved)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if _, ok := model.(core.Router).Top().(*components.DialogScreen); !ok {
+		t.Fatalf("a changed name should raise the confirm, got %T", model.(core.Router).Top())
+	}
+	if _, err := os.Stat(moved); !os.IsNotExist(err) {
+		t.Fatalf("nothing may be written before the y, stat err = %v", err)
+	}
+
+	// No returns to the box with the typed name still in it — the reason to say no is
+	// usually a typo, and retyping the whole path would be the wrong penalty for one.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, ok := model.(core.Router).Top().(*components.LineEditScreen); !ok {
+		t.Fatalf("esc should return to the save-as box, got %T", model.(core.Router).Top())
+	}
+
+	// Enter again with nothing retyped, then y: the name survived the cancel (the write
+	// below lands on it), both overlays come off, and the file appears.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model = pumpModel(model, cmd)
+	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+		t.Fatalf("a confirmed save-as should land back on the home screen, got %T", model.(core.Router).Top())
+	}
+	if b, err := os.ReadFile(moved); err != nil || string(b) != "body" {
+		t.Fatalf("the new path should hold the buffer: %q, err = %v", b, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "old.md")); err != nil || string(b) != "body" {
+		t.Fatalf("save-as leaves the old file alone: %q, err = %v", b, err)
+	}
+}
+
 // pressDelete sends ctrl+d and returns the confirm it pushed, if any.
 func pressDelete(model tea.Model) (tea.Model, *components.DialogScreen) {
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
