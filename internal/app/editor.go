@@ -38,7 +38,7 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 			return core.Seq(core.Pop(), s.cyclePreview())
 		}},
 		{Label: "Full preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), core.Push(s.previewScreen()))
+			return core.Seq(core.Pop(), s.toggleFullPreview())
 		}},
 		{Label: "Toggle wrap", Pick: func(*core.Shared) core.Action {
 			s.editor.ToggleWrap()
@@ -61,8 +61,8 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	Of(sh).RekeyDoc(s.currentPath, path, s.editor)
 	s.currentPath = path
-	s.enforcePreview() // a save-as can rename markdown out of markdown under an open pane
-	return core.PropagateAll(ReseedMsg{})
+	// A save-as can rename markdown out of markdown under an open preview.
+	return core.Seq(core.Async(s.enforcePreview()), core.PropagateAll(ReseedMsg{}))
 }
 
 // editorExit is the editor pane's OnExit hook (ctrl+x — clean, saved, or discarded;
@@ -95,9 +95,12 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 // showDoc points the editor pane at path — an already-open doc, since the caller took it
 // from the open set — or at a fresh scratch buffer when path is "" and no doc remains.
 // Shared by ctrl+x and the docs list's delete: both take a document away from the pane
-// and have to leave it showing something. enforcePreview runs after SetChild, so the
+// and have to leave it showing something. enforcePreview runs after the swap, so the
 // layout is rebuilt around the new buffer (openDoc's ordering); the returned cmd is the
 // child's Init and has to reach bubbletea.
+//
+// No seeding here, unlike openDoc: every doc this can be handed is already in the open
+// set and therefore already loaded, and the "" case is a scratch buffer with no file.
 func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
 	if path != "" {
 		s.currentPath = path
@@ -106,9 +109,8 @@ func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
 		s.currentPath = ""
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
-	cmd := s.editorPanel.SetChild(s.editor)
-	s.enforcePreview()
-	return cmd
+	cmd := s.paneChild()
+	return tea.Batch(cmd, s.enforcePreview())
 }
 
 // editorRelease is the editor pane's OnRelease hook (esc): hand the keys back to the

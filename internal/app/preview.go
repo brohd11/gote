@@ -8,13 +8,13 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// The markdown preview: the side pane and the full-screen reader, what may be previewed,
-// and keeping the pane in sync with the editor's buffer and scroll position. The homeScreen
-// fields these read (preview, previewSrc/W/Map/At) are declared with the rest in screen.go.
+// The markdown preview: the ctrl+p side pane and the alt+p reader that takes the editor's
+// own pane, what may be previewed, and keeping the side pane in sync with the editor's
+// buffer and scroll position. The homeScreen fields these read (preview, previewPrior,
+// fullPreview, previewSrc/W/Map/At) are declared with the rest in screen.go.
 
 // previewable reports whether ctrl+p has anything worth showing. The pane is a
 // markdown reader — it joins paragraphs and re-flows to its own width — so pointing it
@@ -31,113 +31,138 @@ func (s *homeScreen) previewable() bool {
 	return false
 }
 
-// enforcePreview closes a pane the current document no longer earns — the doc switched
-// to a non-markdown file, or a save-as renamed the open one out of markdown underneath
-// it. Called wherever currentPath moves; a no-op when the pane is already off.
-func (s *homeScreen) enforcePreview() {
-	if s.preview != previewOff && !s.previewable() {
+// enforcePreview closes a preview the current document no longer earns — the doc switched
+// to a non-markdown file, or a save-as renamed the open one out of markdown underneath it.
+// Called wherever currentPath moves; a no-op when neither preview is up.
+//
+// It returns closeFullPreview's cmd (the editor's Init, re-armed as it goes back into the
+// pane) rather than swallowing it: today that cmd is always nil — every editor gote hands
+// the pane is loaded by then — but a caller that batches it cannot be broken by a future
+// where it isn't.
+func (s *homeScreen) enforcePreview() tea.Cmd {
+	if s.previewable() {
+		return nil
+	}
+	cmd := s.closeFullPreview().Cmd
+	if s.preview != previewOff {
 		s.setPreview(previewOff)
 	}
+	return cmd
 }
 
-// cyclePreview steps ctrl+p through the panes: off → the reader → off. Every rung is
+// cyclePreview steps ctrl+p through the panes: off → the side pane → off. Every rung is
 // a layout change, so nothing here touches the router's stack and there is no
-// navigation state to keep in sync. On a file the reader would mangle, ctrl+p does
+// navigation state to keep in sync. On a file the renderer would mangle, ctrl+p does
 // nothing at all.
+//
+// The reader hands the editor back first: ctrl+p is the SIDE pane's key, and the two
+// previews are never on screen together (the rule alt+p keeps from its own side).
 func (s *homeScreen) cyclePreview() core.Action {
 	if !s.previewable() {
 		return core.Action{}
 	}
+	act := s.closeFullPreview() // restores whatever pane alt+p folded away, then:
 	switch s.preview {
 	case previewOff:
 		s.setPreview(previewPane)
 	case previewPane:
 		s.setPreview(previewOff)
 	}
-	return core.Action{}
+	return act
 }
 
-// previewScreen is alt+p's full-width reader, pushed over whatever the editor is doing.
-// alt+p and esc both pop it, which is why the home screen tracks only the pane — an esc
-// it never sees cannot desync it, and the pane it was opened over is still there
-// underneath on the way back.
+// previewScreen builds alt+p's reader: bubblestack's read-only DocScreen, hosted as the
+// EDITOR PANE's child (toggleFullPreview) rather than pushed over the app. That is what
+// leaves the sidebar drawn and toggleable beside it — the reader covers the editor and
+// nothing else — and it is why the reader needs no chrome mask of its own any more: the
+// home screen is still the top screen, so the mask the router asks for every frame is the
+// one it was already answering with.
 //
 // Every caller reads the live buffer, the --preview launch included — it seeds the editor
-// before pushing this, so there is no longer a launch that has to render off disk (see
-// homeScreen.Init).
+// before swapping the reader in, so there is no launch that renders off disk (homeScreen.Init).
 //
 // The buffer accessor is bound HERE rather than called from inside the render closure: the
-// reader is opened over one document, and a doc swap underneath it must not retarget it.
-func (s *homeScreen) previewScreen() *previewDoc {
+// reader is built over ONE document, so a doc swap builds a new reader (paneChild) instead
+// of leaving this one aimed at the editor that has left the pane.
+func (s *homeScreen) previewScreen() *components.DocScreen {
 	src := s.editor.Text
-	return &previewDoc{minimal: s.minimal, DocScreen: components.NewDocScreen(components.DocOpts{
+	return components.NewDocScreen(components.DocOpts{
 		// Document first, mode second — the editor's own title bar is the filename, and
 		// the reader is a view of the same document, so the two bars line up.
 		Title:  s.previewName() + " · preview",
-		Crumb:  "preview",
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
-		// The default DocScreen bar names scroll and back only, so alt+p — the key that
-		// opened this and the one a reader reaches for to close it — went unwritten
-		// everywhere while the OnKey below answered it.
-		Help: []key.Binding{
-			core.Hint("scroll", core.Keys.Up, core.Keys.Down),
-			core.Hint("back", core.Keys.Back),
-			core.Hint("close", fullPreviewKey),
-		},
-		OnKey: func(_ *core.Shared, k string) (core.Action, bool) {
-			if core.MatchKey(k, fullPreviewKey) {
-				return core.Pop(), true
-			}
-			return core.Action{}, false
-		},
-	})}
+		// No Help and no OnKey, which is what being a pane rather than a screen costs and
+		// saves: a ScreenPanel contributes no PanelHelp, so the way out is named by the
+		// host's bar instead (buildModular), and closing the reader is a change to the
+		// HOME screen's state, so the home screen claims alt+p and esc before the pane is
+		// ever consulted. A Crumb would go the same way — the stack never moves, so the
+		// breadcrumb stays the editor's.
+	})
 }
 
-// previewDoc is the full-screen reader: bubblestack's read-only DocScreen plus a chrome
-// mask. The mask is needed at all because the router asks only the TOP screen for one —
-// without it, everything homeScreen.ChromeMask had just suppressed would come back the
-// moment the reader was pushed.
+// toggleFullPreview is the whole of alt+p: the reader takes the editor pane, or gives it
+// back. Nothing is pushed and nothing is masked — the layout, the sidebar and the
+// breadcrumb are the home screen's throughout, which is what makes the sidebar usable
+// while the reader is up (pick a doc and it opens INTO the preview, see paneChild).
 //
-// It masks by carrying the launch mode down rather than by claiming the whole canvas: the
-// reader is a way of looking at the document the editor underneath is holding, not a
-// different place, so it wears that editor's chrome. In an ordinary launch that means the
-// breadcrumb (which gains a "preview" segment) and the help bar, one dim line naming the
-// way out. A ModeFile launch drops both, because the editor underneath has neither, and
-// the exit (esc, or alt+p again) goes unlabeled — the price of the chrome-free pair.
-//
-// Status is masked in both cases, as it is on homeScreen: the reader paints the message
-// itself so its body never changes height (View/HelpView, see status.go).
-type previewDoc struct {
-	*components.DocScreen
-	minimal bool
-	h       int // the body height the router last handed down, for statusOver
-}
-
-func (p *previewDoc) ChromeMask() core.ChromeMask { return chromeMask(p.minimal) }
-
-func (p *previewDoc) SetSize(sh *core.Shared, width, bodyHeight int) {
-	p.h = bodyHeight
-	p.DocScreen.SetSize(sh, width, bodyHeight)
-}
-
-func (p *previewDoc) View(sh *core.Shared) string {
-	body := p.DocScreen.View(sh)
-	if p.minimal {
-		return statusOver(sh, body, p.h)
+// Minimal mode needs no branch here: it has no sidebar, so the editor pane IS the
+// terminal and the reader covers it exactly as the pushed screen used to.
+func (s *homeScreen) toggleFullPreview() core.Action {
+	if s.fullPreview != nil {
+		return s.closeFullPreview()
 	}
-	return body
+	if !s.previewable() {
+		return core.Action{}
+	}
+	// One preview on screen at a time: the ctrl+p column folds away and is restored on
+	// the way out, so alt+p is a look at the document rather than a rearrangement of it.
+	s.previewPrior, s.preview = s.preview, previewOff
+	s.fullPreview = s.previewScreen()
+	cmd := s.editorPanel.SetChild(s.fullPreview)
+	s.relayout()
+	return core.Async(cmd)
 }
 
-func (p *previewDoc) HelpView(sh *core.Shared) string {
-	return statusBar(sh, p.DocScreen.HelpView(sh))
+// closeFullPreview puts the editor back in its pane, exactly as it stood: SetChild runs
+// the child's Init, and EditorScreen.Init is idempotent (its loaded flag), so the buffer,
+// cursor, scroll and undo history survive the round trip rather than being re-read.
+func (s *homeScreen) closeFullPreview() core.Action {
+	if s.fullPreview == nil {
+		return core.Action{}
+	}
+	s.fullPreview = nil
+	cmd := s.editorPanel.SetChild(s.editor)
+	s.preview, s.previewPrior = s.previewPrior, previewOff
+	s.relayout()
+	return core.Async(cmd)
 }
 
-// Update keeps the wrapper on the stack. DocScreen.Update answers with its own pointer,
-// which the router stores back — dropping this type, and with it the mask, on the first
-// keystroke the reader received.
-func (p *previewDoc) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
-	_, act := p.DocScreen.Update(sh, msg)
-	return p, act
+// paneChild points the editor pane at the document the screen has just moved to — the
+// editor itself, or a reader over it while the full preview is up. Rebuilding the reader
+// is what makes a doc picked from the sidebar open INTO the preview: previewScreen binds
+// one editor's Text at build time, and the old reader would otherwise keep rendering the
+// document that has just left.
+func (s *homeScreen) paneChild() tea.Cmd {
+	if s.fullPreview == nil {
+		return s.editorPanel.SetChild(s.editor)
+	}
+	s.fullPreview = s.previewScreen()
+	return s.editorPanel.SetChild(s.fullPreview)
+}
+
+// seedForPreview loads a freshly opened buffer off disk when the reader — not the editor —
+// is what the pane is about to show. EditorScreen.Init reads ASYNCHRONOUSLY and the result
+// comes back as a message the router hands to the top screen, which routes it to the pane's
+// child: with the reader in that seat the load reaches nothing, leaving an empty buffer
+// aimed at a file that is not empty, which the first save would truncate. SetText marks the
+// editor loaded, so the Init that follows dispatches no read at all.
+//
+// Only for a buffer that is NEW to the open set: an already-open one may hold unsaved
+// edits, and seeding those away is the very loss this exists to prevent.
+func (s *homeScreen) seedForPreview(ed *components.EditorScreen, path string, fresh bool) {
+	if fresh && s.fullPreview != nil {
+		ed.SetText(fileText(path))
+	}
 }
 
 // previewName labels the preview with the doc being edited, or the scratch buffer.
@@ -149,15 +174,23 @@ func (s *homeScreen) previewName() string {
 }
 
 // setPreview swaps which preview pane (if any) sits beside the editor, rebuilding the
-// layout around it. The rebuild auto-focuses the first slot, so focus is put back on
-// the editor: ctrl+p is a view toggle, not a navigation.
+// layout around it. ctrl+p is a view toggle, not a navigation, so focus goes back to the
+// editor pane.
 func (s *homeScreen) setPreview(mode int) {
 	if s.preview == mode {
 		return
 	}
 	s.preview = mode
-	// Focus lands on the editor pane, which has no on-focus work to hand back; dropping
-	// the cmd keeps this off the four-deep enforcePreview/cyclePreview call chain.
+	s.relayout()
+}
+
+// relayout rebuilds the layout around the current preview flags and re-seeds the side
+// pane. Shared by the ctrl+p toggle and the alt+p reader, which both change what the
+// editor column holds and what the help bar has to name (buildModular).
+//
+// Focus lands on the editor pane, which has no on-focus work to hand back; dropping the
+// cmd keeps this off the four-deep enforcePreview/cyclePreview call chain.
+func (s *homeScreen) relayout() {
 	_ = s.rebuildModular(s.sh, s.editorSlot())
 	s.resetPreviewCache()
 	s.refreshPreview()

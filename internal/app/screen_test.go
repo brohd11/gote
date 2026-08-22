@@ -832,9 +832,9 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 // bubbletea attaches shift to navigation keys only — so alt+p is what opens the reader.
 var altP = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p"), Alt: true}
 
-// TestPreviewOverlayRendersBuffer: the reader renders the LIVE buffer, not a snapshot
+// TestReaderRendersLiveBuffer: the reader renders the LIVE buffer, not a snapshot
 // taken when it was built.
-func TestPreviewOverlayRendersBuffer(t *testing.T) {
+func TestReaderRendersLiveBuffer(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- bullet")})
@@ -849,68 +849,162 @@ func TestPreviewOverlayRendersBuffer(t *testing.T) {
 	}
 }
 
-// TestPreviewOverlayCloses: alt+p and esc both pop the reader, which is why the home
-// screen tracks only the pane — an esc it never sees cannot desync it.
-func TestPreviewOverlayCloses(t *testing.T) {
+// TestReaderCloses: alt+p and esc both put the editor back in its pane. The
+// reader is the pane's CHILD, not a pushed screen, so closing it is a change to this
+// screen's own state — which is why the home screen claims esc rather than letting the
+// pane answer it with a pop the router would clamp away at the root.
+func TestReaderCloses(t *testing.T) {
+	for _, key := range []tea.KeyMsg{altP, {Type: tea.KeyEsc}} {
+		s, sh := newHome(t)
+		s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+
+		s.Update(sh, altP)
+		if s.fullPreview == nil {
+			t.Fatal("alt+p should put the reader in the editor pane")
+		}
+		if _, a := s.Update(sh, key); msgType(a) == "core.pushMsg" || msgType(a) == "core.popMsg" {
+			t.Errorf("%s should close the reader in place, not navigate (%s)", key, msgType(a))
+		}
+		if s.fullPreview != nil {
+			t.Errorf("%s should close the reader", key)
+		}
+		// The buffer is the thing the round trip must not cost: the editor goes back into
+		// its pane as it stood, because EditorScreen.Init is idempotent.
+		if got := s.editor.Text(); got != "# Title" {
+			t.Errorf("%s: the editor came back changed: %q", key, got)
+		}
+	}
+}
+
+// TestReaderKeepsTheSidebar is what alt+p was changed FOR: the reader covers the editor
+// and nothing else, so the sidebar is still drawn beside it, still toggles, and a doc
+// picked from it opens INTO the preview rather than kicking the reader out.
+func TestReaderKeepsTheSidebar(t *testing.T) {
+	dir := t.TempDir()
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+	s.Update(sh, altP)
+
+	view := stripANSI(s.View(sh))
+	if !strings.Contains(view, "Docs") || !strings.Contains(view, "Open") {
+		t.Fatalf("the sidebar should stand beside the reader, frame:\n%s", view)
+	}
+	if !strings.Contains(view, "Title") || strings.Contains(view, "# Title") {
+		t.Fatalf("the reader should render the document where the editor was, frame:\n%s", view)
+	}
+	if !strings.Contains(stripANSI(s.HelpView(sh)), "alt+p") {
+		t.Error("the bar should name the way back to the editor")
+	}
+	// ctrl+b still works, and the reader is still there on the other side of it.
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if s.sidebar || s.fullPreview == nil {
+		t.Fatal("ctrl+b should hide the sidebar and leave the reader alone")
+	}
+	if v := stripANSI(s.View(sh)); strings.Contains(v, "Docs") {
+		t.Errorf("the sidebar should be gone, frame:\n%s", v)
+	}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+
+	// A doc picked while the reader is up is READ, not edited: the pane keeps a reader and
+	// the new buffer is seeded synchronously, since the editor is out of the tree and its
+	// async load would reach nothing.
+	other := filepath.Join(dir, "b.md")
+	if err := os.WriteFile(other, []byte("- from disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.openDoc(sh, other)
+	if s.fullPreview == nil {
+		t.Fatal("picking a doc should open it into the preview, not close it")
+	}
+	if got := s.editor.Text(); got != "- from disk" {
+		t.Fatalf("the picked doc should have been seeded from disk, got %q", got)
+	}
+	if v := stripANSI(s.View(sh)); !strings.Contains(v, "• from disk") {
+		t.Fatalf("the reader should follow the pick, frame:\n%s", v)
+	}
+}
+
+// TestReaderRestoresTheSidePane: the two previews are mutually exclusive — alt+p folds a
+// live ctrl+p column away and puts it back on the way out, so the reader is a look at the
+// document rather than a rearrangement of the layout.
+func TestReaderRestoresTheSidePane(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
 
-	for _, key := range []tea.KeyMsg{altP, {Type: tea.KeyEsc}} {
-		doc := s.previewScreen()
-		if _, a := doc.Update(sh, key); msgType(a) != "core.popMsg" {
-			t.Errorf("%s should pop the reader, got %s", key, msgType(a))
-		}
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	if s.preview != previewPane {
+		t.Fatal("ctrl+p should open the side pane")
+	}
+	s.Update(sh, altP)
+	if s.preview != previewOff {
+		t.Error("the reader should fold the side pane away")
+	}
+	s.Update(sh, altP)
+	if s.preview != previewPane {
+		t.Error("closing the reader should put the side pane back")
+	}
+	// ctrl+p is the side pane's key, so it takes the editor back from the reader rather
+	// than opening a second preview beside it: the pane it folded away comes back and the
+	// cycle then steps that pane off, leaving neither preview up.
+	s.Update(sh, altP)
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	if s.fullPreview != nil {
+		t.Error("ctrl+p should hand the editor back before touching the side pane")
+	}
+	if s.preview != previewOff {
+		t.Errorf("ctrl+p should step the restored pane off, got %d", s.preview)
+	}
+
+	// And a reader opened with no pane up leaves none behind.
+	s.Update(sh, altP)
+	s.Update(sh, altP)
+	if s.preview != previewOff {
+		t.Errorf("no pane was up, so none should come back, got %d", s.preview)
 	}
 }
 
-// TestPreviewOverlayKeepsWrapper: DocScreen.Update answers with its own pointer, so
-// without the wrapper's override the router would store that back and the reader would
-// lose its chrome mask on the first keystroke it received.
-func TestPreviewOverlayKeepsWrapper(t *testing.T) {
-	s, sh := newHome(t)
-	doc := s.previewScreen()
-
-	next, _ := doc.Update(sh, tea.KeyMsg{Type: tea.KeyDown})
-	wrapped, ok := next.(*previewDoc)
-	if !ok {
-		t.Fatalf("the reader should stay a *previewDoc, got %T", next)
-	}
-	// The mask is the thing the wrapper exists to carry, so check it through the value
-	// Update handed back rather than the one we still hold.
-	if mask := wrapped.ChromeMask(); mask != chromeMask(false) {
-		t.Errorf("the reader lost its chrome mask across Update, got %+v", mask)
-	}
-}
-
-// TestReaderWearsTheEditorsChrome: the home screen and the full-screen reader pushed over
-// it must mask identically in each launch mode. Reader-only chrome (or chrome only the
-// editor has) makes alt+p read as leaving the app rather than as a way of looking at the
-// document already open — which is exactly what the reader's own hand-tuned mask used to
-// do. They share chromeMask; this is what keeps them from drifting apart again.
-func TestReaderWearsTheEditorsChrome(t *testing.T) {
-	for _, minimal := range []bool{false, true} {
-		home := (&homeScreen{minimal: minimal}).ChromeMask()
-		reader := (&previewDoc{minimal: minimal}).ChromeMask()
-		if home != reader {
-			t.Errorf("minimal=%v: home masks %+v but the reader masks %+v", minimal, home, reader)
-		}
-	}
-}
-
-// TestFullPreviewKey: alt+p pushes the reader over a markdown doc, and does nothing at
-// all over a file its renderer would mangle — the same gate ctrl+p uses.
+// TestFullPreviewKey: alt+p puts the reader in the editor pane over a markdown doc, and
+// does nothing at all over a file its renderer would mangle — the same gate ctrl+p uses.
+// Nothing is pushed either way: the reader is a pane child, so the stack never moves.
 func TestFullPreviewKey(t *testing.T) {
 	s, sh := newHome(t)
 	dir := t.TempDir()
 
 	s.openDoc(sh, filepath.Join(dir, "a.md"))
-	if _, a := s.Update(sh, altP); msgType(a) != "core.pushMsg" {
-		t.Errorf("alt+p should push the reader on a markdown doc, got %q", msgType(a))
+	if _, a := s.Update(sh, altP); msgType(a) == "core.pushMsg" {
+		t.Error("the reader should not be pushed onto the stack")
 	}
+	if s.fullPreview == nil {
+		t.Error("alt+p should open the reader on a markdown doc")
+	}
+	s.Update(sh, altP)
+
 	s.openDoc(sh, filepath.Join(dir, "a.go"))
 	if _, a := s.Update(sh, altP); msgType(a) != "" {
 		t.Errorf("alt+p should do nothing on a .go file, got %q", msgType(a))
+	}
+	if s.fullPreview != nil {
+		t.Error("alt+p should refuse a file the renderer would mangle")
+	}
+}
+
+// TestEnforcePreviewClosesTheReader: a save-as (or a rename) can take the open document
+// out of markdown underneath the reader, and the reader must go with it — the same rule
+// that closes the ctrl+p pane.
+func TestEnforcePreviewClosesTheReader(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+	s.Update(sh, altP)
+	if s.fullPreview == nil {
+		t.Fatal("alt+p should open the reader")
+	}
+
+	s.currentPath = filepath.Join(t.TempDir(), "a.txt")
+	s.enforcePreview()
+	if s.fullPreview != nil {
+		t.Error("a document the renderer would mangle should close the reader")
 	}
 }
 
@@ -943,46 +1037,29 @@ func TestLaunchPreviewLoadsTheBuffer(t *testing.T) {
 	}
 }
 
-// TestLaunchPreviewEscapeKeepsDocument pins the user-visible outcome through the router,
-// the only path that actually applies the launch push to a stack: esc out of the reader
-// and the document is still in the editor behind it.
-//
-// It does NOT reproduce the original bug, and can't: pumpModel walks a batch in order, so
-// the editor's read is delivered before the push, while real bubbletea runs the two
-// concurrently and the instant push closure beats the file I/O every time. That asymmetry
-// is exactly why the fix does not depend on ordering at all — TestLaunchPreviewLoadsTheBuffer
-// is what pins it, by proving the buffer is seeded with no cmd pumped whatsoever.
+// TestLaunchPreviewEscapeKeepsDocument pins the user-visible outcome through the router:
+// esc out of the launch reader and the document is in the editor it uncovers. The stack
+// never moves — the reader is the editor pane's child — so what esc has to leave behind is
+// a buffer, not a screen.
 func TestLaunchPreviewEscapeKeepsDocument(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(file, []byte("# Heading\n\nbody text"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Built by hand rather than through newHomeRouter: the launch push rides Init's cmd
-	// batch, so it only reaches the stack if that batch is pumped (as TestLaunchPreview
-	// does). The screen is captured on the way past — once the reader is on top, Top() is
-	// the reader, not the editor underneath it.
-	t.Setenv("HOME", t.TempDir())
-	sh := core.NewShared(New("test", DefaultConfig(), Options{Mode: ModeFile, File: file, Preview: true}))
-	var s *homeScreen
-	r := core.NewRouter(sh, []core.TabEntry{
-		{Title: "Editor", New: func(sh *core.Shared) core.Screen {
-			s = NewHomeScreen(sh).(*homeScreen)
-			return s
-		}},
-	})
-	var model tea.Model = r
-	model = pumpModel(model, r.Init())
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model, s, _ := newHomeRouter(t, Options{Mode: ModeFile, File: file, Preview: true})
 
-	if _, ok := model.(core.Router).Top().(*previewDoc); !ok {
-		t.Fatalf("-P should boot into the reader, got %T", model.(core.Router).Top())
+	if s.fullPreview == nil {
+		t.Fatal("-P should boot into the reader")
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
-		t.Fatalf("esc should pop back to the editor, got %T", model.(core.Router).Top())
+		t.Fatalf("the reader is a pane, so esc must not move the stack, got %T", model.(core.Router).Top())
+	}
+	if s.fullPreview != nil {
+		t.Error("esc should close the reader")
 	}
 	if got := s.editor.Text(); got != "# Heading\n\nbody text" {
-		t.Fatalf("the editor behind the reader lost the document: %q", got)
+		t.Fatalf("the editor under the reader lost the document: %q", got)
 	}
 }
 
@@ -1019,26 +1096,14 @@ func TestLaunchPreview(t *testing.T) {
 	if !strings.Contains(preview, "Heading") || strings.Contains(preview, "# Heading") {
 		t.Fatalf("-P should boot into the rendered document, frame:\n%s", preview)
 	}
-	// A ModeFile launch is chrome-free, and the reader pushed over it matches: no
-	// breadcrumb, no help bar of gote's and none of its own either.
+	// A ModeFile launch is chrome-free and the reader changes nothing about that: it is
+	// the editor pane's child, so the mask the router asks the top screen for is the home
+	// screen's own, in this mode and every other.
 	if strings.Contains(preview, "more") || strings.Contains(preview, "docs") {
 		t.Fatalf("the reader should mask gote's breadcrumb and help bar, frame:\n%s", preview)
 	}
 	if strings.Contains(preview, "esc back") {
 		t.Fatalf("a minimal launch's reader should grow no help bar of its own, frame:\n%s", preview)
-	}
-	// Only minimal drops it — pushed from the ordinary launch, the exit hint stays.
-	if mask := (&previewDoc{minimal: false}).ChromeMask(); mask.Help {
-		t.Fatal("the ordinary launch's reader should keep its help bar — it is the exit")
-	}
-	// And the breadcrumb goes the same way: masked with the editor's in minimal mode,
-	// kept with it otherwise, so the reader never wears chrome the screen it was opened
-	// over isn't wearing.
-	if mask := (&previewDoc{minimal: false}).ChromeMask(); mask.Breadcrumb {
-		t.Error("the ordinary launch's reader should keep the breadcrumb")
-	}
-	if mask := (&previewDoc{minimal: true}).ChromeMask(); !mask.Breadcrumb {
-		t.Error("a minimal launch's reader should mask the breadcrumb")
 	}
 
 	// Everything that opens no markdown document launches exactly as it always did.

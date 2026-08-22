@@ -34,13 +34,20 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 // intact — because EditorScreen reads its file only on the first Init.
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
+	// Asked BEFORE OpenDoc, which memoizes — afterwards every doc looks open. A buffer new
+	// to the open set has to be seeded by hand while the reader holds the pane, or its
+	// async load reaches nothing (seedForPreview).
+	_, was := c.Doc(path)
 	ed := c.OpenDoc(path, s.editorOpts())
+	s.seedForPreview(ed, path, !was)
 	s.currentPath = path
 	s.editor = ed
 	s.openPanel.SetItems(openDocItems(c, s.currentPath))
-	cmd := s.editorPanel.SetChild(ed)
-	// After SetChild, so the layout setPreview rebuilds is sized around the new buffer.
-	s.enforcePreview()
+	// paneChild rather than SetChild: with the reader up, a pick opens INTO the preview —
+	// the pane keeps a reader, rebuilt around the doc that was just picked.
+	cmd := s.paneChild()
+	// After the swap, so the layout enforcePreview rebuilds is sized around the new buffer.
+	cmd = tea.Batch(cmd, s.enforcePreview())
 	focus := s.modular.FocusSlot(s.editorSlot())
 	return core.Async(tea.Batch(cmd, focus))
 }
@@ -154,15 +161,17 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 	if err := renameDoc(doc.Path, path); err != nil {
 		return core.Replace(errPopup("rename", err))
 	}
+	act := core.Action{}
 	if ed, open := c.Doc(doc.Path); open && ed != nil {
 		ed.SetPath(path)
 		c.RekeyDoc(doc.Path, path, ed)
 		if s.currentPath == doc.Path {
 			s.currentPath = path
-			s.enforcePreview() // a rename can take a file out of markdown under a live pane
+			// A rename can take a file out of markdown under a live preview.
+			act = core.Async(s.enforcePreview())
 		}
 	}
-	return core.Seq(core.Pop(), core.PropagateAll(ReseedMsg{}))
+	return core.Seq(core.Pop(), act, core.PropagateAll(ReseedMsg{}))
 }
 
 // docRel is how a doc is named to the user in the boxes that act on it: its path

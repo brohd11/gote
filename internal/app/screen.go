@@ -23,8 +23,9 @@ var (
 	sidebarKey = key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "sidebar"))
 	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
-	// The full-screen reader gets its own key rather than a third rung on ctrl+p: full
-	// screen is a place you go, not a state you cycle past on the way back to the editor.
+	// The reader gets its own key rather than a third rung on ctrl+p: reading the whole
+	// document is a mode you sit in, not a state you cycle past on the way back to the
+	// editor. It covers the EDITOR, not the app — the sidebar stays beside it.
 	// alt+p and not ctrl+shift+p — bubbletea v1 attaches shift only to navigation keys, so
 	// a terminal delivers ctrl+shift+p as a bare "P" typed into the buffer.
 	fullPreviewKey = key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "full preview"))
@@ -46,8 +47,9 @@ var (
 // The preview modes ctrl+p cycles through. The render shows up as a pane beside the
 // editor rather than as an overlay over it: side by side is the shape a preview
 // actually gets used in, and it is the only shape that lets it be read against the
-// SOURCE. The full-width reader is alt+p's (previewScreen), off this cycle entirely —
-// it is a pushed screen with no layout state, so there is nothing here to track.
+// SOURCE. The reader alt+p opens is off this cycle entirely — it is the editor pane's
+// child rather than a column (homeScreen.fullPreview), and the two are mutually
+// exclusive: alt+p folds a live pane away and puts it back on the way out.
 const (
 	previewOff  = iota // editor only
 	previewPane        // the custom reader, live, beside the editor
@@ -69,12 +71,14 @@ type homeScreen struct {
 	openPanel     *components.CompactListPanel
 	editorPanel   *components.ScreenPanel
 	previewPanel  *components.ScrollContainer // the live preview pane
-	editor        *components.EditorScreen    // the editor pane's live child (ScreenPanel exposes none)
+	editor        *components.EditorScreen    // the editor pane's live buffer (ScreenPanel exposes none)
+	fullPreview   *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
 	currentPath   string                      // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar       bool
 	minimal       bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
-	launchPreview bool         // --preview: push the reader from Init, once
+	launchPreview bool         // --preview: open the reader from Init, once
 	preview       int          // previewOff/previewPane
+	previewPrior  int          // the ctrl+p mode alt+p folded away, restored when the reader closes
 	previewSrc    string       // the buffer text the pane was last rendered from
 	previewW      int          // the width it was last rendered at (a resize must re-wrap)
 	previewMap    []int        // that render's source line → pane row map (RenderMarkdownMapped)
@@ -139,38 +143,32 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 }
 
 // Init stashes Shared, boots the layout, and — for a --preview launch — seeds the editor
-// with the file and pushes the reader over it. The push travels as an Action through the
-// cmd queue, which the router resolves against the stack the same way it resolves one
-// returned from Update.
+// with the file and puts the reader in the editor pane over it.
 //
-// The seeding is the whole reason the read happens HERE rather than being left to
-// EditorScreen.Init, and it has to come BEFORE modular.Init: Init's read returns an
-// editorLoadedMsg, the router delivers a message only to the TOP screen, and this launch
-// is about to make the reader exactly that. Batched together, the push (an instant
-// closure) beats the read (file I/O) every time, so the load landed on the reader, was
-// ignored, and left an empty buffer aimed at the file — which the first save would then
-// have truncated. Seeding first means Init finds the buffer loaded and dispatches nothing,
-// so there is no message to lose rather than one that is harmlessly dropped.
+// The seeding is why the read happens HERE rather than being left to EditorScreen.Init:
+// that read is asynchronous and comes back as a message the router hands to the top
+// screen, which routes it to the pane's child — and this launch is about to make the
+// READER that child, so the load would land nowhere, leaving an empty buffer aimed at the
+// file, which the first save would then truncate. Seeding first means Init finds the
+// buffer loaded and dispatches nothing, so there is no message to lose rather than one
+// that is harmlessly dropped (seedForPreview does the same for a doc opened later).
 //
-// It also makes the reader and the buffer the same bytes by construction: the reader now
-// renders the live buffer, as every later alt+p already did, instead of a second
-// independently-read copy of the file.
+// It also makes the reader and the buffer the same bytes by construction: the reader
+// renders the live buffer, as every alt+p does, rather than a second independently-read
+// copy of the file.
 //
-// Synchronous, and only on this launch — the reader used to read the file synchronously on
-// its first View anyway, so nothing here got slower.
+// The swap runs before modular.Init on purpose — a SetChild before the panel is
+// initialized is silent, and the host's own Init starts the child that is there.
 func (s *homeScreen) Init(sh *core.Shared) tea.Cmd {
 	s.sh = sh
-	var doc *previewDoc
 	if s.launchPreview {
 		s.launchPreview = false
 		s.editor.SetText(fileText(s.currentPath))
-		doc = s.previewScreen()
+		s.fullPreview = s.previewScreen()
+		s.modular = s.buildModular() // rebuilt so the bar names the way back to the editor
+		_ = s.editorPanel.SetChild(s.fullPreview)
 	}
-	cmd := s.modular.Init(sh)
-	if doc == nil {
-		return cmd
-	}
-	return tea.Batch(cmd, func() tea.Msg { return core.Push(doc) })
+	return s.modular.Init(sh)
 }
 
 // fileText reads a document for the launch reader. An unreadable path renders as an empty
@@ -203,10 +201,14 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			return s, s.cyclePreview()
 		}
 		if core.MatchKey(k, fullPreviewKey) {
-			if !s.previewable() {
-				return s, core.Action{}
-			}
-			return s, core.Push(s.previewScreen())
+			return s, s.toggleFullPreview()
+		}
+		// esc closes the reader, as it did back when the reader was a pushed screen and
+		// esc popped it. Claimed HERE, ahead of the panes: the pane child would answer
+		// esc with a Pop the router clamps away at the root, and a list's /-filter still
+		// needs its own esc (Filtering).
+		if s.fullPreview != nil && core.MatchKey(k, core.Keys.Back) && !s.modular.Filtering() {
+			return s, s.closeFullPreview()
 		}
 		if core.MatchKey(k, wrapKey) {
 			s.editor.ToggleWrap()
@@ -396,10 +398,11 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	}
 	s.currentPath = ""
 	s.editor = components.NewEditorScreen(s.editorOpts())
+	s.fullPreview = nil // the vault's scratch buffer is the editor, not a reader over it
 	cmd := s.editorPanel.SetChild(s.editor)
 	s.docsPanel.SetItems(docRows(c))
 	s.openPanel.SetItems(nil)
-	s.preview = previewOff
+	s.preview, s.previewPrior = previewOff, previewOff
 	s.resetPreviewCache()
 	s.minimal = false
 	s.sidebar = true
@@ -474,6 +477,12 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		// rather than reprinting a handful of them beside the framework's own
 		// pane/back/select hints. The keys themselves are untouched.
 		Help: []key.Binding{helpKey},
+	}
+	if s.fullPreview != nil {
+		// The one exception, and it earns the cell: a reader sitting where the editor was
+		// has to say how to get the editor back. A ScreenPanel contributes no PanelHelp of
+		// its own, so the reader's own hints never reach this bar.
+		opts.Help = append([]key.Binding{fullPreviewKey}, opts.Help...)
 	}
 	var cols [][]components.Slot
 	var widths []int
