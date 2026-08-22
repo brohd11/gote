@@ -78,12 +78,13 @@ func typeMarkdownBullets(s *homeScreen, sh *core.Shared, n int) {
 }
 
 // focusedPane names which pane holds focus, read off the help bar: the sidebar
-// lists contribute their select/filter hints (ListPanel.PanelHelp) while the
-// editor's ScreenPanel contributes none, so "filter" present means a list is
-// focused and absent means the editor is. It is the only focus signal the app
-// package can see — ModularScreen's index is another package's unexported field.
+// lists contribute their select hint (ListPanel.PanelHelp) while the editor's
+// ScreenPanel contributes none, so "select" present means a list is focused and
+// absent means the editor is. Nothing else on gote's bar (panes / back / ? more)
+// carries the word. It is the only focus signal the app package can see —
+// ModularScreen's index is another package's unexported field.
 func focusedPane(s *homeScreen, sh *core.Shared) string {
-	if strings.Contains(s.HelpView(sh), "filter") {
+	if strings.Contains(s.HelpView(sh), "select") {
 		return "list"
 	}
 	return "editor"
@@ -539,7 +540,8 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 
 	help := s.helpText()
 	for _, want := range []string{
-		"panes", "back", "select", "filter", // navigation, the bar's remaining hints
+		"panes", "back", "select", // navigation, the hints the bar still shows
+		"filter", // navigation too, but off the bar — the overlay is its only home
 		"ctrl+b", "sidebar", "actions", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", // gote's alt chords

@@ -472,7 +472,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		// One entry, and it is the pointer at all the others: every app key gote has
 		// is documented in the ? overlay (helpText), so the bar names the way in
 		// rather than reprinting a handful of them beside the framework's own
-		// pane/back/select/filter hints. The keys themselves are untouched.
+		// pane/back/select hints. The keys themselves are untouched.
 		Help: []key.Binding{helpKey},
 	}
 	var cols [][]components.Slot

@@ -42,13 +42,16 @@ func (s *homeScreen) helpText() string {
 	}
 	// Navigation is built from the same helpers the bar builds itself from
 	// (ModularScreen.HelpView, ListPanel.PanelHelp), so rebinding any of them reaches
-	// this overlay rather than leaving it quietly stale. These four are the entries the
-	// bar still shows; they are listed anyway so this page stands alone.
+	// this overlay rather than leaving it quietly stale. The first three are the entries
+	// the bar still shows; they are listed anyway so this page stands alone. The last two
+	// are not on the bar — "/" and the g/G jumps are commands rather than navigation — so
+	// this is their only home.
 	writeSection("navigation", []key.Binding{
 		core.PaneHint(),
 		core.Hint("back", core.Keys.Back),
 		core.Hint("select", core.Keys.Select),
 		core.Hint("filter", s.docsPanel.List().KeyMap.Filter),
+		core.Hint("top/bottom", core.Keys.Top, core.Keys.Bottom),
 	})
 	// The quit row is assembled from the shared keymap rather than spelled out, so
 	// rebinding core.Keys.Quit reaches this overlay too. ctrl+c is not in that keymap —
