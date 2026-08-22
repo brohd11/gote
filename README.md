@@ -20,6 +20,12 @@ Default mode, shows a sidebar with docs in a location folder, as well as a list 
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
 
 `gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.
+Without a depth it uses `scan_depth` from the config (5 by default).
+
+Set `GOTE_DEPTH` to scan a different depth without typing one every run — `export GOTE_DEPTH=2`
+and every scan starts two folders deep, config included. Anything typed still wins: the depth
+argument beats `--depth`, which beats the variable. A malformed or negative value is refused
+rather than quietly ignored, and a blank one (`GOTE_DEPTH= gote here`) drops it for a single run.
 
 #### Vaults
 

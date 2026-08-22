@@ -42,6 +42,10 @@ type flags struct {
 // directory of the same name — `gote ./here` is the way to reach that one.
 const hereArg = "here"
 
+// depthEnv names the environment variable that supplies a scan depth when the command
+// line gives none, so a depth you always want need not be typed every run.
+const depthEnv = "GOTE_DEPTH"
+
 var rootCmd = &cobra.Command{
 	Use:   "gote [here|dir|file|vault] [depth]",
 	Short: "A simple text editor (TUI)",
@@ -72,7 +76,11 @@ or --ext to narrow one run; --ext with no value widens a narrowed config back ag
 name is only consulted for an argument that names nothing on disk, so ./main-vault
 still reaches a file of that name; --vault is the way back, reading its argument as a
 vault name and nothing else. A file argument that does not exist yet opens an empty
-buffer, written on ctrl+s.`,
+buffer, written on ctrl+s.
+
+Set GOTE_DEPTH to the depth you always want and every scan starts there, without the
+config's scan_depth and without typing a number. A depth given as an argument or with
+--depth still wins; GOTE_DEPTH= (blank) drops it for one run.`,
 	Version:       version,
 	Args:          cobra.MaximumNArgs(2),
 	SilenceUsage:  true,
@@ -83,7 +91,11 @@ buffer, written on ctrl+s.`,
 func init() {
 	rootCmd.SetVersionTemplate("gote {{.Version}}\n")
 	rootCmd.Flags().BoolVarP(&scan, "scan", "s", false, "treat the argument as a directory to scan (implied when it is one)")
-	rootCmd.Flags().IntVarP(&depth, "depth", "d", 0, "scan depth in directory levels (default: config's scan_depth)")
+	rootCmd.Flags().IntVarP(&depth, "depth", "d", 0, "scan depth in directory levels")
+	// The real default is the ladder resolveDepth walks, not the 0 the flag holds — which
+	// pflag suppresses anyway as a zero value. DefValue is only ever the string cobra
+	// renders in "(default %s)", so rewriting it states that ladder where a reader looks.
+	rootCmd.Flags().Lookup("depth").DefValue = "$GOTE_DEPTH, else the config's scan_depth"
 	// Flags, not PersistentFlags: --ext means nothing to `config` or `update` and has no
 	// business in their help. On the root it already works in either position — `here` is
 	// a positional argument rather than a subcommand, and pflag parses flags interspersed
@@ -118,10 +130,14 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	d, dSet, err := resolveDepth(depth, cmd.Flags().Changed("depth"))
+	if err != nil {
+		return err
+	}
 	opts, list, err := resolveOptions(args, flags{
 		scan:     scan,
-		depth:    depth,
-		depthSet: cmd.Flags().Changed("depth"),
+		depth:    d,
+		depthSet: dSet,
 		exts:     exts,
 		extsSet:  cmd.Flags().Changed("ext"),
 		vault:    vault,
@@ -164,6 +180,38 @@ func printVaults(w io.Writer, entries []app.VaultEntry) {
 		}
 		fmt.Fprintln(w, line)
 	}
+}
+
+// resolveDepth picks the depth the launch starts from: the flag when it was actually
+// typed, otherwise $GOTE_DEPTH, otherwise nothing — reported as unset so the config's
+// scan_depth goes on deciding. Everything typed still outranks the environment, and the
+// positional depth outranks the flag inside resolveOptions, so the ladder reads
+// argument, flag, environment, config.
+//
+// A malformed or negative value is refused rather than ignored: the variable lives in a
+// shell profile, where a silently misread depth would never be noticed. An unset or
+// blank one is not malformed, which is what makes `GOTE_DEPTH= gote here` the way to
+// drop it for a single run.
+func resolveDepth(flagDepth int, flagChanged bool) (depth int, set bool, err error) {
+	if flagChanged {
+		return flagDepth, true, nil
+	}
+	raw, ok := os.LookupEnv(depthEnv)
+	if !ok {
+		return flagDepth, false, nil
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return flagDepth, false, nil
+	}
+	n, convErr := strconv.Atoi(trimmed)
+	if convErr != nil {
+		return flagDepth, false, fmt.Errorf("%s %q is not a number", depthEnv, raw)
+	}
+	if n < 0 {
+		return flagDepth, false, fmt.Errorf("%s %d is negative", depthEnv, n)
+	}
+	return n, true, nil
 }
 
 // resolveOptions turns the CLI surface into the app's launch options. It is the whole
