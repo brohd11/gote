@@ -359,7 +359,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		c := Of(sh)
 		c.Seed()
 		s.docsPanel.SetItems(docRows(c))
-		s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
+		s.openPanel.SetItems(openDocItems(c, s.currentPath))
 		return core.Action{}
 	}
 	if msg, ok := payload.(SwitchVaultMsg); ok {

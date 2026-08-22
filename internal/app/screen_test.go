@@ -507,7 +507,7 @@ func TestHomeEditorSearch(t *testing.T) {
 	}
 	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha")})
 	drive(tea.KeyMsg{Type: tea.KeyEnter})
-	if view := stripANSI(model.View()); !strings.Contains(view, "a.txt [+]") || strings.Contains(view, "a.txt [+] · find:") || strings.Index(view, "find: alpha") < strings.Index(view, "a.txt [+]") {
+	if view := stripANSI(model.View()); !strings.Contains(view, "a.txt (*)") || strings.Contains(view, "a.txt (*) · find:") || strings.Index(view, "find: alpha") < strings.Index(view, "a.txt (*)") {
 		t.Fatalf("first buffer should retain its query below the editor, not in its title:\n%s", view)
 	}
 
@@ -2048,5 +2048,78 @@ func TestHomeEditorMenuQuitGate(t *testing.T) {
 	}
 	if view := stripANSI(model.View()); !strings.Contains(view, "unsaved changes") {
 		t.Errorf("the confirm should name the unsaved buffer:\n%s", view)
+	}
+}
+
+// openMarks names each Open-list row as the sidebar prints it: the title with its flag.
+func openMarks(s *homeScreen) []string {
+	out := []string{}
+	for _, it := range s.openPanel.List().VisibleItems() {
+		row, ok := it.(docItem)
+		if !ok {
+			continue
+		}
+		out = append(out, row.Title()+row.Mark())
+	}
+	return out
+}
+
+// TestOpenListFlagsDirtyBuffers is the point of the feature: the sidebar is the only place
+// unsaved work in a buffer that is NOT on screen is visible. The flag has to track the
+// buffer live — nothing rebuilds the open list per keystroke — and it has to survive the
+// pane switching to another doc.
+func TestOpenListFlagsDirtyBuffers(t *testing.T) {
+	s, sh := newHome(t)
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+
+	s.openDoc(sh, a)
+	s.openDoc(sh, b)
+	if got := openMarks(s); !reflect.DeepEqual(got, []string{"a.txt", "• b.txt"}) {
+		t.Fatalf("setup: two clean buffers should carry no flags, got %v", got)
+	}
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if !s.editor.Dirty() {
+		t.Fatal("setup: typing should have dirtied the buffer on screen")
+	}
+	// No reseed, no SetItems: the row answers from the buffer on every render.
+	if got := openMarks(s); !reflect.DeepEqual(got, []string{"a.txt", "• b.txt (*)"}) {
+		t.Fatalf("the edited buffer should be flagged without a rebuild, got %v", got)
+	}
+
+	s.openDoc(sh, a)
+	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt", "b.txt (*)"}) {
+		t.Fatalf("a dirty buffer must stay flagged once the pane leaves it, got %v", got)
+	}
+	// And it reaches the pixels: the flag is pinned past the suffix column, at the right
+	// of everything the row prints.
+	for _, line := range strings.Split(stripANSI(s.View(sh)), "\n") {
+		if strings.Contains(line, "b.txt") && !strings.Contains(strings.TrimRight(line, " │"), "(*)") {
+			t.Fatalf("the flag should reach the rendered sidebar row: %q", line)
+		}
+	}
+}
+
+// TestOpenListFlagClearsWhenBufferGoesClean: the flag is the buffer's own dirty state, so
+// it drops the moment the buffer is clean again — here by undoing back to the loaded
+// text — with no rebuild of the list in between.
+func TestOpenListFlagClearsWhenBufferGoesClean(t *testing.T) {
+	s, sh := newHome(t)
+	path := filepath.Join(t.TempDir(), "a.txt")
+
+	s.openDoc(sh, path)
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt (*)"}) {
+		t.Fatalf("setup: the edited buffer should be flagged, got %v", got)
+	}
+
+	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlZ})
+	if s.editor.Dirty() {
+		t.Fatal("setup: undoing the only edit should leave the buffer clean")
+	}
+	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt"}) {
+		t.Fatalf("a clean buffer must lose its flag, got %v", got)
 	}
 }

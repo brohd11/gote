@@ -163,9 +163,16 @@ func sortDocs(docs []DocFile) {
 // docItem adapts a DocFile to a list.Item for the picker panels. current marks the
 // doc showing in the editor pane: its row gets a dot prefix (the list has no other
 // "open here" channel — selection is focus, not state).
+//
+// dirty is the row's unsaved-changes probe, set only on the OPEN list (a file with no
+// buffer cannot be dirty, so a docs row leaves it nil). It is a func rather than a bool
+// because the open list is rebuilt only on open/save/reseed and never per keystroke: a
+// value read at build time would go stale the moment the next character landed, while a
+// probe is answered afresh by every render.
 type docItem struct {
 	doc     DocFile
 	current bool
+	dirty   func() bool
 }
 
 func (i docItem) Title() string {
@@ -176,6 +183,16 @@ func (i docItem) Title() string {
 }
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
+
+// Mark flags a buffer with unsaved changes, matching the marker the editor pane's own
+// title bar carries. core.MarkItem reserves its width before the name is truncated, so it
+// is still readable on a row the sidebar has narrowed — see core.CompactDelegate.
+func (i docItem) Mark() string {
+	if i.dirty != nil && i.dirty() {
+		return " (*)"
+	}
+	return ""
+}
 func (i docItem) SuffixText() string {
 	rel, err := filepath.Rel(i.doc.Root, i.doc.Path)
 	if err != nil {
@@ -194,6 +211,24 @@ func docItems(docs []DocFile, currentPath string) []list.Item {
 	items := make([]list.Item, 0, len(docs))
 	for _, d := range docs {
 		items = append(items, docItem{doc: d, current: d.Path == currentPath && currentPath != ""})
+	}
+	return items
+}
+
+// openDocItems is the open list's rows: docItems plus the live dirty probe each open
+// buffer can answer. The probe is the editor's own Dirty method value, so a row reports
+// what the buffer holds right now — including the one being typed into, whose editor is
+// the very instance the pane is showing. A path whose buffer went missing gets a nil
+// probe and simply shows no marker.
+func openDocItems(c *Ctx, currentPath string) []list.Item {
+	docs := c.OpenDocs()
+	items := make([]list.Item, 0, len(docs))
+	for _, d := range docs {
+		item := docItem{doc: d, current: d.Path == currentPath && currentPath != ""}
+		if ed, ok := c.Doc(d.Path); ok && ed != nil {
+			item.dirty = ed.Dirty
+		}
+		items = append(items, item)
 	}
 	return items
 }

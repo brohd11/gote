@@ -2,34 +2,15 @@
 
 simple TUI text editor built with Go and Bubbletea.
 
-## Install
-
-Unix:
-```bash
-curl -fsSL https://raw.githubusercontent.com/brohd11/gote/main/install.sh | sh
-```
-
-Windows:
-```powershell
-irm https://raw.githubusercontent.com/brohd11/gote/main/install.ps1 | iex
-```
-
-To update:
-```
-gote update
-```
-More install details (location, flags, etc): [shared install reference](https://github.com/brohd11/goutil/blob/main/docs/install.md).
-
-<sub>macOS note: a binary downloaded **in a browser** gets quarantined by Gatekeeper — clear it
-with `xattr -dr com.apple.quarantine path/to/binary`. This doesn't apply to the installer
-above; the attribute is set by browsers, not by `curl`.</sub>
-
 ## Features
  - simple text editing
  - minimal markdown previewer
  - syntax highlighting for select extensions
  - mouse support for scrolling, selection, right click
  - vaults store a collection of files for a focused view
+
+**Note:** on MacOS, option is treated as alt, but the key does not reach the terminal input by default.
+`Terminal -> Settings -> Profiles -> Keyboard -> Use Option as Meta Key`
 
 ## gote works in 2 modes:
 
@@ -61,3 +42,25 @@ Open the editor with a single document. Useful if you have your terminal default
 Open a markdown file straight into the full-screen reader, with the rest of the interface out of the way.
 `esc` drops into the editor. Preview only works for `md` files, otherwise just launches gote.
 
+
+## Install
+
+Unix:
+```bash
+curl -fsSL https://raw.githubusercontent.com/brohd11/gote/main/install.sh | sh
+```
+
+Windows:
+```powershell
+irm https://raw.githubusercontent.com/brohd11/gote/main/install.ps1 | iex
+```
+
+To update:
+```
+gote update
+```
+More install details (location, flags, etc): [shared install reference](https://github.com/brohd11/goutil/blob/main/docs/install.md).
+
+<sub>macOS note: a binary downloaded **in a browser** gets quarantined by Gatekeeper — clear it
+with `xattr -dr com.apple.quarantine path/to/binary`. This doesn't apply to the installer
+above; the attribute is set by browsers, not by `curl`.</sub>

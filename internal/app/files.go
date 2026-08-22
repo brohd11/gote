@@ -37,7 +37,7 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	ed := c.OpenDoc(path, s.editorOpts())
 	s.currentPath = path
 	s.editor = ed
-	s.openPanel.SetItems(docItems(c.OpenDocs(), s.currentPath))
+	s.openPanel.SetItems(openDocItems(c, s.currentPath))
 	cmd := s.editorPanel.SetChild(ed)
 	// After SetChild, so the layout setPreview rebuilds is sized around the new buffer.
 	s.enforcePreview()

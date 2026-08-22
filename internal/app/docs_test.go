@@ -339,3 +339,40 @@ func TestDocItemsMarksCurrent(t *testing.T) {
 		}
 	}
 }
+
+// TestDocItemMarkTracksDirty: the unsaved-changes flag is a live probe, not a value baked
+// in when the row was built. The open list is rebuilt only on open/save/reseed, so a
+// snapshot would go stale the moment the next character was typed.
+func TestDocItemMarkTracksDirty(t *testing.T) {
+	dirty := false
+	row := docItem{doc: DocFile{Name: "a.txt", Path: "/x/a.txt", Root: "/x"}, dirty: func() bool { return dirty }}
+
+	if got := row.Mark(); got != "" {
+		t.Fatalf("a clean buffer's mark = %q, want empty", got)
+	}
+	dirty = true
+	if got := row.Mark(); got != " (*)" {
+		t.Fatalf("a dirty buffer's mark = %q, want %q", got, " (*)")
+	}
+	// The flag is a separate reserved piece, so it must not leak into either the text the
+	// row prints as its name or the text a filter matches against.
+	if got := row.Title(); got != "a.txt" {
+		t.Fatalf("the mark leaked into the title: %q", got)
+	}
+	if got := row.FilterValue(); got != "a.txt" {
+		t.Fatalf("the mark leaked into filtering: %q", got)
+	}
+}
+
+// A docs row has no buffer behind it and so can never be dirty: docItems leaves the probe
+// nil, and a nil probe never flags.
+func TestDocItemsHaveNoDirtyProbe(t *testing.T) {
+	items := docItems([]DocFile{{Name: "a.txt", Path: "/x/a.txt", Root: "/x"}}, "")
+	row := items[0].(docItem)
+	if row.dirty != nil {
+		t.Error("a docs row must not carry a dirty probe")
+	}
+	if got := row.Mark(); got != "" {
+		t.Fatalf("a docs row's mark = %q, want empty", got)
+	}
+}
