@@ -19,6 +19,10 @@ Default mode, shows a sidebar with docs in a location folder, as well as a list 
 `gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
 
+The sidebar lists the scan flat by default; `alt+t` swaps it for a folder-by-folder view of
+the same tree (`alt+r` there switches row density). Set `folder_view: true` in the config to
+open on the folder view instead — it only picks the starting view, the scan runs either way.
+
 `gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.
 Without a depth it uses `scan_depth` from the config (5 by default).
 

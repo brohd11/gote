@@ -17,9 +17,13 @@ import (
 // "extensions: []" and an empty vault map as "vaults: {}", which reads as "this key
 // exists and takes a list" rather than not appearing at all.
 type Config struct {
-	Extensions []string               `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
-	ScanDepth  int                    `yaml:"scan_depth"` // default recursive scan depth (default 5)
-	Default    string                 `yaml:"default"`    // what a bare launch opens: a directory path, or a named vault
+	Extensions []string `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
+	ScanDepth  int      `yaml:"scan_depth"` // default recursive scan depth (default 5)
+	// FolderView opens the sidebar on the folder explorer instead of the flat scan list —
+	// a preset for alt+t, not a mode: the scan still runs and the flat list is still
+	// seeded behind it, so the toggle shows it with nothing left to load.
+	FolderView bool                   `yaml:"folder_view"`
+	Default    string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
 	Vaults     map[string]VaultConfig `yaml:"vaults"`
 }
 

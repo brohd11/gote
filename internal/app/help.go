@@ -61,11 +61,12 @@ func (s *homeScreen) helpText() string {
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
 	writeSection("general", []key.Binding{
 		quitKey,
-		sidebarKey, actionsKey, previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey,
+		sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey,
 	})
 	// These act on the selected row, so they are the docs list's keys rather than the
 	// screen's — and, off the bar, this is the only place they are written down.
-	writeSection("docs list", []key.Binding{renameKey, deleteKey})
+	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey,
+		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
 	writeSection("editor", s.editor.HelpBindings())
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()

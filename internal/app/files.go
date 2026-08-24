@@ -15,6 +15,47 @@ import (
 // Document operations driven from the docs list: opening, creating and renaming files, and
 // the row-anchored line edit both the new-file and rename boxes are built from.
 
+// filePanelOpts wires the folder view. It is the same set of verbs the flat docs list
+// has — open, create, rename, delete — pointed at one directory instead of a whole scan:
+// the panel owns walking into folders, gote owns what a FILE row means.
+func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
+	root := docsRoot(c)
+	return components.FilePanelOpts{
+		Dir:        root,
+		Root:       root,
+		Border:     true, // as both sidebar lists are: with three panes up, the focused one must show
+		Compact:    true, // a 30-cell column has no room for the standard delegate's second line
+		DensityKey: densityKey,
+		Include:    includeDoc(c),
+		// Rebuilt per directory by the panel, which is what makes "+ new file" mean the
+		// folder on screen rather than the root (see createFile).
+		Rows:     func(string) []list.Item { return []list.Item{newFileItem{}} },
+		OnRow:    func(sh *core.Shared, _ list.Item) core.Action { return s.newFile(sh) },
+		OnSelect: func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
+		OnKey:    s.fileKey,
+		OnError:  func(_ *core.Shared, err error) core.Action { return core.Push(errPopup("open folder", err)) },
+	}
+}
+
+// fileKey is the folder view's row keys, docsKey's counterpart: the same ctrl+r rename and
+// ctrl+d delete, over an entry instead of a seeded DocFile. Root is the entry's own
+// directory, which is what makes the rename box open on a bare name here — in the flat
+// list the name it prefills carries the path down from the scan root, because that is the
+// context that list shows.
+func (s *homeScreen) fileKey(sh *core.Shared, k string, e components.FileEntry) (core.Action, bool) {
+	if e.IsDir {
+		return core.Action{}, false
+	}
+	doc := DocFile{Name: e.Name, Path: e.Path, Root: e.Dir}
+	switch {
+	case core.MatchKey(k, renameKey):
+		return s.renameFile(sh, doc), true
+	case core.MatchKey(k, deleteKey):
+		return s.deleteFile(sh, doc), true
+	}
+	return core.Action{}, false
+}
+
 // pickDoc routes the docs list's rows: the action row opens the new-file line
 // edit; a doc row opens (or switches to) that doc in the editor pane.
 func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
@@ -62,7 +103,8 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 // land the box's borders exactly on the panel's own.
 func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
-	row, ok := s.docsPanel.RowY(s.docsPanel.List().Index())
+	pane := s.docsPane()
+	row, ok := pane.RowY(pane.List().Index())
 	if !ok {
 		row = 1 // the selected row is on-page by construction; never die on it
 	}
@@ -86,13 +128,18 @@ func (s *homeScreen) createFile(sh *core.Shared, name string) core.Action {
 		return core.Pop()
 	}
 	c := Of(sh)
-	base := c.ScanDir
-	if c.Mode == ModeHome {
-		dir, err := DocsDir()
-		if err != nil {
-			return core.Replace(errPopup("new file", err))
+	// The folder view creates where you are looking; the flat list has no such place, so
+	// it creates at the root of the scan (or in the doc store).
+	base := s.filePanel.Dir()
+	if s.flat {
+		base = c.ScanDir
+		if c.Mode == ModeHome {
+			dir, err := DocsDir()
+			if err != nil {
+				return core.Replace(errPopup("new file", err))
+			}
+			base = dir
 		}
-		base = dir
 	}
 	path, err := newDocPath(base, name, c.NewExt)
 	if err != nil {

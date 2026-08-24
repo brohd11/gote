@@ -104,7 +104,7 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "folder_view:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}

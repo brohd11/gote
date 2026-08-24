@@ -116,6 +116,43 @@ var skipDirs = map[string]bool{
 	"venv":         true,
 }
 
+// docsRoot is the directory the folder view is rooted at, and its floor: the scan or vault
+// root in the modes that have one, the doc store in home mode, the file's own directory in
+// single-file mode (where the sidebar is unreachable anyway). "" leaves the explorer
+// unclamped at the working directory, which is the honest answer when gote has no root.
+func docsRoot(c *Ctx) string {
+	switch c.Mode {
+	case ModeScan, ModeVault:
+		return c.ScanDir
+	case ModeHome:
+		if dir, err := DocsDir(); err == nil {
+			return dir
+		}
+	case ModeFile:
+		if c.FilePath != "" {
+			return filepath.Dir(c.FilePath)
+		}
+	}
+	return ""
+}
+
+// includeDoc is the folder view's components.FilePanelOpts.Include: the same rules
+// ScanDocs prunes a walk with, asked one directory at a time. So the explorer shows
+// exactly the files the flat list shows, only nested — the configured extensions (or the
+// text sniff) still decide, and .git and node_modules still stay out of the way.
+func includeDoc(c *Ctx) func(string, fs.DirEntry) bool {
+	return func(path string, d fs.DirEntry) bool {
+		name := d.Name()
+		if strings.HasPrefix(name, ".") {
+			return false
+		}
+		if d.IsDir() {
+			return !skipDirs[name]
+		}
+		return c.Filter.Match(path, name)
+	}
+}
+
 // ScanDocs walks root recursively down to depth directory levels below it (0 = root
 // only), collecting the files f accepts. Dot-directories and skipDirs are pruned — a
 // scan of ~ has no business descending into .git, and one of a project has none

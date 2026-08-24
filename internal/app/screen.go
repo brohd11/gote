@@ -8,6 +8,7 @@ import (
 	"github.com/brohd11/bubblestack/core"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -42,6 +43,15 @@ var (
 	// editor's forward-delete — but it never has to be: docsKey fires only while the docs
 	// panel is focused and not running a /-filter, so the editor keeps its own chord.
 	deleteKey = key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete"))
+	// The flat/explorer switch. A screen key rather than the docs panel's own, because it
+	// has to work in BOTH views — a key that only the flat list carried could turn the
+	// explorer on and never off. alt+t is free of gote's chords, of the editor's word
+	// motions (alt+b/f/d) and of core's alt+wasd arrows.
+	flatKey = key.NewBinding(key.WithKeys("alt+t"), key.WithHelp("alt+t", "flat/folder view"))
+	// The explorer's own row density (components.FilePanelOpts.DensityKey), so it fires
+	// only while that panel is focused and not running a /-filter. alt+r, not alt+d/f: the
+	// editor moves by words on those.
+	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
 )
 
 // The preview modes ctrl+p cycles through. The render shows up as a pane beside the
@@ -68,6 +78,7 @@ type ReseedMsg struct{}
 type homeScreen struct {
 	modular       *components.ModularScreen
 	docsPanel     *components.CompactListPanel
+	filePanel     *components.FilePanel // the folder view alt+t swaps into the docs slot
 	openPanel     *components.CompactListPanel
 	editorPanel   *components.ScreenPanel
 	previewPanel  *components.ScrollContainer // the live preview pane
@@ -75,6 +86,7 @@ type homeScreen struct {
 	fullPreview   *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
 	currentPath   string                      // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar       bool
+	flat          bool         // the docs slot shows the flat scan (true) or the folder explorer
 	minimal       bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
 	launchPreview bool         // --preview: open the reader from Init, once
 	preview       int          // previewOff/previewPane
@@ -105,7 +117,9 @@ var _ core.QuitGater = (*homeScreen)(nil)
 func NewHomeScreen(sh *core.Shared) core.Screen {
 	c := Of(sh)
 	minimal := c.Mode == ModeFile
-	s := &homeScreen{sidebar: !minimal, minimal: minimal}
+	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
+	// there and nothing writes the choice back.
+	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
@@ -120,6 +134,10 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
+	// Built alongside the flat list rather than on first use: both panels outlive the
+	// ModularScreen that holds them, and a layout rebuild does not Init what it builds
+	// (see rebuildModular), so a panel that deferred its first read would swap in empty.
+	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))
 	// The minimal editor goes through the ctx like any picked doc, so the buffer is
 	// registered under its path and a save-as rekeys it the same way. ScreenPanel.Init
 	// forwards Init to its child, so the file read fires at startup unprompted.
@@ -189,6 +207,10 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		k := km.String()
 		if core.MatchKey(k, sidebarKey) {
 			s.setSidebar(!s.sidebar)
+			return s, core.Action{}
+		}
+		if core.MatchKey(k, flatKey) {
+			s.setFlat(!s.flat)
 			return s, core.Action{}
 		}
 		if core.MatchKey(k, actionsKey) && !s.modular.Filtering() {
@@ -361,6 +383,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		c := Of(sh)
 		c.Seed()
 		s.docsPanel.SetItems(docRows(c))
+		s.filePanel.Refresh()
 		s.openPanel.SetItems(openDocItems(c, s.currentPath))
 		return core.Action{}
 	}
@@ -369,6 +392,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 	}
 	if _, ok := payload.(core.MsgThemeChanged); ok {
 		core.StyleList(s.docsPanel.List())
+		core.StyleList(s.filePanel.List())
 		core.StyleList(s.openPanel.List())
 	}
 	return core.Action{}
@@ -401,6 +425,9 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	s.fullPreview = nil // the vault's scratch buffer is the editor, not a reader over it
 	cmd := s.editorPanel.SetChild(s.editor)
 	s.docsPanel.SetItems(docRows(c))
+	// Rebuilt, not re-pointed: the new vault brings a new root as well as a new directory,
+	// and the explorer's floor is fixed at construction.
+	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))
 	s.openPanel.SetItems(nil)
 	s.preview, s.previewPrior = previewOff, previewOff
 	s.resetPreviewCache()
@@ -432,6 +459,36 @@ func (s *homeScreen) setSidebar(visible bool) {
 	}
 	s.sidebar = visible
 	s.rebuildModular(s.sh, noFocus)
+}
+
+// setFlat swaps the docs slot between the flat scan list and the folder explorer. Like
+// setSidebar it goes through rebuildModular, because which panel sits in the slot is a
+// layout fact; both panels are kept, so each keeps its cursor across a round trip.
+//
+// Minimal mode returns here for setSidebar's reason: there is no sidebar to swap a panel
+// into, and this is the only door the flag can change through.
+func (s *homeScreen) setFlat(flat bool) {
+	if s.minimal || flat == s.flat {
+		return
+	}
+	s.flat = flat
+	s.rebuildModular(s.sh, noFocus)
+}
+
+// docsPane is the panel currently filling the docs slot. The two views differ in what they
+// list, not in what the screen asks of them: a footprint to lay out, and the row geometry
+// the rename/new-file box anchors to.
+type docsPane interface {
+	components.Panel
+	RowY(int) (int, bool)
+	List() *list.Model
+}
+
+func (s *homeScreen) docsPane() docsPane {
+	if s.flat {
+		return s.docsPanel
+	}
+	return s.filePanel
 }
 
 // noFocus tells rebuildModular to leave focus where the fresh layout auto-places it
@@ -488,7 +545,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	var widths []int
 	if s.sidebar {
 		cols = append(cols, []components.Slot{
-			{Panel: s.docsPanel, Weight: 1},
+			{Panel: s.docsPane(), Weight: 1},
 			{Panel: s.openPanel, Weight: 1},
 		})
 		widths = append(widths, sidebarWidth)
