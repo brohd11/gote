@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/gote/internal/app"
+	"github.com/brohd11/goutil/envopt"
 
 	"github.com/spf13/cobra"
 )
@@ -45,6 +46,15 @@ const hereArg = "here"
 // depthEnv names the environment variable that supplies a scan depth when the command
 // line gives none, so a depth you always want need not be typed every run.
 const depthEnv = "GOTE_DEPTH"
+
+// resolveDepth picks the depth the launch starts from: the flag when it was actually
+// typed, otherwise GOTE_DEPTH, otherwise the flag's own default. set reports whether
+// either source spoke, which gote uses to tell an explicit 0 from silence. The ladder
+// itself is goutil/envopt.Int -- repoview had written the identical function for
+// REPOVIEW_DEPTH, down to the doc comment and the test table.
+func resolveDepth(flagDepth int, flagChanged bool) (depth int, set bool, err error) {
+	return envopt.Int(depthEnv, flagDepth, flagChanged)
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "gote [here|dir|file|vault] [depth]",
@@ -180,38 +190,6 @@ func printVaults(w io.Writer, entries []app.VaultEntry) {
 		}
 		fmt.Fprintln(w, line)
 	}
-}
-
-// resolveDepth picks the depth the launch starts from: the flag when it was actually
-// typed, otherwise $GOTE_DEPTH, otherwise nothing — reported as unset so the config's
-// scan_depth goes on deciding. Everything typed still outranks the environment, and the
-// positional depth outranks the flag inside resolveOptions, so the ladder reads
-// argument, flag, environment, config.
-//
-// A malformed or negative value is refused rather than ignored: the variable lives in a
-// shell profile, where a silently misread depth would never be noticed. An unset or
-// blank one is not malformed, which is what makes `GOTE_DEPTH= gote here` the way to
-// drop it for a single run.
-func resolveDepth(flagDepth int, flagChanged bool) (depth int, set bool, err error) {
-	if flagChanged {
-		return flagDepth, true, nil
-	}
-	raw, ok := os.LookupEnv(depthEnv)
-	if !ok {
-		return flagDepth, false, nil
-	}
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return flagDepth, false, nil
-	}
-	n, convErr := strconv.Atoi(trimmed)
-	if convErr != nil {
-		return flagDepth, false, fmt.Errorf("%s %q is not a number", depthEnv, raw)
-	}
-	if n < 0 {
-		return flagDepth, false, fmt.Errorf("%s %d is negative", depthEnv, n)
-	}
-	return n, true, nil
 }
 
 // resolveOptions turns the CLI surface into the app's launch options. It is the whole

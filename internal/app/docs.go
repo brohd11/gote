@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/brohd11/goutil/strutil"
 	"github.com/charmbracelet/bubbles/list"
 )
 
@@ -169,7 +170,7 @@ func ScanDocs(root string, depth int, f DocFilter) []DocFile {
 			if path != root && (strings.HasPrefix(d.Name(), ".") || skipDirs[d.Name()]) {
 				return fs.SkipDir
 			}
-			if dirDepth(root, path) > depth {
+			if strutil.Depth(root, path) > depth {
 				return fs.SkipDir
 			}
 			return nil
@@ -181,16 +182,6 @@ func ScanDocs(root string, depth int, f DocFilter) []DocFile {
 	})
 	sortDocs(docs)
 	return docs
-}
-
-// dirDepth counts how many directory levels below the walk root path sits: the root
-// itself is 0, its direct subdirectories 1, and so on.
-func dirDepth(root, path string) int {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." {
-		return 0
-	}
-	return strings.Count(rel, string(filepath.Separator)) + 1
 }
 
 func sortDocs(docs []DocFile) {

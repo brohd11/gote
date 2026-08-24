@@ -541,7 +541,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 	help := s.helpText()
 	for _, want := range []string{
 		"panes", "back", "select", // navigation, the hints the bar still shows
-		"filter", // navigation too, but off the bar — the overlay is its only home
+		"filter",                       // navigation too, but off the bar — the overlay is its only home
 		"ctrl+b", "sidebar", "actions", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", // gote's alt chords
