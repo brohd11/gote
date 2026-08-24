@@ -36,6 +36,7 @@ Pass `--vault` to read the argument as a vault name.
 
 `gote --vault` lists the configured vaults, as does a vault that doesn't exist.
 
+Run `gote config` to edit `~/.gote/config.yml`.
 
 ### Single Document
 
