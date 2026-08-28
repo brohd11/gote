@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/goutil/strutil"
+	"github.com/brohd11/goutil/textfile"
 	"github.com/charmbracelet/bubbles/list"
 )
 
@@ -20,7 +21,7 @@ type DocFile struct {
 }
 
 // DocFilter decides which files seed the lists. An empty Exts means any text file,
-// judged by sniffing content (isTextFile) — the default, so a fresh gote lists
+// judged by sniffing content (textfile.IsText) — the default, so a fresh gote lists
 // everything it can actually edit. A non-empty Exts is the user's explicit word, from
 // config.yml's extensions key or the --ext flag, and is taken at face value without
 // sniffing.
@@ -62,7 +63,7 @@ func defaultExt(exts []string) string {
 // Match reports whether the file at path (with base name name) belongs in a list.
 func (f DocFilter) Match(path, name string) bool {
 	if len(f.Exts) == 0 {
-		return isTextFile(path)
+		return textfile.IsText(path)
 	}
 	return f.hasExt(name)
 }
