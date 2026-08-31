@@ -246,8 +246,7 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			return s, core.Action{}
 		}
 		if core.MatchKey(k, gutterKey) {
-			s.setGitGutter(!s.gitGutter)
-			return s, core.Action{}
+			return s, core.Async(s.setGitGutter(!s.gitGutter))
 		}
 	}
 	_, act := s.modular.Update(sh, msg)
@@ -452,9 +451,9 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	s.sidebar = true
 	// The launch mode this screen was built for is gone; a vault is the full editor, so
 	// the auto default has to be asked again rather than carrying ModeFile's answer over.
-	s.setGitGutter(gutterDefault(c.Config, ModeVault))
+	gutterCmd := s.setGitGutter(gutterDefault(c.Config, ModeVault))
 	focus := s.rebuildModular(sh, 0)
-	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.ResetToRoot())
+	return core.Seq(core.Async(tea.Batch(cmd, focus, gutterCmd)), core.ResetToRoot())
 }
 
 // editorSlot is the editor pane's flat slot index in the current layout.

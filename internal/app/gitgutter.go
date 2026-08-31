@@ -51,8 +51,7 @@ type baselineMsg struct {
 
 // The markers, in the vocabulary git's own diffs use — green added, red removed — with
 // yellow for the third case a diff has no word for: a line that is neither, having been
-// edited in place. The glyph is a left half-block so the column reads as a margin rule
-// rather than as punctuation that could be mistaken for text.
+// edited in place.
 //
 // Deletions have no line to mark, only a gap between two, so they take a boundary tick
 // on the line the removal sat in front of: an upper edge normally, a lower one when the
@@ -60,18 +59,44 @@ type baselineMsg struct {
 //
 // Styles are rebuilt per call so a theme switch repaints them, as every other style in
 // this app is (core.MutedColor is a live var, not a constant).
+
+// signBar is the glyph EVERY whole-line marker draws — added, modified and new-file
+// alike, which differ by color and not by shape. One constant rather than three literals
+// so the column can be re-spelled in one place, and so the two candidates below can be
+// traded by moving a single comment.
+//
+// Which one reads better is a question about the terminal and the font, not about the
+// code, so both are kept here to be swapped and compared. Both are chosen for the same
+// property: a run of changed lines has to join into ONE unbroken margin rule, or the
+// column reads as a stack of separate marks and stops answering "how much of this did I
+// touch" at a glance.
+//
+//   - The half block fills its cell edge to edge, so it joins by construction.
+//   - The box-drawing vertical is a thinner rule that joins just as cleanly on a terminal
+//     that draws it full-height.
+//
+// The ASCII pipe is deliberately NOT one of the candidates: it leaves a gap between rows
+// (measured, not assumed), which is the one thing this column cannot have.
+//
+// Whatever replaces it must measure exactly one display cell: components.Sign says so,
+// and the editor's whole left-gutter width is derived from that assumption.
+// const signBar = "▌" // U+258C left half block
+const signBar = "┃" // U+2502 box-drawing light vertical
+
+// The deletion ticks. They mark an edge rather than a line, so they stay pinned to the
+// top and bottom of the cell and have no bearing on how signBar is spelled — swapping
+// that one does not ask for these to change too.
 const (
-	signAdd    = "▌"
-	signDelTop = "▔"
-	signDelBot = "▁"
+	signDelTop = "▔" // U+2594 upper one-eighth block
+	signDelBot = "▁" // U+2581 lower one-eighth block
 )
 
 func addedSign() components.Sign {
-	return components.Sign{Text: signAdd, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("2"))}
+	return components.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("2"))}
 }
 
 func modifiedSign() components.Sign {
-	return components.Sign{Text: signAdd, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("3"))}
+	return components.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("3"))}
 }
 
 func deletedSign(text string) components.Sign {
@@ -82,7 +107,7 @@ func deletedSign(text string) components.Sign {
 // true but not worth a column of green shouting it. Muted says "git has never seen this"
 // without competing with the markers that report an actual change.
 func newFileSign() components.Sign {
-	return components.Sign{Text: signAdd, Style: lipgloss.NewStyle().Foreground(core.MutedColor)}
+	return components.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(core.MutedColor)}
 }
 
 // gutterDefault decides whether the column starts on. The config has the final say; its
@@ -105,7 +130,13 @@ func gutterDefault(cfg Config, mode Mode) bool {
 
 // setGitGutter turns the column on or off, clearing the cached baseline on the way down
 // so switching back re-reads it — HEAD may have moved while it was off.
-func (s *homeScreen) setGitGutter(on bool) {
+//
+// Turning it ON returns the work that has to happen for the column to hold anything, and
+// the caller must run it. Showing the column is not drawing it: the baseline read is
+// async, and every caller here is a key or a menu row that returns straight out of
+// Update — past the tail where refreshGutter otherwise runs. Left to that tail, a toggle
+// would raise an empty column and fill it one unrelated keystroke later.
+func (s *homeScreen) setGitGutter(on bool) tea.Cmd {
 	s.gitGutter = on
 	if s.editor != nil {
 		s.editor.ShowSigns(on)
@@ -115,7 +146,9 @@ func (s *homeScreen) setGitGutter(on bool) {
 		if s.editor != nil {
 			s.editor.SetSigns(nil)
 		}
+		return nil
 	}
+	return s.refreshGutter()
 }
 
 // refreshGutter brings the markers up to date with the buffer, and is called once per
@@ -144,13 +177,34 @@ func (s *homeScreen) refreshGutter() tea.Cmd {
 	if s.gutter.path != s.currentPath {
 		return s.loadBaseline(s.currentPath)
 	}
+	s.drawGutter()
+	return nil
+}
+
+// drawGutter recomputes the markers, when the buffer has moved since the ones on screen
+// were computed from it.
+//
+// It is split out of refreshGutter because a finished baseline read needs it too, and
+// cannot get it from there: that result comes back as a broadcast Action, and the router
+// resolves an Action against the stack and returns without dispatching to any screen's
+// Update (core/router.go). So a gutter drawn only from Update would come up empty on the
+// read that was supposed to fill it, and stay empty until some unrelated key or mouse
+// event happened along — markers that appear a keystroke after you open a file.
+//
+// Doing it inline rather than bouncing a redraw back through the event loop is what
+// makes that a non-event: the baseline arrives holding everything the computation needs,
+// and bubbletea renders after every message anyway, so the frame that follows this one
+// already has the markers in it.
+func (s *homeScreen) drawGutter() {
+	if s.editor == nil {
+		return
+	}
 	src := s.editor.Text()
 	if s.gutter.drawn && src == s.gutter.src {
-		return nil
+		return
 	}
 	s.gutter.src, s.gutter.drawn = src, true
 	s.editor.SetSigns(markers(s.gutter.base, src, s.gutter.state))
-	return nil
 }
 
 // loadBaseline reads HEAD's copy of path in the cmd lane, where every other bit of IO in
@@ -183,7 +237,8 @@ func (s *homeScreen) applyBaseline(m baselineMsg) {
 		return
 	}
 	s.gutter.path, s.gutter.base, s.gutter.state = m.path, m.base, m.state
-	s.gutter.src, s.gutter.drawn = "", false // force the next refresh to compute
+	s.gutter.src, s.gutter.drawn = "", false // the markers on screen predate this baseline
+	s.drawGutter()
 }
 
 // markers is the whole marker computation, pure over two strings so the edge cases can

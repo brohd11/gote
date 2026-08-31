@@ -49,8 +49,9 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 			return core.Pop()
 		}},
 		{Label: "Toggle git gutter", Pick: func(*core.Shared) core.Action {
-			s.setGitGutter(!s.gitGutter)
-			return core.Pop()
+			// Seq rather than a bare Pop: turning the column on hands back a baseline
+			// read, and the router collects the cmd lane of every Action in a Seq.
+			return core.Seq(core.Pop(), core.Async(s.setGitGutter(!s.gitGutter)))
 		}},
 	}
 }

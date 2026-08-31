@@ -143,6 +143,18 @@ func TestBufLines(t *testing.T) {
 	}
 }
 
+// TestSignGlyphsAreOneCell guards the constraint a glyph swap can quietly break. The
+// editor derives its whole left-gutter width from "a sign is one display cell", so a
+// two-cell replacement shifts every row of the body one column right of where clicks
+// land — and nothing else in the build would object.
+func TestSignGlyphsAreOneCell(t *testing.T) {
+	for _, glyph := range []string{signBar, signDelTop, signDelBot} {
+		if got := lipgloss.Width(glyph); got != 1 {
+			t.Errorf("%q measures %d display cells, want 1", glyph, got)
+		}
+	}
+}
+
 // TestGutterDefault: the config decides, and its default defers to the launch. A bare
 // `gote <file>` is the chrome-less editor, which is exactly the launch a git column
 // should stay out of.
@@ -233,8 +245,12 @@ func TestHomeGutterMarksARealRepo(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("a doc with no baseline loaded should ask for one")
 	}
-	model.Update(cmd()) // the router resolves the broadcast onto every Receiver
-	s.refreshGutter()   // and the next pass draws from the baseline it delivered
+	// Nothing is called after this: delivering the baseline must be enough to draw. The
+	// router resolves a broadcast Action against the stack and returns WITHOUT dispatching
+	// to any screen's Update, so a gutter that only recomputed there would come up empty
+	// on the very read meant to fill it — markers appearing a keystroke after you open a
+	// file, if at all.
+	model.Update(cmd())
 
 	if got := kind(signAt(t, s, 1)); got != "mod" {
 		t.Errorf("the edited line should be marked modified, got %s", got)
@@ -248,6 +264,40 @@ func TestHomeGutterMarksARealRepo(t *testing.T) {
 	// this whole design exists to avoid.
 	if s.refreshGutter() != nil {
 		t.Error("an unchanged buffer should ask git for nothing")
+	}
+}
+
+// TestHomeGutterToggleDraws: alt+g turning the column back ON must fill it, not raise an
+// empty one. The screen's key handlers return straight out of Update, past the tail where
+// refreshGutter otherwise runs, so the toggle has to carry its own baseline read — and
+// nothing here calls refreshGutter to cover for it.
+func TestHomeGutterToggleDraws(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	file := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(file, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-q", "-m", "init")
+
+	model, s, sh := newHomeRouter(t, Options{})
+	s.openDoc(sh, file)
+	s.editor.SetText("one\nTWO\nthree\n")
+
+	// Off, then on — the way a user reaches for it. The off leg clears the baseline, so
+	// the on leg has to go back to git for it.
+	if cmd := s.setGitGutter(false); cmd != nil {
+		t.Error("turning the column off should ask git for nothing")
+	}
+	cmd := s.setGitGutter(true)
+	if cmd == nil {
+		t.Fatal("turning the column on should hand back the baseline read it needs")
+	}
+	model.Update(cmd()) // the router resolves the broadcast; nothing else is called
+
+	if got := kind(signAt(t, s, 1)); got != "mod" {
+		t.Errorf("the edited line should be marked straight after the toggle, got %s", got)
 	}
 }
 
