@@ -61,7 +61,8 @@ func (s *homeScreen) helpText() string {
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
 	writeSection("general", []key.Binding{
 		quitKey,
-		sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey,
+		sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey,
+		wrapKey, lineNumsKey, gutterKey, helpKey,
 	})
 	// These act on the selected row, so they are the docs list's keys rather than the
 	// screen's — and, off the bar, this is the only place they are written down.

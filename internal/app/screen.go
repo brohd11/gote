@@ -34,6 +34,7 @@ var (
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
 	lineNumsKey = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
+	gutterKey   = key.NewBinding(key.WithKeys("alt+g"), key.WithHelp("alt+g", "git gutter"))
 	helpKey     = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
 	// The docs list's own key, not the screen's: it acts on the selected row, so it
 	// belongs to the panel that has one (ListPanelOpts.OnKey) and must not fire from
@@ -88,6 +89,8 @@ type homeScreen struct {
 	sidebar       bool
 	flat          bool         // the docs slot shows the flat scan (true) or the folder explorer
 	minimal       bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
+	gitGutter     bool         // alt+g: draw change markers against HEAD (see gitgutter.go)
+	gutter        gutter       // the baseline and last-drawn markers behind them
 	launchPreview bool         // --preview: open the reader from Init, once
 	preview       int          // previewOff/previewPane
 	previewPrior  int          // the ctrl+p mode alt+p folded away, restored when the reader closes
@@ -119,7 +122,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	minimal := c.Mode == ModeFile
 	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
 	// there and nothing writes the choice back.
-	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView}
+	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
+		gitGutter: gutterDefault(c.Config, c.Mode)}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
@@ -147,6 +151,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	} else {
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
+	s.editor.ShowSigns(s.gitGutter)
 	// --preview needs a document to read, and ModeFile is the only launch that opens one
 	// here — so a vault or scan launch never sets this, which is how the flag comes to be
 	// silently ignored for every target that is not a single markdown file.
@@ -240,10 +245,18 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			s.editor.ToggleLineNums()
 			return s, core.Action{}
 		}
+		if core.MatchKey(k, gutterKey) {
+			s.setGitGutter(!s.gitGutter)
+			return s, core.Action{}
+		}
 	}
 	_, act := s.modular.Update(sh, msg)
 	s.refreshPreview()
 	s.syncPreviewScroll()
+	// Batched into the cmd lane rather than folded in with core.Seq: Seq builds an
+	// Action carrying only a control message, which would drop whatever cmd the panes
+	// just returned (the editor's clipboard writes, a list's own async work).
+	act.Cmd = tea.Batch(act.Cmd, s.refreshGutter())
 	return s, act
 }
 
@@ -387,6 +400,10 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		s.openPanel.SetItems(openDocItems(c, s.currentPath))
 		return core.Action{}
 	}
+	if msg, ok := payload.(baselineMsg); ok {
+		s.applyBaseline(msg)
+		return core.Action{}
+	}
 	if msg, ok := payload.(SwitchVaultMsg); ok {
 		return s.requestVaultSwitch(sh, msg.Name)
 	}
@@ -433,6 +450,9 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	s.resetPreviewCache()
 	s.minimal = false
 	s.sidebar = true
+	// The launch mode this screen was built for is gone; a vault is the full editor, so
+	// the auto default has to be asked again rather than carrying ModeFile's answer over.
+	s.setGitGutter(gutterDefault(c.Config, ModeVault))
 	focus := s.rebuildModular(sh, 0)
 	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.ResetToRoot())
 }

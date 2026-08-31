@@ -48,6 +48,10 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 			s.editor.ToggleLineNums()
 			return core.Pop()
 		}},
+		{Label: "Toggle git gutter", Pick: func(*core.Shared) core.Action {
+			s.setGitGutter(!s.gitGutter)
+			return core.Pop()
+		}},
 	}
 }
 
@@ -61,6 +65,10 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	Of(sh).RekeyDoc(s.currentPath, path, s.editor)
 	s.currentPath = path
+	// Re-read the baseline rather than keep the one in hand: a save-as makes this a
+	// different file to git (very likely one HEAD has never seen), and even a plain save
+	// may follow a commit that moved HEAD out from under the markers.
+	s.gutter = gutter{}
 	// A save-as can rename markdown out of markdown under an open preview.
 	return core.Seq(core.Async(s.enforcePreview()), core.PropagateAll(ReseedMsg{}))
 }
@@ -109,6 +117,9 @@ func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
 		s.currentPath = ""
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
+	// The column is the screen's preference, not the buffer's: a doc swapped into the
+	// pane has to be told, or the toggle would only hold for the doc it was pressed on.
+	s.editor.ShowSigns(s.gitGutter)
 	cmd := s.paneChild()
 	return tea.Batch(cmd, s.enforcePreview())
 }

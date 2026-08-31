@@ -22,10 +22,24 @@ type Config struct {
 	// FolderView opens the sidebar on the folder explorer instead of the flat scan list —
 	// a preset for alt+t, not a mode: the scan still runs and the flat list is still
 	// seeded behind it, so the toggle shows it with nothing left to load.
-	FolderView bool                   `yaml:"folder_view"`
-	Default    string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
-	Vaults     map[string]VaultConfig `yaml:"vaults"`
+	FolderView bool `yaml:"folder_view"`
+	// GitGutter decides whether the editor draws change markers against HEAD:
+	// gutterOn, gutterOff, or gutterAuto (the default) to let the launch decide —
+	// see gutterDefault. Auto exists because the two launches want opposite answers
+	// and neither is wrong: `gote <file>` is the chrome-less editor, and a git column
+	// is the kind of thing that launch exists to leave out.
+	GitGutter string                 `yaml:"git_gutter"`
+	Default   string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
+	Vaults    map[string]VaultConfig `yaml:"vaults"`
 }
+
+// The values Config.GitGutter takes. Anything else reads as gutterAuto rather than
+// failing the load — a typo in one key should not cost the user their whole config.
+const (
+	gutterAuto = "auto"
+	gutterOn   = "on"
+	gutterOff  = "off"
+)
 
 // Filter is the discovery filter the config asks for: the configured extensions, or
 // the zero DocFilter (any text file) when none are set. The --ext flag overrides it,
@@ -51,7 +65,7 @@ type VaultConfig struct {
 // about how gote launches (resolveDefault maps that path back to ModeHome). It is there
 // to show the user the key exists and what shape its value takes.
 func DefaultConfig() Config {
-	return Config{ScanDepth: 5, Default: defaultDocsRef, Vaults: map[string]VaultConfig{}}
+	return Config{ScanDepth: 5, GitGutter: gutterAuto, Default: defaultDocsRef, Vaults: map[string]VaultConfig{}}
 }
 
 // defaultDocsRef is the home store written the ~ way rather than as this machine's
@@ -121,6 +135,11 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.Vaults == nil {
 		cfg.Vaults = map[string]VaultConfig{}
+	}
+	// An unset or misspelled value is auto, the default: the key is a preference, and
+	// getting it wrong should change what the gutter does, not whether gote starts.
+	if cfg.GitGutter != gutterOn && cfg.GitGutter != gutterOff {
+		cfg.GitGutter = gutterAuto
 	}
 	return cfg, nil
 }

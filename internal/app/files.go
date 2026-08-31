@@ -83,6 +83,7 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	s.seedForPreview(ed, path, !was)
 	s.currentPath = path
 	s.editor = ed
+	s.editor.ShowSigns(s.gitGutter) // the column follows the pane, not the buffer
 	s.openPanel.SetItems(openDocItems(c, s.currentPath))
 	// paneChild rather than SetChild: with the reader up, a pick opens INTO the preview —
 	// the pane keeps a reader, rebuilt around the doc that was just picked.
