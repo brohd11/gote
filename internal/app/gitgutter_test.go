@@ -13,7 +13,7 @@ import (
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // kind names a sign for a test's expectations, since two Signs differ only by a glyph

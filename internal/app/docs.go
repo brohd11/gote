@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/bubbles/v2/list"
 	"github.com/brohd11/goutil/strutil"
 	"github.com/brohd11/goutil/textfile"
-	"github.com/charmbracelet/bubbles/list"
 )
 
 // DocFile is one seedable document: a file the configured filter accepts.

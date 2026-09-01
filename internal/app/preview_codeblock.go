@@ -6,9 +6,9 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Syntax highlighting for the fenced code blocks in gote's markdown preview (and its

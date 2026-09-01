@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,9 +14,9 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // newHome builds the real home screen against an empty temp store — the same
@@ -66,15 +67,15 @@ func typeMarkdownBullets(s *homeScreen, sh *core.Shared, n int) {
 	if n <= 0 {
 		return
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- item")})
+	s.Update(sh, keyMsg("- item"))
 	for i := 0; i < n; i++ {
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+		s.Update(sh, keyMsg("enter"))
 		if i+1 < n {
-			s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("item")})
+			s.Update(sh, keyMsg("item"))
 		}
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
+	s.Update(sh, keyMsg("backspace"))
+	s.Update(sh, keyMsg("backspace"))
 }
 
 // focusedPane names which pane holds focus, read off the help bar: the sidebar
@@ -98,7 +99,7 @@ func focusedPane(s *homeScreen, sh *core.Shared) string {
 func TestHomePaneNavigation(t *testing.T) {
 	s, sh := newHome(t)
 
-	paneNext := tea.KeyMsg{Type: tea.KeyShiftTab}
+	paneNext := keyMsg("shift+tab")
 
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("focus should start on the docs list, got %s", got)
@@ -115,9 +116,9 @@ func TestHomePaneNavigation(t *testing.T) {
 	// The editor now owns tab. Read the result off the render, which is all the app
 	// package can see of the buffer: a tab expands to editorTabWidth (4) spaces, and
 	// the trailing rune proves the tab landed between them rather than being dropped.
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyTab})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	s.Update(sh, keyMsg("hi"))
+	s.Update(sh, keyMsg("tab"))
+	s.Update(sh, keyMsg("X"))
 	v := s.View(sh)
 	if strings.Contains(v, "\t") {
 		t.Fatal("the rendered screen must never carry a raw tab")
@@ -150,14 +151,14 @@ func TestHomePaneNavigation(t *testing.T) {
 func TestHomeShiftTabLeavesEditor(t *testing.T) {
 	s, sh := newHome(t)
 
-	shiftTab := tea.KeyMsg{Type: tea.KeyShiftTab}
+	shiftTab := keyMsg("shift+tab")
 	s.Update(sh, shiftTab) // docs → open
 	s.Update(sh, shiftTab) // open → editor
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("two shift+tab steps should reach the editor pane, got %s", got)
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	s.Update(sh, keyMsg("hi"))
 	s.Update(sh, shiftTab) // must escape, not indent
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("shift+tab must escape the capturing editor pane, got %s", got)
@@ -171,7 +172,7 @@ func TestHomeShiftTabLeavesEditor(t *testing.T) {
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the cycle should return to the editor, got %s", got)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	s.Update(sh, keyMsg("X"))
 	v := stripANSI(s.View(sh))
 	if strings.Contains(v, "hi    X") {
 		t.Fatalf("shift+tab typed a tab instead of moving panes; render:\n%s", v)
@@ -197,11 +198,11 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 	r.Init()
 	var model tea.Model = r
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // docs -> open
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // open -> editor
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved theme text")})
+	model, _ = model.Update(keyMsg("shift+tab")) // docs -> open
+	model, _ = model.Update(keyMsg("shift+tab")) // open -> editor
+	model, _ = model.Update(keyMsg("unsaved theme text"))
 
-	if !strings.Contains(stripANSI(model.View()), "unsaved theme text") {
+	if !strings.Contains(stripANSI(view(model)), "unsaved theme text") {
 		t.Fatal("test setup did not render the unsaved editor buffer")
 	}
 
@@ -211,7 +212,7 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 	}
 	model, _ = model.Update(core.ApplyTheme(next))
 
-	view := stripANSI(model.View())
+	view := stripANSI(view(model))
 	if !strings.Contains(view, "unsaved theme text") {
 		t.Fatalf("theme change must keep the live editor and its unsaved buffer, render:\n%s", view)
 	}
@@ -223,14 +224,14 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 func TestHomePaneNavigationWithoutSidebar(t *testing.T) {
 	s, sh := newHome(t)
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	s.Update(sh, keyMsg("ctrl+b"))
 	if s.sidebar {
 		t.Fatal("ctrl+b should hide the sidebar")
 	}
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the lone editor pane should hold focus, got %s", got)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
+	s.Update(sh, keyMsg("shift+tab"))
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("a pane key with nowhere to go should be a no-op, got %s", got)
 	}
@@ -251,8 +252,8 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	s.openDoc(sh, a)
 	s.openDoc(sh, b) // current: b; open order [a, b]; the editor pane holds focus
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // clean buffer: closes b
-	s.Receive(sh, ReseedMsg{})                   // the router applies the hook's broadcast
+	s.Update(sh, keyMsg("ctrl+x")) // clean buffer: closes b
+	s.Receive(sh, ReseedMsg{})     // the router applies the hook's broadcast
 	if _, ok := c.open.byPath[b]; ok {
 		t.Fatal("the exited doc must leave the open set")
 	}
@@ -263,8 +264,8 @@ func TestEditorExitClosesDoc(t *testing.T) {
 		t.Fatalf("the pane should show %q's editor and the dot should follow it, render:\n%s", a, v)
 	}
 
-	s.modular.FocusSlot(s.editorSlot())          // the exit focused the docs list; go back
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // closes a: none remain
+	s.modular.FocusSlot(s.editorSlot()) // the exit focused the docs list; go back
+	s.Update(sh, keyMsg("ctrl+x"))      // closes a: none remain
 	s.Receive(sh, ReseedMsg{})
 	if s.currentPath != "" || len(c.OpenDocs()) != 0 {
 		t.Fatalf("the last exit should clear everything: path %q, open %v", s.currentPath, c.OpenDocs())
@@ -288,7 +289,7 @@ func TestEditorEscReleasesFocus(t *testing.T) {
 		t.Fatalf("opening a doc should focus the editor, got %s", got)
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyEsc})
+	s.Update(sh, keyMsg("esc"))
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("esc should hand focus to the docs list, got %s", got)
 	}
@@ -306,12 +307,12 @@ func TestEditorEscReleasesFocus(t *testing.T) {
 func TestEditorEscUnhidesSidebar(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	s.Update(sh, keyMsg("ctrl+b"))
 	if s.sidebar {
 		t.Fatal("ctrl+b should have hidden the sidebar")
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyEsc})
+	s.Update(sh, keyMsg("esc"))
 	if !s.sidebar {
 		t.Fatal("esc should unhide the sidebar so there is a pane to focus")
 	}
@@ -326,13 +327,13 @@ func TestEditorEscUnhidesSidebar(t *testing.T) {
 func TestEscOverExitPromptStillCancels(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("dirty")})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlX}) // dirty ⇒ the prompt, not an exit
+	s.Update(sh, keyMsg("dirty"))
+	s.Update(sh, keyMsg("ctrl+x")) // dirty ⇒ the prompt, not an exit
 	if !strings.Contains(stripANSI(s.View(sh)), "Save modified buffer?") {
 		t.Fatal("a dirty ctrl+x should raise the exit prompt")
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyEsc})
+	s.Update(sh, keyMsg("esc"))
 	if v := stripANSI(s.View(sh)); strings.Contains(v, "Save modified buffer?") {
 		t.Fatal("esc should cancel the prompt")
 	}
@@ -347,7 +348,7 @@ func TestPreviewCycle(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 
-	ctrlP := tea.KeyMsg{Type: tea.KeyCtrlP}
+	ctrlP := keyMsg("ctrl+p")
 
 	for _, step := range []struct {
 		mode    int
@@ -383,14 +384,14 @@ func TestPreviewCycle(t *testing.T) {
 func TestPreviewReopenRerenders(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+	s.Update(sh, keyMsg("# Title"))
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // open
+	s.Update(sh, keyMsg("ctrl+p")) // open
 	if v := stripANSI(s.View(sh)); !strings.Contains(v, "Title") {
 		t.Fatalf("the pane should have rendered, got:\n%s", v)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // close
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP}) // open again, same buffer
+	s.Update(sh, keyMsg("ctrl+p")) // close
+	s.Update(sh, keyMsg("ctrl+p")) // open again, same buffer
 	if v := stripANSI(s.View(sh)); !strings.Contains(v, "Title") {
 		t.Fatalf("the reopened pane should have rendered without an edit, got:\n%s", v)
 	}
@@ -414,7 +415,7 @@ func msgType(act core.Action) string {
 func TestHomeWrapAndLineNums(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(strings.Repeat("w", 400))})
+	s.Update(sh, keyMsg(strings.Repeat("w", 400)))
 	render := func(what string) {
 		t.Helper()
 		if v := s.View(sh); v == "" {
@@ -425,7 +426,7 @@ func TestHomeWrapAndLineNums(t *testing.T) {
 		t.Fatal("both toggles should start off")
 	}
 
-	altZ := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}, Alt: true}
+	altZ := keyMsg("alt+z")
 	s.Update(sh, altZ)
 	if !s.editor.WrapMode() {
 		t.Fatal("alt+z should turn wrap on")
@@ -437,12 +438,12 @@ func TestHomeWrapAndLineNums(t *testing.T) {
 	}
 	render("unwrapped")
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlL})
+	s.Update(sh, keyMsg("ctrl+l"))
 	if !s.editor.LineNumMode() {
 		t.Fatal("ctrl+l should turn line numbers on")
 	}
 	render("numbered")
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlL})
+	s.Update(sh, keyMsg("ctrl+l"))
 	if s.editor.LineNumMode() {
 		t.Fatal("a second ctrl+l should turn line numbers off")
 	}
@@ -454,8 +455,8 @@ func TestHomeWrapAndLineNums(t *testing.T) {
 func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha beta")})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlW})
+	s.Update(sh, keyMsg("alpha beta"))
+	s.Update(sh, keyMsg("ctrl+w"))
 	if got, want := s.editor.Text(), "alpha "; got != want {
 		t.Fatalf("ctrl+w through the home screen = %q, want %q (delete-word-back)", got, want)
 	}
@@ -471,9 +472,9 @@ func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
 func TestHomeLeavesClipboardChordsToTheEditor(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha beta")})
+	s.Update(sh, keyMsg("alpha beta"))
 
-	_, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Alt: true})
+	_, act := s.Update(sh, keyMsg("alt+x"))
 	if act.Cmd == nil {
 		t.Fatal("alt+x should reach the editor and return its clipboard command")
 	}
@@ -501,28 +502,28 @@ func TestHomeEditorSearch(t *testing.T) {
 		t.Fatalf("every editor built by gote should enable the right-click menu and contribute rows: %+v", opts)
 	}
 	s.openDoc(sh, a)
-	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha body")})
-	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
-	if overlay := stripANSI(model.View()); !strings.Contains(overlay, "╭") || !strings.Contains(overlay, "find:") {
+	drive(keyMsg("alpha body"))
+	drive(keyMsg("ctrl+f"))
+	if overlay := stripANSI(view(model)); !strings.Contains(overlay, "╭") || !strings.Contains(overlay, "find:") {
 		t.Fatalf("ctrl+f should show the shared rounded line-edit overlay:\n%s", overlay)
 	}
-	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha")})
-	drive(tea.KeyMsg{Type: tea.KeyEnter})
-	if view := stripANSI(model.View()); !strings.Contains(view, "a.txt (*)") || strings.Contains(view, "a.txt (*) · find:") || strings.Index(view, "find: alpha") < strings.Index(view, "a.txt (*)") {
+	drive(keyMsg("alpha"))
+	drive(keyMsg("enter"))
+	if view := stripANSI(view(model)); !strings.Contains(view, "a.txt (*)") || strings.Contains(view, "a.txt (*) · find:") || strings.Index(view, "find: alpha") < strings.Index(view, "a.txt (*)") {
 		t.Fatalf("first buffer should retain its query below the editor, not in its title:\n%s", view)
 	}
 
 	s.openDoc(sh, b)
-	if view := stripANSI(model.View()); strings.Contains(view, "find: alpha") {
+	if view := stripANSI(view(model)); strings.Contains(view, "find: alpha") {
 		t.Fatalf("a new buffer inherited the previous buffer's search:\n%s", view)
 	}
-	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta body")})
-	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
-	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta")})
-	drive(tea.KeyMsg{Type: tea.KeyEnter})
+	drive(keyMsg("beta body"))
+	drive(keyMsg("ctrl+f"))
+	drive(keyMsg("beta"))
+	drive(keyMsg("enter"))
 
 	s.openDoc(sh, a)
-	view := stripANSI(model.View())
+	view := stripANSI(view(model))
 	if !strings.Contains(view, "find: alpha") || strings.Contains(view, "find: beta") {
 		t.Fatalf("switching back should restore a's search only:\n%s", view)
 	}
@@ -572,10 +573,10 @@ func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single.md")
 	model, _, _ := newHomeRouter(t, Options{Mode: ModeFile, File: path})
 	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
-	drive(tea.KeyMsg{Type: tea.KeyCtrlF})
-	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("needle")})
-	drive(tea.KeyMsg{Type: tea.KeyEnter})
-	view := stripANSI(model.View())
+	drive(keyMsg("ctrl+f"))
+	drive(keyMsg("needle"))
+	drive(keyMsg("enter"))
+	view := stripANSI(view(model))
 	if !strings.Contains(view, "single.md") || strings.Contains(view, "single.md · find:") {
 		t.Fatalf("chrome-less file mode should keep an ordinary editor title:\n%s", view)
 	}
@@ -597,9 +598,9 @@ func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
 func TestPreviewPaneTracksEdits(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	s.Update(sh, keyMsg("ctrl+p"))
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+	s.Update(sh, keyMsg("# Title"))
 	v := stripANSI(s.View(sh))
 	// The editor shows the source and the preview the render, so the marker appears
 	// once (the editor) and the bare text twice.
@@ -625,7 +626,7 @@ func TestPreviewFollowsEditorScroll(t *testing.T) {
 	// Typed with real Enters — rune input carries no newlines, and a file load is a
 	// cmd no test runs.
 	typeMarkdownBullets(s, sh, 200)
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	s.Update(sh, keyMsg("ctrl+p"))
 
 	// Typing left the caret (and so the view) at the buffer's end; the pane opens
 	// synced to that, not parked at the top.
@@ -641,10 +642,10 @@ func TestPreviewFollowsEditorScroll(t *testing.T) {
 	// right half of what remains.
 	wheel := func(btn tea.MouseButton, n int) {
 		for ; n > 0; n-- {
-			s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: btn, X: 45, Y: 15})
+			s.Update(sh, tea.MouseWheelMsg{X: 45, Y: 15, Button: btn})
 		}
 	}
-	wheel(tea.MouseButtonWheelUp, 200) // browse all the way back to the start
+	wheel(tea.MouseWheelUp, 200) // browse all the way back to the start
 	if off, _, _ := s.editor.ScrollSpan(); off != 0 {
 		t.Fatalf("wheeling up should reach the buffer's top, got offset %d", off)
 	}
@@ -655,7 +656,7 @@ func TestPreviewFollowsEditorScroll(t *testing.T) {
 	// Down one tick at a time, watching for a step backwards.
 	last := 0
 	for i := 0; i < 250; i++ {
-		wheel(tea.MouseButtonWheelDown, 1)
+		wheel(tea.MouseWheelDown, 1)
 		got := s.previewPanel.ScrollOffset()
 		if got < last {
 			off, _, _ := s.editor.ScrollSpan()
@@ -683,7 +684,7 @@ func TestPreviewScrollsByHand(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	typeMarkdownBullets(s, sh, 60)
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	s.Update(sh, keyMsg("ctrl+p"))
 
 	// The preview column: the sidebar owns x<30 and the editor and preview split what is
 	// left of the 100 cells, putting the pane's left edge at 65.
@@ -692,7 +693,7 @@ func TestPreviewScrollsByHand(t *testing.T) {
 		t.Fatal("typing should have left the pane synced away from the top")
 	}
 	for i := 0; i < 4; i++ {
-		s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 80, Y: 15})
+		s.Update(sh, tea.MouseWheelMsg{X: 80, Y: 15, Button: tea.MouseWheelUp})
 	}
 	if !s.previewPanel.Focused() {
 		t.Fatal("a press over the pane should focus it")
@@ -707,24 +708,24 @@ func TestPreviewScrollsByHand(t *testing.T) {
 	if got := s.previewPanel.ScrollOffset(); got != byHand {
 		t.Fatalf("a re-layout at the same size must not move the pane: %d → %d", byHand, got)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlL}) // line numbers: nothing to do with the pane
+	s.Update(sh, keyMsg("ctrl+l")) // line numbers: nothing to do with the pane
 	if got := s.previewPanel.ScrollOffset(); got != byHand {
 		t.Fatalf("an unrelated message must not move the pane: %d → %d", byHand, got)
 	}
 
 	// The keyboard path: shift+tab walks focus onto the pane, the nav keys scroll it.
 	s.modular.FocusSlot(s.editorSlot())
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
+	s.Update(sh, keyMsg("shift+tab"))
 	if !s.previewPanel.Focused() {
 		t.Fatal("shift+tab from the editor should focus the pane")
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyUp})
+	s.Update(sh, keyMsg("up"))
 	if got := s.previewPanel.ScrollOffset(); got != byHand-1 {
 		t.Fatalf("up on the focused pane should scroll it one row: %d → %d", byHand, got)
 	}
 
 	// The editor scrolling again re-takes it.
-	s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 45, Y: 15})
+	s.Update(sh, tea.MouseWheelMsg{X: 45, Y: 15, Button: tea.MouseWheelUp})
 	if got := s.previewPanel.ScrollOffset(); got == byHand-1 {
 		t.Fatal("scrolling the editor should put the pane back under the sync")
 	}
@@ -744,13 +745,13 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 	// Typed with real Enters — rune input carries no newlines, and a file load is a cmd
 	// no test runs.
 	type_ := func(text string) {
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+		s.Update(sh, keyMsg(text))
+		s.Update(sh, keyMsg("enter"))
 		// This fixture wants a blank line after its bullet. Enter now supplies the
 		// next marker, so remove that marker before typing the intended blank line.
 		if strings.HasPrefix(text, "- ") {
-			s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
-			s.Update(sh, tea.KeyMsg{Type: tea.KeyBackspace})
+			s.Update(sh, keyMsg("backspace"))
+			s.Update(sh, keyMsg("backspace"))
 		}
 	}
 	for i := 0; i < 20; i++ {
@@ -767,14 +768,14 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 		type_("```")
 		type_("")
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	s.Update(sh, keyMsg("ctrl+p"))
 
 	wheel := func(btn tea.MouseButton, n int) {
 		for ; n > 0; n-- {
-			s.Update(sh, tea.MouseMsg{Action: tea.MouseActionPress, Button: btn, X: 45, Y: 15})
+			s.Update(sh, tea.MouseWheelMsg{X: 45, Y: 15, Button: btn})
 		}
 	}
-	wheel(tea.MouseButtonWheelUp, 400) // back to the top
+	wheel(tea.MouseWheelUp, 400) // back to the top
 
 	src := strings.Split(s.previewSrc, "\n")
 	lines := strings.Split(stripANSI(components.RenderMarkdown(s.previewSrc, s.previewPanel.TextWidth())), "\n")
@@ -793,7 +794,7 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 
 	checked, drifted := 0, 0
 	for step := 0; step < 30; step++ {
-		wheel(tea.MouseButtonWheelDown, 4)
+		wheel(tea.MouseWheelDown, 4)
 		off, maxOff, editorRows := s.editor.ScrollSpan()
 		if off < editorRows || maxOff-off < editorRows {
 			continue // inside an eased end: the endpoints, not the anchor, decide here
@@ -830,14 +831,14 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 
 // altP is the full-screen reader's key. A terminal cannot deliver ctrl+shift+p — v1
 // bubbletea attaches shift to navigation keys only — so alt+p is what opens the reader.
-var altP = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p"), Alt: true}
+var altP = keyMsg("alt+p")
 
 // TestReaderRendersLiveBuffer: the reader renders the LIVE buffer, not a snapshot
 // taken when it was built.
 func TestReaderRendersLiveBuffer(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("- bullet")})
+	s.Update(sh, keyMsg("- bullet"))
 
 	doc := s.previewScreen()
 	doc.SetSize(sh, 80, 24)
@@ -854,10 +855,10 @@ func TestReaderRendersLiveBuffer(t *testing.T) {
 // screen's own state — which is why the home screen claims esc rather than letting the
 // pane answer it with a pop the router would clamp away at the root.
 func TestReaderCloses(t *testing.T) {
-	for _, key := range []tea.KeyMsg{altP, {Type: tea.KeyEsc}} {
+	for _, key := range []tea.KeyPressMsg{altP, keyMsg("esc")} {
 		s, sh := newHome(t)
 		s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-		s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+		s.Update(sh, keyMsg("# Title"))
 
 		s.Update(sh, altP)
 		if s.fullPreview == nil {
@@ -884,7 +885,7 @@ func TestReaderKeepsTheSidebar(t *testing.T) {
 	dir := t.TempDir()
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(dir, "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("# Title")})
+	s.Update(sh, keyMsg("# Title"))
 	s.Update(sh, altP)
 
 	view := stripANSI(s.View(sh))
@@ -898,14 +899,14 @@ func TestReaderKeepsTheSidebar(t *testing.T) {
 		t.Error("the bar should name the way back to the editor")
 	}
 	// ctrl+b still works, and the reader is still there on the other side of it.
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	s.Update(sh, keyMsg("ctrl+b"))
 	if s.sidebar || s.fullPreview == nil {
 		t.Fatal("ctrl+b should hide the sidebar and leave the reader alone")
 	}
 	if v := stripANSI(s.View(sh)); strings.Contains(v, "Docs") {
 		t.Errorf("the sidebar should be gone, frame:\n%s", v)
 	}
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	s.Update(sh, keyMsg("ctrl+b"))
 
 	// A doc picked while the reader is up is READ, not edited: the pane keeps a reader and
 	// the new buffer is seeded synchronously, since the editor is out of the tree and its
@@ -933,7 +934,7 @@ func TestReaderRestoresTheSidePane(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	s.Update(sh, keyMsg("ctrl+p"))
 	if s.preview != previewPane {
 		t.Fatal("ctrl+p should open the side pane")
 	}
@@ -949,7 +950,7 @@ func TestReaderRestoresTheSidePane(t *testing.T) {
 	// than opening a second preview beside it: the pane it folded away comes back and the
 	// cycle then steps that pane off, leaving neither preview up.
 	s.Update(sh, altP)
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlP})
+	s.Update(sh, keyMsg("ctrl+p"))
 	if s.fullPreview != nil {
 		t.Error("ctrl+p should hand the editor back before touching the side pane")
 	}
@@ -1051,7 +1052,7 @@ func TestLaunchPreviewEscapeKeepsDocument(t *testing.T) {
 	if s.fullPreview == nil {
 		t.Fatal("-P should boot into the reader")
 	}
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = model.Update(keyMsg("esc"))
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatalf("the reader is a pane, so esc must not move the stack, got %T", model.(core.Router).Top())
 	}
@@ -1088,7 +1089,7 @@ func TestLaunchPreview(t *testing.T) {
 		var m tea.Model = r
 		m = pumpModel(m, r.Init())
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		return stripANSI(m.View())
+		return stripANSI(view(m))
 	}
 
 	// The renderer is the tell: it eats the "#", where the editor would show it raw.
@@ -1123,7 +1124,7 @@ func TestLaunchPreview(t *testing.T) {
 func TestEditorPaneFillsColumn(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")}) // far shorter than the pane
+	s.Update(sh, keyMsg("hi")) // far shorter than the pane
 
 	// Measured in display cells, not bytes: the sidebar's box-drawing runes are
 	// multi-byte and would make every row look a different length.
@@ -1199,7 +1200,7 @@ func TestMinimalMode(t *testing.T) {
 		t.Fatalf("minimal mode should mask the chrome, got %+v", mask)
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlB})
+	s.Update(sh, keyMsg("ctrl+b"))
 	if s.sidebar {
 		t.Fatal("ctrl+b must not bring the sidebar back in minimal mode")
 	}
@@ -1246,7 +1247,7 @@ func TestMinimalFrame(t *testing.T) {
 		// back in. pump does that; without it the buffer would still be empty.
 		pump(r, r.Init())
 		r.Update(tea.WindowSizeMsg{Width: 80, Height: rows})
-		return stripANSI(r.View())
+		return stripANSI(view(r))
 	}
 
 	minimal := frame(Options{Mode: ModeFile, File: file})
@@ -1316,7 +1317,7 @@ func TestStatusCostsNoRows(t *testing.T) {
 			sh.WriteStatus(status)
 		}
 		r.Update(tea.WindowSizeMsg{Width: cols, Height: rows})
-		return strings.Split(stripANSI(r.View()), "\n")
+		return strings.Split(stripANSI(view(r)), "\n")
 	}
 
 	for _, tc := range []struct {
@@ -1412,9 +1413,9 @@ func TestQuitGate(t *testing.T) {
 	}
 
 	// Focus the editor pane and dirty the scratch buffer.
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("x"))
 
 	if names := s.dirtyDocs(sh); len(names) != 1 || names[0] != "scratch" {
 		t.Fatalf("dirtyDocs should name the scratch buffer, got %v", names)
@@ -1443,7 +1444,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	oldPath := filepath.Join(t.TempDir(), "old.md")
 	s.openDoc(sh, oldPath)
 	oldEditor := s.editor
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved")})
+	s.Update(sh, keyMsg("unsaved"))
 	s.preview = previewPane
 
 	if act := s.requestVaultSwitch(sh, "notes"); msgType(act) != "core.pushMsg" {
@@ -1498,19 +1499,19 @@ func TestVaultSwitchRejectsMissingFolderWithoutClosing(t *testing.T) {
 func TestHelpKey(t *testing.T) {
 	s, sh := newHome(t)
 
-	if _, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}); act.Msg == nil {
+	if _, act := s.Update(sh, keyMsg("?")); act.Msg == nil {
 		t.Fatal("? should push the help overlay when nothing is capturing text")
 	}
 
 	// Into the editor pane: ? is text now, so the buffer goes dirty.
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyShiftTab})
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("?"))
 	if !s.editor.Dirty() {
 		t.Fatal("? should type into the editor, not open help")
 	}
 
-	if _, act := s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?"), Alt: true}); act.Msg == nil {
+	if _, act := s.Update(sh, keyMsg("alt+?")); act.Msg == nil {
 		t.Fatal("alt+? should push the help overlay even from the editor")
 	}
 }
@@ -1558,14 +1559,14 @@ func filterList(t *testing.T, l *list.Model, query string) {
 			*l, _ = l.Update(msg)
 		}
 	}
-	*l, _ = l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	*l, _ = l.Update(keyMsg("/"))
 	for _, r := range query {
 		var cmd tea.Cmd
-		*l, cmd = l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		*l, cmd = l.Update(keyMsg(string(r)))
 		run(cmd)
 	}
 	var cmd tea.Cmd
-	*l, cmd = l.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	*l, cmd = l.Update(keyMsg("enter"))
 	run(cmd)
 }
 
@@ -1640,13 +1641,13 @@ func renameFixture(t *testing.T, name, body string) (tea.Model, *homeScreen, *co
 		t.Fatal(err)
 	}
 	model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: dir})
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.Update(keyMsg("down"))
 	return model, s, sh, dir
 }
 
 // pressRename sends ctrl+r and returns the line edit it pushed, if any.
 func pressRename(model tea.Model) (tea.Model, *components.LineEditScreen) {
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	model, _ = model.Update(keyMsg("ctrl+r"))
 	edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
 	return model, edit
 }
@@ -1668,8 +1669,8 @@ func TestRenamePrompt(t *testing.T) {
 	}
 
 	// esc back to the list, up onto "+ new file", and the key is inert there.
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model, _ = model.Update(keyMsg("esc"))
+	model, _ = model.Update(keyMsg("up"))
 	if _, edit := pressRename(model); edit != nil {
 		t.Fatal("ctrl+r on the + new file row should do nothing")
 	}
@@ -1686,7 +1687,7 @@ func TestRenameMovesFile(t *testing.T) {
 		t.Fatal("no rename box")
 	}
 	edit.SetValue("new") // no extension: NewExt appends .md
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.Update(keyMsg("enter"))
 
 	if _, err := os.Stat(filepath.Join(dir, "old.md")); !os.IsNotExist(err) {
 		t.Fatal("the old path should be gone")
@@ -1712,9 +1713,9 @@ func TestSaveAsConfirmFlow(t *testing.T) {
 	model, _, _, dir := renameFixture(t, "old.md", "body")
 
 	// Open the doc into the editor pane, then ctrl+s.
-	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, cmd := model.Update(keyMsg("enter"))
 	model = pumpModel(model, cmd)
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	model, _ = model.Update(keyMsg("ctrl+s"))
 	edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
 	if edit == nil {
 		t.Fatal("ctrl+s should raise the save-as box")
@@ -1722,7 +1723,7 @@ func TestSaveAsConfirmFlow(t *testing.T) {
 
 	moved := filepath.Join(dir, "moved.md")
 	edit.SetValue(moved)
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.Update(keyMsg("enter"))
 	if _, ok := model.(core.Router).Top().(*components.DialogScreen); !ok {
 		t.Fatalf("a changed name should raise the confirm, got %T", model.(core.Router).Top())
 	}
@@ -1732,15 +1733,15 @@ func TestSaveAsConfirmFlow(t *testing.T) {
 
 	// No returns to the box with the typed name still in it — the reason to say no is
 	// usually a typo, and retyping the whole path would be the wrong penalty for one.
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = model.Update(keyMsg("esc"))
 	if _, ok := model.(core.Router).Top().(*components.LineEditScreen); !ok {
 		t.Fatalf("esc should return to the save-as box, got %T", model.(core.Router).Top())
 	}
 
 	// Enter again with nothing retyped, then y: the name survived the cancel (the write
 	// below lands on it), both overlays come off, and the file appears.
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model, _ = model.Update(keyMsg("enter"))
+	model, cmd = model.Update(keyMsg("y"))
 	model = pumpModel(model, cmd)
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatalf("a confirmed save-as should land back on the home screen, got %T", model.(core.Router).Top())
@@ -1755,7 +1756,7 @@ func TestSaveAsConfirmFlow(t *testing.T) {
 
 // pressDelete sends ctrl+d and returns the confirm it pushed, if any.
 func pressDelete(model tea.Model) (tea.Model, *components.DialogScreen) {
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	model, _ = model.Update(keyMsg("ctrl+d"))
 	dlg, _ := model.(core.Router).Top().(*components.DialogScreen)
 	return model, dlg
 }
@@ -1775,7 +1776,7 @@ func TestDeletePrompt(t *testing.T) {
 		t.Fatalf("the confirm should name the doc, got:\n%s", got)
 	}
 
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = model.Update(keyMsg("esc"))
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatal("esc should back out of the confirm")
 	}
@@ -1784,7 +1785,7 @@ func TestDeletePrompt(t *testing.T) {
 	}
 
 	// Up onto "+ new file", where the key is inert.
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model, _ = model.Update(keyMsg("up"))
 	if _, dlg := pressDelete(model); dlg != nil {
 		t.Fatal("ctrl+d on the + new file row should do nothing")
 	}
@@ -1799,7 +1800,7 @@ func TestDeleteRemovesFile(t *testing.T) {
 	if dlg == nil {
 		t.Fatal("no delete confirm")
 	}
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model, _ = model.Update(keyMsg("y"))
 
 	if _, err := os.Stat(filepath.Join(dir, "old.md")); !os.IsNotExist(err) {
 		t.Fatalf("the file should be gone, stat err = %v", err)
@@ -1819,8 +1820,8 @@ func TestDeleteRemovesFile(t *testing.T) {
 func TestDeleteOpenDoc(t *testing.T) {
 	model, s, sh, dir := renameFixture(t, "old.md", "body")
 
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open it
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})   // back to the list
+	model, _ = model.Update(keyMsg("enter")) // open it
+	model, _ = model.Update(keyMsg("esc"))   // back to the list
 	ed := s.editor
 
 	model, dlg := pressDelete(model)
@@ -1831,7 +1832,7 @@ func TestDeleteOpenDoc(t *testing.T) {
 		t.Fatalf("an open doc's confirm should say the buffer closes, got:\n%s", got)
 	}
 	r := model.(core.Router)
-	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model, cmd := model.Update(keyMsg("y"))
 	pump(r, cmd)
 
 	if _, err := os.Stat(filepath.Join(dir, "old.md")); !os.IsNotExist(err) {
@@ -1859,9 +1860,9 @@ func TestDeleteOpenDoc(t *testing.T) {
 func TestRenameOpenDoc(t *testing.T) {
 	model, s, sh, dir := renameFixture(t, "old.md", "body")
 
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})                     // open it
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")}) // dirty it
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})                       // back to the list
+	model, _ = model.Update(keyMsg("enter")) // open it
+	model, _ = model.Update(keyMsg("!"))     // dirty it
+	model, _ = model.Update(keyMsg("esc"))   // back to the list
 	ed := s.editor
 
 	model, edit := pressRename(model)
@@ -1869,7 +1870,7 @@ func TestRenameOpenDoc(t *testing.T) {
 		t.Fatal("no rename box")
 	}
 	edit.SetValue("new.md")
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.Update(keyMsg("enter"))
 
 	renamed := filepath.Join(dir, "new.md")
 	if s.currentPath != renamed {
@@ -1898,7 +1899,7 @@ func TestRenameOpenDoc(t *testing.T) {
 	// And clicking the renamed row afterwards is still just a switch — the sequence the
 	// bug showed up in, where the re-read landed on a file that no longer held the edits.
 	r := model.(core.Router)
-	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := model.Update(keyMsg("enter"))
 	pump(r, cmd)
 	if s.editor != ed || !ed.Dirty() || !strings.Contains(ed.Text(), "!") {
 		t.Fatalf("activating the renamed row should switch to the live buffer, got %q", ed.Text())
@@ -1925,7 +1926,7 @@ func TestRenameRefusals(t *testing.T) {
 				t.Fatal("no rename box")
 			}
 			edit.SetValue(tc.value)
-			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m, _ = m.Update(keyMsg("enter"))
 
 			if _, ok := m.(core.Router).Top().(*components.DialogScreen); !ok {
 				t.Fatalf("a refused rename should raise an error popup, got %T", m.(core.Router).Top())
@@ -1936,7 +1937,7 @@ func TestRenameRefusals(t *testing.T) {
 			if b, err := os.ReadFile(occupied); err != nil || string(b) != "theirs" {
 				t.Fatalf("the target must be untouched, got %q err %v", b, err)
 			}
-			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // dismiss for the next case
+			m, _ = m.Update(keyMsg("esc")) // dismiss for the next case
 			model = m
 		})
 	}
@@ -1951,7 +1952,7 @@ func TestRenameUnchangedCancels(t *testing.T) {
 	if edit == nil {
 		t.Fatal("no rename box")
 	}
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.Update(keyMsg("enter"))
 
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatalf("an unchanged name should just pop, got %T", model.(core.Router).Top())
@@ -1970,19 +1971,19 @@ func TestReselectOpenDocKeepsBuffer(t *testing.T) {
 	model, s, sh, _ := renameFixture(t, "old.md", "body")
 	r := model.(core.Router)
 
-	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open it
+	model, cmd := model.Update(keyMsg("enter")) // open it
 	pump(r, cmd)
 	ed := s.editor
 	if got := ed.Text(); got != "body" {
 		t.Fatalf("the first open should load the file, buffer = %q", got)
 	}
 
-	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")}) // dirty it
+	model, cmd = model.Update(keyMsg("!")) // dirty it
 	pump(r, cmd)
-	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to the list
+	model, cmd = model.Update(keyMsg("esc")) // back to the list
 	pump(r, cmd)
 
-	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter}) // activate the same row again
+	_, cmd = model.Update(keyMsg("enter")) // activate the same row again
 	pump(r, cmd)
 
 	if s.editor != ed {
@@ -2045,20 +2046,20 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 	model, _, _ := newHomeRouter(t, Options{})
 	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
 	right := func(x, y int) tea.MouseMsg {
-		return tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonRight, X: x, Y: y}
+		return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseRight}
 	}
 
 	// Render once before clicking, as bubbletea does: ModularScreen publishes each pane's
 	// absolute origin from View, and that origin is what turns the pane-relative click
 	// back into the anchor the overlay is placed at.
-	_ = model.View()
+	_ = view(model)
 
 	drive(right(45, 15)) // the editor column
 	menu, ok := model.(core.Router).Top().(*components.MenuScreen)
 	if !ok {
 		t.Fatalf("a right click in the editor should raise the menu, top is %T", model.(core.Router).Top())
 	}
-	view := stripANSI(model.View())
+	view := stripANSI(view(model))
 	for _, want := range []string{"Copy", "Cut", "Paste", "Toggle wrap"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the menu should offer %q:\n%s", want, view)
@@ -2071,7 +2072,7 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 		t.Errorf("the menu placed at (%d,%d), want (45,16) — the click column, one row below:\n%s", x, y, view)
 	}
 
-	drive(tea.KeyMsg{Type: tea.KeyEsc})
+	drive(keyMsg("esc"))
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatalf("esc should dismiss the menu, top is %T", model.(core.Router).Top())
 	}
@@ -2091,29 +2092,29 @@ func TestHomeEditorMenuQuitGate(t *testing.T) {
 	model, _, _ := newHomeRouter(t, Options{})
 	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
 	// The sidebar holds focus at startup, so click into the editor column before typing.
-	drive(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 45, Y: 15})
-	drive(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonNone, X: 45, Y: 15})
-	drive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("unsaved work")}) // dirty the scratch buffer
-	_ = model.View()
+	drive(tea.MouseClickMsg{X: 45, Y: 15, Button: tea.MouseLeft})
+	drive(tea.MouseReleaseMsg{X: 45, Y: 15, Button: tea.MouseNone})
+	drive(keyMsg("unsaved work")) // dirty the scratch buffer
+	_ = view(model)
 
-	drive(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonRight, X: 45, Y: 15})
+	drive(tea.MouseClickMsg{X: 45, Y: 15, Button: tea.MouseRight})
 	if _, ok := model.(core.Router).Top().(*components.MenuScreen); !ok {
 		t.Fatalf("the right click should have raised the menu, top is %T", model.(core.Router).Top())
 	}
 
-	drive(tea.KeyMsg{Type: tea.KeyCtrlC})
+	drive(keyMsg("ctrl+c"))
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatalf("ctrl+c should close the menu and stop there, top is %T", model.(core.Router).Top())
 	}
-	if view := stripANSI(model.View()); strings.Contains(view, "unsaved changes") {
+	if view := stripANSI(view(model)); strings.Contains(view, "unsaved changes") {
 		t.Errorf("the confirm should not appear until the menu is gone:\n%s", view)
 	}
 
-	drive(tea.KeyMsg{Type: tea.KeyCtrlC})
+	drive(keyMsg("ctrl+c"))
 	if _, ok := model.(core.Router).Top().(*components.DialogScreen); !ok {
 		t.Fatalf("the second ctrl+c should raise the dirty-buffer confirm, top is %T", model.(core.Router).Top())
 	}
-	if view := stripANSI(model.View()); !strings.Contains(view, "unsaved changes") {
+	if view := stripANSI(view(model)); !strings.Contains(view, "unsaved changes") {
 		t.Errorf("the confirm should name the unsaved buffer:\n%s", view)
 	}
 }
@@ -2147,7 +2148,7 @@ func TestOpenListFlagsDirtyBuffers(t *testing.T) {
 		t.Fatalf("setup: two clean buffers should carry no flags, got %v", got)
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	s.Update(sh, keyMsg("x"))
 	if !s.editor.Dirty() {
 		t.Fatal("setup: typing should have dirtied the buffer on screen")
 	}
@@ -2177,12 +2178,12 @@ func TestOpenListFlagClearsWhenBufferGoesClean(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.txt")
 
 	s.openDoc(sh, path)
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	s.Update(sh, keyMsg("x"))
 	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt (*)"}) {
 		t.Fatalf("setup: the edited buffer should be flagged, got %v", got)
 	}
 
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyCtrlZ})
+	s.Update(sh, keyMsg("ctrl+z"))
 	if s.editor.Dirty() {
 		t.Fatal("setup: undoing the only edit should leave the buffer clean")
 	}
@@ -2190,3 +2191,10 @@ func TestOpenListFlagClearsWhenBufferGoesClean(t *testing.T) {
 		t.Fatalf("a clean buffer must lose its flag, got %v", got)
 	}
 }
+
+// view renders the model to the plain text the assertions match against. v2's View
+// returns a tea.View — the frame's content plus the terminal modes it asks for — so this
+// reaches through to the content, and strips it: lipgloss v2 renders styles verbatim
+// where v1's TTY-less Ascii profile dropped them, so a substring like "Docs › Getting
+// started" now has escape sequences between its words.
+func view(tm tea.Model) string { return ansi.Strip(tm.View().Content) }

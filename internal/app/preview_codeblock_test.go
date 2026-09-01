@@ -1,28 +1,14 @@
 package app
 
 import (
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
-
-// withColor forces a real color profile for one test, so styled output carries ANSI
-// instead of rendering to bare text (go test has no TTY). Same pattern as
-// bubblestack's components tests. stripANSI (screen_test.go) removes the sequences
-// for string comparison.
-func withColor(t *testing.T) {
-	t.Helper()
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
-}
 
 // TestChromaCodeBlockColors: a known language comes back with colored spans, and the
 // color costs no text — stripping ANSI reproduces the block exactly.
 func TestChromaCodeBlockColors(t *testing.T) {
-	withColor(t)
 
 	code := []string{"x := 1 // hi", "println(x)"}
 	rows := chromaCodeBlock("go", code, 40)
@@ -42,7 +28,6 @@ func TestChromaCodeBlockColors(t *testing.T) {
 // TestChromaCodeBlockUnknownLang: a fence with no language (or one chroma does not
 // know) falls back to the reader's muted look rather than erroring.
 func TestChromaCodeBlockUnknownLang(t *testing.T) {
-	withColor(t)
 
 	for _, lang := range []string{"", "not-a-language"} {
 		rows := chromaCodeBlock(lang, []string{"plain words"}, 40)
@@ -55,8 +40,9 @@ func TestChromaCodeBlockUnknownLang(t *testing.T) {
 // TestChromaCodeBlockWraps: a line wider than the pane folds across rows, and the
 // styling survives the fold — ANSI opens and closes inside each row, never straddling
 // the cut (which would paint the rest of the block).
+var sgrSeq = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
 func TestChromaCodeBlockWraps(t *testing.T) {
-	withColor(t)
 
 	line := `"` + strings.Repeat("a", 50) + `" tail`
 	rows := chromaCodeBlock("go", []string{line}, 20)
@@ -66,9 +52,14 @@ func TestChromaCodeBlockWraps(t *testing.T) {
 	var plain strings.Builder
 	for _, row := range rows {
 		plain.WriteString(stripANSI(row))
-		// A reset before the row ends means no sequence leaks past the cut.
-		if strings.Contains(row, "\x1b[") && !strings.Contains(row, "\x1b[0m") && !strings.HasSuffix(row, "\x1b[m") {
-			t.Errorf("row %q opens ANSI without closing it", row)
+		// The row's LAST sequence being a reset is what says no style leaks past the
+		// cut. It need not be the row's final bytes: a fold can land mid-token, leaving
+		// plain text after the reset. (lipgloss v1 emitted no escapes at all under
+		// `go test`, so this check used to be vacuous here.)
+		if seqs := sgrSeq.FindAllString(row, -1); len(seqs) > 0 {
+			if last := seqs[len(seqs)-1]; last != "\x1b[m" && last != "\x1b[0m" {
+				t.Errorf("row %q ends with %q, want its style closed by a reset", row, last)
+			}
 		}
 	}
 	if plain.String() != line {

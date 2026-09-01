@@ -8,9 +8,9 @@ import (
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aymanbagabas/go-udiff"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // The git diff gutter: a marker beside every line the buffer has changed since HEAD.

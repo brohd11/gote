@@ -5,9 +5,9 @@ import (
 
 	"github.com/brohd11/bubblestack/components"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Syntax coloring for the source files gote gets pointed at in scan mode. It lives here

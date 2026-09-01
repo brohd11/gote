@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/brohd11/bubblestack/components"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestVaultItemsSortedAndActive(t *testing.T) {
@@ -67,7 +66,7 @@ func TestSubmitNewVaultPersistsBeforeSwitch(t *testing.T) {
 	// A dirty scratch buffer proves submitting the form does not discard anything;
 	// the returned switch broadcast is what will subsequently raise the gate.
 	s.modular.FocusSlot(s.editorSlot())
-	s.editor.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("draft")})
+	s.editor.Update(sh, keyMsg("draft"))
 
 	form := newVaultForm()
 	form.SetValue("name", "notes")

@@ -8,7 +8,7 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // The markdown preview: the ctrl+p side pane and the alt+p reader that takes the editor's

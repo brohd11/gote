@@ -8,8 +8,8 @@ import (
 
 	"github.com/brohd11/bubblestack/core"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 )
 
 // scanTree builds root/{notes.md, sub/{deep.md}, node_modules/{junk.md}} and returns root.
@@ -53,7 +53,7 @@ func newHomeCfg(t *testing.T, cfg Config, opts Options) (*homeScreen, *core.Shar
 
 // altKey builds gote's alt chords, which keyMsg-style helpers elsewhere don't cover.
 func altKey(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true}
+	return keyMsg("alt+" + string(r))
 }
 
 // TestFolderViewToggle: alt+t swaps the docs slot between the flat scan (every hit in one
@@ -149,7 +149,7 @@ func TestFolderViewOpensDoc(t *testing.T) {
 	s.Update(sh, altKey('t'))
 
 	selectRow(t, s.filePanel.List(), "notes.md")
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+	s.Update(sh, keyMsg("enter"))
 	if want := filepath.Join(root, "notes.md"); s.currentPath != want {
 		t.Fatalf("currentPath = %q, want %q", s.currentPath, want)
 	}
@@ -166,7 +166,7 @@ func TestFolderViewWalksIntoFolder(t *testing.T) {
 	s.Update(sh, altKey('t'))
 
 	selectRow(t, s.filePanel.List(), "sub/")
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+	s.Update(sh, keyMsg("enter"))
 	if want := filepath.Join(root, "sub"); s.filePanel.Dir() != want {
 		t.Fatalf("Dir() = %q, want %q", s.filePanel.Dir(), want)
 	}
@@ -175,7 +175,7 @@ func TestFolderViewWalksIntoFolder(t *testing.T) {
 	}
 
 	selectRow(t, s.filePanel.List(), "deep.md")
-	if _, handled := s.filePanel.UpdatePanel(sh, tea.KeyMsg{Type: tea.KeyCtrlR}); !handled {
+	if _, handled := s.filePanel.UpdatePanel(sh, keyMsg("ctrl+r")); !handled {
 		t.Fatal("ctrl+r should still rename from the folder view")
 	}
 }
@@ -203,7 +203,7 @@ func TestFolderViewNewFileUsesCurrentFolder(t *testing.T) {
 	s, sh := newScanHome(t, root)
 	s.Update(sh, altKey('t'))
 	selectRow(t, s.filePanel.List(), "sub/")
-	s.Update(sh, tea.KeyMsg{Type: tea.KeyEnter})
+	s.Update(sh, keyMsg("enter"))
 
 	s.createFile(sh, "made.md")
 	if _, err := os.Stat(filepath.Join(root, "sub", "made.md")); err != nil {

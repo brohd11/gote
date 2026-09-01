@@ -7,9 +7,9 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 )
 
 // sidebarWidth is the fixed cell width of the docs/open column; the editor flexes.
@@ -208,7 +208,7 @@ func fileText(path string) string {
 // screen. The returned screen is always the wrapper — the modular swap happens in
 // place, never as a screen replacement.
 func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
-	if km, ok := msg.(tea.KeyMsg); ok {
+	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
 		if core.MatchKey(k, sidebarKey) {
 			s.setSidebar(!s.sidebar)
