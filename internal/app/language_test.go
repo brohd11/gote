@@ -107,9 +107,17 @@ func TestGDScriptPairsAndUndo(t *testing.T) {
 	if got := ed.Text(); got != "()" {
 		t.Fatalf("GDScript pair = %q, want ()", got)
 	}
-	pressEditor(ed, "ctrl+z")
+	pressEditor(ed, "backspace")
 	if got := ed.Text(); got != "" {
-		t.Fatalf("undo GDScript pair = %q, want empty", got)
+		t.Fatalf("GDScript paired Backspace = %q, want empty", got)
+	}
+	pressEditor(ed, "ctrl+z")
+	if got := ed.Text(); got != "()" {
+		t.Fatalf("undo GDScript paired Backspace = %q, want ()", got)
+	}
+	pressEditor(ed, "ctrl+y")
+	if got := ed.Text(); got != "" {
+		t.Fatalf("redo GDScript paired Backspace = %q, want empty", got)
 	}
 
 	pressEditor(ed, "`")

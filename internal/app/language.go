@@ -22,7 +22,7 @@ var (
 		{Open: '(', Close: ')'},
 		{Open: '[', Close: ']'},
 		{Open: '{', Close: '}'},
-		{Open: '\'', Close: '\''},
+		// {Open: '\'', Close: '\''},
 		{Open: '"', Close: '"'},
 		{Open: '`', Close: '`'},
 	}
