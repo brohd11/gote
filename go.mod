@@ -5,9 +5,9 @@ go 1.26.4
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0
 	github.com/aymanbagabas/go-udiff v0.3.1
-	github.com/brohd11/bubblestack v0.1.13
-	github.com/brohd11/gitstack v0.1.12
-	github.com/brohd11/goutil v0.1.5
+	github.com/brohd11/bubblestack v0.1.14
+	github.com/brohd11/gitstack v0.1.13
+	github.com/brohd11/goutil v0.1.6
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
