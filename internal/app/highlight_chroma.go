@@ -7,15 +7,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 // Syntax coloring for the source files gote gets pointed at in scan mode. It lives here
-// rather than in bubblestack because it is chroma that makes it work, and bubblestack
-// stays free of that dependency — components.RegisterHighlighter is the seam that lets
-// a consumer add languages without the framework knowing any of them. Markdown is not
-// among them: bubblestack's own goldmark highlighter understands headings and emphasis,
-// which a source tokenizer has no concept of, and it keeps .md.
+// rather than in bubblestack because languageForPath is gote's language authority;
+// bubblestack receives only a language-neutral Highlighter factory. Markdown has its
+// own goldmark highlighter beside this file because headings and emphasis are document
+// structure rather than source tokens.
 //
 // Chroma is the right tokenizer for this because it is lossless — the Values of the
 // tokens it emits concatenate back to the exact input — which is precisely the contract
@@ -23,7 +21,7 @@ import (
 // don't reconstruct it). Nothing here goes near chroma's formatters: those exist to
 // write ANSI, and the editor needs styled *runs*, which it composites itself.
 
-// The palette. Fixed ANSI like bubblestack's markdown highlighter, deliberately: the
+// The palette. Fixed ANSI like gote's markdown highlighter, deliberately: the
 // editor's syntax colors are not theme-derived, and the two files should not disagree
 // about that. The 8 basic slots keep it readable on whatever the terminal's own scheme
 // is, which a 256-color palette would not.
@@ -78,7 +76,7 @@ func styleFor(tt chroma.TokenType) lipgloss.Style {
 
 // chromaHighlighter is the components.Highlighter chroma backs. Parse tokenizes the
 // whole document and bakes per-line spans; HighlightLine is then a lookup. The lexer is
-// fixed at construction (the registry keys on extension), so no per-parse detection.
+// fixed at construction (the language profile chooses it), so no per-parse detection.
 type chromaHighlighter struct {
 	lexer chroma.Lexer
 	lines [][]components.Span
@@ -86,13 +84,18 @@ type chromaHighlighter struct {
 
 var _ components.Highlighter = (*chromaHighlighter)(nil)
 
+func chromaHighlighterFactory(lexer chroma.Lexer) func() components.Highlighter {
+	lexer = chroma.Coalesce(lexer)
+	return func() components.Highlighter { return &chromaHighlighter{lexer: lexer} }
+}
+
 // Parse tokenizes doc and splits the token stream into per-line spans. Tokens cross line
 // boundaries — a block comment is one token, a string may contain newlines — so each
 // token's Value is cut on '\n' and its pieces distributed, which is what turns chroma's
 // flat stream into the row-addressed answer the editor asks for.
 //
 // A tokenizer error leaves lines nil: HighlightLine then answers nothing for every row
-// and the buffer renders plain, the same as an unregistered extension.
+// and the buffer renders plain, the same as a profile with no highlighter.
 func (h *chromaHighlighter) Parse(doc string) {
 	h.lines = nil
 	if h.lexer == nil {
@@ -133,16 +136,14 @@ func (h *chromaHighlighter) HighlightLine(row int) []components.Span {
 	return h.lines[row]
 }
 
-// chromaExts are the extensions gote hands to chroma. A curated list rather than every
-// filename pattern chroma knows: these are what a scan-mode gote actually opens, the
-// registry is a global one extension can only be claimed in once, and adding to it is
-// one line. Anything not listed keeps rendering plain, exactly as before.
+// chromaExts are the extensions gote hands to Chroma. A curated list rather than every
+// filename pattern Chroma knows: these are what a scan-mode gote actually opens, and
+// adding a profile is one line. Anything not listed keeps rendering plain.
 //
-// Two exclusions are deliberate. ".md"/".markdown" belong to bubblestack's own
-// markdown highlighter and claiming them here would take them from it. Files chroma
-// matches by whole name rather than extension — Makefile, Dockerfile — cannot be
-// registered at all, since the registry's key IS the extension; they list and edit
-// fine, just unhighlighted.
+// Two exclusions are deliberate. ".md"/".markdown" use gote's structural Markdown
+// highlighter. Files Chroma matches by whole name rather than extension — Makefile,
+// Dockerfile — currently resolve to literal editing because this seam is path-extension
+// based; they still list and edit normally.
 var chromaExts = []string{
 	".go", ".py", ".rb", ".rs", ".java", ".lua", ".php", ".pl", ".r",
 	".js", ".jsx", ".ts", ".tsx",
@@ -150,25 +151,5 @@ var chromaExts = []string{
 	".sh", ".bash", ".zsh", ".fish", ".vim",
 	".json", ".yaml", ".yml", ".toml", ".ini", ".xml", ".csv",
 	".html", ".css", ".scss", ".sql", ".diff", ".patch",
-	".tf", ".gradle", ".proto", ".mk",
-}
-
-// init registers a highlighter for each extension chroma has a lexer for. The lexer is
-// resolved HERE rather than inside the factory: components.lookupHighlighter returns
-// whatever the factory hands back, so a factory that could return a nil-lexer
-// highlighter would give the editor a non-nil interface wrapping nothing. Resolving up
-// front means an extension chroma doesn't know is simply never registered.
-func init() {
-	for _, ext := range chromaExts {
-		lexer := lexers.Match("f" + ext)
-		if lexer == nil {
-			continue
-		}
-		// Coalesce merges adjacent same-type tokens, which cuts the span count on real
-		// source by a large factor — the editor styles one Render call per span.
-		lexer = chroma.Coalesce(lexer)
-		components.RegisterHighlighter(ext, func() components.Highlighter {
-			return &chromaHighlighter{lexer: lexer}
-		})
-	}
+	".tf", ".gradle", ".proto", ".mk", ".gd",
 }

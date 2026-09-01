@@ -25,6 +25,24 @@ func TestChromaCodeBlockColors(t *testing.T) {
 	}
 }
 
+func TestGDScriptCodeBlockUsesChroma(t *testing.T) {
+	code := []string{"func ready():", "\tpass"}
+	rows := chromaCodeBlock("gdscript", code, 40)
+	if len(rows) != len(code) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(code))
+	}
+	for i, row := range rows {
+		// lipgloss expands a styled tab to the editor's four-cell display form.
+		want := strings.ReplaceAll(code[i], "\t", "    ")
+		if got := stripANSI(row); got != want {
+			t.Errorf("row %d strips to %q, want %q", i, got, want)
+		}
+	}
+	if !strings.Contains(rows[0], "\x1b[") {
+		t.Errorf("a GDScript block should carry ANSI color, got %q", rows[0])
+	}
+}
+
 // TestChromaCodeBlockUnknownLang: a fence with no language (or one chroma does not
 // know) falls back to the reader's muted look rather than erroring.
 func TestChromaCodeBlockUnknownLang(t *testing.T) {

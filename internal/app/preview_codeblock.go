@@ -7,7 +7,6 @@ import (
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/lipgloss/v2"
-	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
@@ -25,8 +24,7 @@ import (
 // unchanged. Wrapping styled output would break ANSI at the cuts; wrapping first and
 // styling after never does.
 
-// init claims the seam for the process. Like the highlighter registrations in
-// highlight_chroma.go, linking the package is the whole setup.
+// init claims the language-neutral fenced-code renderer seam for the process.
 func init() {
 	components.CodeBlockRenderer = chromaCodeBlock
 }
@@ -51,7 +49,7 @@ func chromaCodeBlock(lang string, code []string, width int) []string {
 		return rows
 	}
 
-	h := &chromaHighlighter{lexer: chroma.Coalesce(lexer)}
+	h := chromaHighlighterFactory(lexer)()
 	h.Parse(strings.Join(rows, "\n"))
 	for i := range rows {
 		spans := h.HighlightLine(i)

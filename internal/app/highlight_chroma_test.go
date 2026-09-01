@@ -6,21 +6,17 @@ import (
 
 	"github.com/brohd11/bubblestack/components"
 
-	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
-// highlighterFor builds the highlighter init registers for ext. components' registry
-// lookup is unexported, so the tests construct the same thing the factory does; what
-// registration itself depends on — that every listed extension resolves to a lexer —
-// is asserted separately in TestChromaExtsAllResolve.
+// highlighterFor constructs the same adapter a Chroma-backed language profile does.
 func highlighterFor(t *testing.T, ext string) components.Highlighter {
 	t.Helper()
-	lexer := lexers.Match("f" + ext)
-	if lexer == nil {
-		t.Fatalf("chroma has no lexer for %s", ext)
+	profile := languageForPath("f" + ext)
+	if profile == nil || profile.editor.NewHighlighter == nil {
+		t.Fatalf("gote has no highlighted profile for %s", ext)
 	}
-	return &chromaHighlighter{lexer: chroma.Coalesce(lexer)}
+	return profile.editor.NewHighlighter()
 }
 
 // spanText is the concatenation the editor validates a line's spans against.
@@ -41,6 +37,7 @@ func spanText(spans []components.Span) string {
 func TestChromaSpansReconstructLines(t *testing.T) {
 	docs := map[string]string{
 		".go":   "package main\n\n/* a block\n   comment */\nfunc main() {\n\tx := `raw\nstring`\n\tprintln(x) // trailing\n}",
+		".gd":   "extends Node\n\nfunc _ready():\n\tvar greeting = \"hello\"\n\tprint(greeting)\n",
 		".py":   "import os\n\ndef f(a, b=1):\n    \"\"\"doc\n    string\"\"\"\n    return a + b  # note\n",
 		".sh":   "#!/bin/sh\nset -eu\nfor f in *.txt; do\n\techo \"$f\"\ndone\n",
 		".json": "{\n  \"a\": [1, 2.5, null],\n  \"b\": {\"c\": \"d\"}\n}\n",
@@ -97,8 +94,7 @@ func TestChromaOutOfRange(t *testing.T) {
 	}
 }
 
-// TestChromaExtsAllResolve: init silently skips an extension chroma has no lexer for,
-// which is the right behavior at runtime and a typo the list should not keep.
+// TestChromaExtsAllResolve guards the curated profile list against typos.
 func TestChromaExtsAllResolve(t *testing.T) {
 	for _, ext := range chromaExts {
 		if lexers.Match("f"+ext) == nil {

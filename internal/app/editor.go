@@ -17,12 +17,13 @@ import (
 // for a doc, left empty for the scratch buffer).
 func (s *homeScreen) editorOpts() components.EditorOpts {
 	return components.EditorOpts{
-		OnExit:       s.editorExit,
-		OnRelease:    s.editorRelease,
-		OnSaved:      s.editorSaved,
-		Search:       true,
-		ContextMenu:  true,
-		ContextItems: s.editorContextItems,
+		OnExit:          s.editorExit,
+		OnRelease:       s.editorRelease,
+		OnSaved:         s.editorSaved,
+		Search:          true,
+		ContextMenu:     true,
+		ContextItems:    s.editorContextItems,
+		ResolveLanguage: editorLanguageForPath,
 	}
 }
 
