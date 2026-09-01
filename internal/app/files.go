@@ -25,6 +25,7 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 		Root:       root,
 		Border:     true, // as both sidebar lists are: with three panes up, the focused one must show
 		Compact:    true, // a 30-cell column has no room for the standard delegate's second line
+		Colors:     true, // folders apart from documents at a glance in a narrow column
 		DensityKey: densityKey,
 		Include:    includeDoc(c),
 		// Rebuilt per directory by the panel, which is what makes "+ new file" mean the
