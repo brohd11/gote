@@ -1,7 +1,6 @@
 package app
 
 import (
-	"strings"
 	"time"
 	"unicode"
 	"unicode/utf16"
@@ -188,10 +187,8 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 	s.completion.resultSeq = result.editSeq
 	s.completion.resultPos = result.position
 	list := components.NewPopupList(components.PopupListOpts[lspCompletionItem]{
-		Items: items, MaxVisible: 8, MaxWidth: 56,
-		Filter: func(query string, item components.PopupListItem[lspCompletionItem]) bool {
-			return strings.HasPrefix(strings.ToLower(item.FilterText), strings.ToLower(query))
-		},
+		MaxVisible: 8, MaxWidth: 56,
+		Fuzzy: true,
 		OnAccept: func(_ *core.Shared, item components.PopupListItem[lspCompletionItem]) core.Action {
 			s.acceptCompletion(item.Value)
 			return core.Action{}
@@ -202,6 +199,10 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 		},
 	})
 	list.SetQuery(query)
+	// Seed after the initial query so the list selects its highest-ranked match. Later
+	// query changes preserve that selected source item, and an explicit LSP preselect
+	// below still wins when it survives the filter.
+	list.SetItems(items)
 	if preselect >= 0 {
 		list.Select(preselect)
 	}

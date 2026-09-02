@@ -80,6 +80,27 @@ func TestCompletionPopupPassesTypingAcceptsAndUndoes(t *testing.T) {
 	}
 }
 
+func TestCompletionPopupFuzzyFiltersAndRanks(t *testing.T) {
+	s, sh := completionHome(t)
+	s.Update(sh, keyMsg("p"))
+	showCompletion(t, s,
+		lspCompletionItem{Label: "sprint", FilterText: "sprint", InsertText: "sprint"},
+		lspCompletionItem{Label: "print", FilterText: "print", InsertText: "print"},
+		lspCompletionItem{Label: "unrelated", FilterText: "unrelated", InsertText: "unrelated"},
+	)
+	s.Update(sh, keyMsg("n"))
+	s.Update(sh, keyMsg("t"))
+	view := stripANSI(s.View(sh))
+	printAt, sprintAt := strings.Index(view, "print"), strings.Index(view, "sprint")
+	if printAt < 0 || sprintAt < 0 || printAt >= sprintAt || strings.Contains(view, "unrelated") {
+		t.Fatalf("fuzzy-ranked popup should put print before sprint and drop unrelated:\n%s", view)
+	}
+	s.Update(sh, keyMsg("tab"))
+	if got := s.editor.Text(); got != "print" {
+		t.Fatalf("accepted fuzzy completion = %q, want print", got)
+	}
+}
+
 func TestCompletionEscapeOnlyClosesPopup(t *testing.T) {
 	s, sh := completionHome(t)
 	s.Update(sh, keyMsg("pri"))

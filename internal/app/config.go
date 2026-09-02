@@ -24,6 +24,9 @@ type Config struct {
 	// a preset for alt+t, not a mode: the scan still runs and the flat list is still
 	// seeded behind it, so the toggle shows it with nothing left to load.
 	FolderView bool `yaml:"folder_view"`
+	// IndentGuides makes the editor visualize complete leading indent levels. It is
+	// off by default so existing configs retain the uncluttered rendering.
+	IndentGuides bool `yaml:"indent_guides"`
 	// GitGutter decides whether the editor draws change markers against HEAD:
 	// gutterOn, gutterOff, or gutterAuto (the default) to let the launch decide —
 	// see gutterDefault. Auto exists because the two launches want opposite answers

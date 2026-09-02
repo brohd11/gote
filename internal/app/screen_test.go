@@ -532,6 +532,15 @@ func TestHomeEditorSearch(t *testing.T) {
 	}
 }
 
+func TestHomeEditorIndentGuidesFromConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IndentGuides = true
+	s, _ := newHomeCfg(t, cfg, Options{})
+	if !s.editorOpts().IndentGuides {
+		t.Fatal("indent_guides config was not propagated to editor options")
+	}
+}
+
 // TestHelpOverlayIsTheCompleteReference pins the split the bar and the overlay now make:
 // the bar names only the way in ("? more"), so every app key has to be written in the
 // overlay or it is written nowhere. It also pins the notation — one modifier spelling

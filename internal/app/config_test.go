@@ -41,6 +41,12 @@ func TestLoadConfigFile(t *testing.T) {
 	if want := DefaultConfig().ScanDepth; cfg.ScanDepth != want {
 		t.Fatalf("scan depth = %d, want the default %d", cfg.ScanDepth, want)
 	}
+	if cfg.IndentGuides {
+		t.Fatal("indent guides should default off when the key is omitted")
+	}
+	if enabled := writeConfig(t, "indent_guides: true\n"); !enabled.IndentGuides {
+		t.Fatal("indent_guides: true was not loaded")
+	}
 }
 
 // TestLoadConfigNoExtensions: the unconfigured default is no filter at all — every
@@ -104,7 +110,7 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "git_gutter:", "language_servers:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "indent_guides:", "git_gutter:", "language_servers:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}

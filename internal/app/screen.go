@@ -90,6 +90,7 @@ type homeScreen struct {
 	sidebar           bool
 	flat              bool          // the docs slot shows the flat scan (true) or the folder explorer
 	minimal           bool          // ModeFile: the editor alone, all chrome masked, sidebar unreachable
+	indentGuides      bool          // config-selected leading-indent visualization for every buffer
 	gitGutter         bool          // draw change markers against HEAD (see gitgutter.go)
 	diagnosticsGutter bool          // independently toggle the LSP marker column
 	gutter            gutter        // the baseline and last-drawn markers behind them
@@ -128,7 +129,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
 	// there and nothing writes the choice back.
 	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
-		gitGutter: gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil,
+		indentGuides: c.Config.IndentGuides,
+		gitGutter:    gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil,
 		gutterDebounce: gitGutterDebounce}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders

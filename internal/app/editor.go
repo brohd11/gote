@@ -23,6 +23,7 @@ func (s *homeScreen) editorOpts() components.EditorOpts {
 		Search:          true,
 		ContextMenu:     true,
 		ContextItems:    s.editorContextItems,
+		IndentGuides:    s.indentGuides,
 		ResolveLanguage: editorLanguageForPath,
 	}
 }
