@@ -95,15 +95,19 @@ func startRecordingTCPServer(t *testing.T, server *recordingLSPServer) string {
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				_, rpc, client := protocol.NewServer(context.Background(), server, jsonrpc2.NewStream(conn))
+				server.mu.Lock()
+				server.client = client
+				server.mu.Unlock()
+				<-rpc.Done()
+			}(conn)
 		}
-		_, rpc, client := protocol.NewServer(context.Background(), server, jsonrpc2.NewStream(conn))
-		server.mu.Lock()
-		server.client = client
-		server.mu.Unlock()
-		<-rpc.Done()
 	}()
 	return listener.Addr().String()
 }
@@ -119,6 +123,22 @@ func waitLSPCall(t *testing.T, calls <-chan recordedLSPCall, method string) reco
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for LSP %s", method)
+		}
+	}
+}
+
+func assertNoLSPCall(t *testing.T, calls <-chan recordedLSPCall, method string, duration time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	for {
+		select {
+		case call := <-calls:
+			if call.method == method {
+				t.Fatalf("received unexpected LSP %s", method)
+			}
+		case <-timer.C:
+			return
 		}
 	}
 }
@@ -145,6 +165,7 @@ func TestLSPTCPDocumentLifecycle(t *testing.T) {
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	defer c.close()
+	c.lsp.changeDebounce = 30 * time.Millisecond
 	ed := c.OpenDoc(path, components.EditorOpts{})
 	ed.SetText("print('one')\n")
 
@@ -202,6 +223,111 @@ func TestLSPTCPDocumentLifecycle(t *testing.T) {
 	c.CloseDoc(newPath)
 	c.lsp.Reconcile(c)
 	waitLSPCall(t, server.calls, "close")
+}
+
+func TestLSPDebouncesDocumentChanges(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.py")
+	server := newRecordingLSPServer()
+	address := startRecordingTCPServer(t, server)
+	cfg := DefaultConfig()
+	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
+	c := New("test", cfg, Options{})
+	defer c.close()
+	c.lsp.changeDebounce = 80 * time.Millisecond
+	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed.SetText("first\n")
+	c.lsp.Reconcile(c)
+	waitLSPCall(t, server.calls, "open")
+
+	ed.SetText("second\n")
+	c.lsp.Reconcile(c)
+	assertNoLSPCall(t, server.calls, "change", 50*time.Millisecond)
+	ed.SetText("third\n")
+	c.lsp.Reconcile(c)
+	// This wait crosses the first edit's deadline. The old timer must recognize that
+	// version three has not received its own quiet period and start a fresh window.
+	assertNoLSPCall(t, server.calls, "change", 50*time.Millisecond)
+	changed := waitLSPCall(t, server.calls, "change")
+	if changed.version != 3 || changed.text != "third\n" {
+		t.Fatalf("debounced didChange = version %d text %q", changed.version, changed.text)
+	}
+
+	// A rename during another pending edit must close the old URI and immediately
+	// open the replacement with the latest text, never emitting the stale change.
+	ed.SetText("renamed\n")
+	c.lsp.Reconcile(c)
+	newPath := filepath.Join(root, "renamed.py")
+	c.RekeyDoc(path, newPath, ed)
+	c.lsp.Reconcile(c)
+	waitLSPCall(t, server.calls, "close")
+	reopened := waitLSPCall(t, server.calls, "open")
+	if reopened.version != 1 || reopened.text != "renamed\n" {
+		t.Fatalf("rekeyed didOpen = version %d text %q", reopened.version, reopened.text)
+	}
+	assertNoLSPCall(t, server.calls, "change", 2*c.lsp.changeDebounce)
+}
+
+func TestLSPSaveFlushesPendingChange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.py")
+	server := newRecordingLSPServer()
+	address := startRecordingTCPServer(t, server)
+	cfg := DefaultConfig()
+	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
+	c := New("test", cfg, Options{})
+	defer c.close()
+	c.lsp.changeDebounce = time.Second
+	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed.SetText("before\n")
+	c.lsp.Reconcile(c)
+	waitLSPCall(t, server.calls, "open")
+
+	ed.SetText("saved\n")
+	c.lsp.Reconcile(c)
+	assertNoLSPCall(t, server.calls, "change", 30*time.Millisecond)
+	c.lsp.DidSave(path)
+
+	deadline := time.After(250 * time.Millisecond)
+	for _, want := range []string{"change", "save"} {
+		select {
+		case call := <-server.calls:
+			if call.method != want {
+				t.Fatalf("save flush call = %q, want %q", call.method, want)
+			}
+			if want == "change" && (call.version != 2 || call.text != "saved\n") {
+				t.Fatalf("save-flushed didChange = version %d text %q", call.version, call.text)
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for immediate LSP %s", want)
+		}
+	}
+}
+
+func TestLSPRestartOpensLatestPendingText(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.py")
+	server := newRecordingLSPServer()
+	address := startRecordingTCPServer(t, server)
+	cfg := DefaultConfig()
+	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
+	c := New("test", cfg, Options{})
+	defer c.close()
+	c.lsp.changeDebounce = time.Second
+	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed.SetText("before\n")
+	c.lsp.Reconcile(c)
+	waitLSPCall(t, server.calls, "open")
+
+	ed.SetText("latest\n")
+	c.lsp.Reconcile(c)
+	c.lsp.Restart()
+	waitLSPCall(t, server.calls, "initialize")
+	reopened := waitLSPCall(t, server.calls, "open")
+	if reopened.version != 2 || reopened.text != "latest\n" {
+		t.Fatalf("restart didOpen = version %d text %q", reopened.version, reopened.text)
+	}
+	assertNoLSPCall(t, server.calls, "change", 100*time.Millisecond)
 }
 
 // TestLSPHelperProcess becomes a tiny pylsp-shaped stdio server only in the subprocess

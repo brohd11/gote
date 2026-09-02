@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	lspRetryDelay = 15 * time.Second
-	lspDialLimit  = 1500 * time.Millisecond
-	lspInitLimit  = 5 * time.Second
+	lspRetryDelay     = 15 * time.Second
+	lspDialLimit      = 1500 * time.Millisecond
+	lspInitLimit      = 5 * time.Second
+	lspChangeDebounce = 500 * time.Millisecond
 )
 
 // lspDocument is the manager's desired view of one live editor buffer. Version is an
@@ -53,11 +54,12 @@ type lspEvent struct{ status string }
 
 // lspManager is an actor around all server and document lifecycle work. The UI writes
 // the latest desired snapshots under mu and nudges wake; the actor converges sessions
-// to that state off Bubble Tea's update goroutine. Repeated edits collapse naturally
-// because only the latest snapshot is retained before the actor takes its next copy.
+// to that state off Bubble Tea's update goroutine. Repeated edits are retained as one
+// latest snapshot and sent only after the change debounce expires.
 type lspManager struct {
-	cfg     Config
-	version string
+	cfg            Config
+	version        string
+	changeDebounce time.Duration
 
 	mu          sync.Mutex
 	desired     map[string]lspDocument
@@ -91,7 +93,7 @@ type lspSession struct {
 
 func newLSPManager(cfg Config, version string) *lspManager {
 	return &lspManager{
-		cfg: cfg, version: version,
+		cfg: cfg, version: version, changeDebounce: lspChangeDebounce,
 		desired: map[string]lspDocument{}, saves: map[string]bool{},
 		diagnostics: map[string][]lspDiagnostic{},
 		wake:        make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
@@ -220,18 +222,60 @@ func (m *lspManager) WaitCmd() tea.Cmd {
 func (m *lspManager) loop() {
 	defer close(m.done)
 	sessions := map[string]*lspSession{}
+	pending := map[string]lspDocument{}
+	debounce := m.changeDebounce
+	if debounce <= 0 {
+		debounce = lspChangeDebounce
+	}
+	var changeTimer *time.Timer
+	var changeTimerC <-chan time.Time
+	stopChangeTimer := func() {
+		if changeTimer == nil {
+			return
+		}
+		if !changeTimer.Stop() {
+			select {
+			case <-changeTimer.C:
+			default:
+			}
+		}
+		changeTimerC = nil
+	}
+	resetChangeTimer := func() {
+		if changeTimer == nil {
+			changeTimer = time.NewTimer(debounce)
+		} else {
+			stopChangeTimer()
+			changeTimer.Reset(debounce)
+		}
+		changeTimerC = changeTimer.C
+	}
 	for {
 		select {
 		case <-m.wake:
-			m.converge(sessions)
+			queued := m.converge(sessions, pending, false)
+			switch {
+			case len(pending) == 0:
+				stopChangeTimer()
+			case queued || changeTimerC == nil:
+				resetChangeTimer()
+			}
+		case <-changeTimerC:
+			changeTimerC = nil
+			m.converge(sessions, pending, true)
+			if len(pending) > 0 {
+				resetChangeTimer()
+			}
 		case dead := <-m.dead:
 			if session := sessions[dead.key]; session != nil && session.conn == dead.conn {
 				if dead.err == nil {
 					dead.err = fmt.Errorf("connection closed")
 				}
 				m.failSession(session, dead.err)
+				clearPendingSession(pending, session.key)
 			}
 		case <-m.stop:
+			stopChangeTimer()
 			for _, session := range sessions {
 				m.closeSession(session)
 			}
@@ -255,13 +299,25 @@ func (m *lspManager) desiredSnapshot() (map[string]lspDocument, map[string]bool,
 	return docs, saves, restart
 }
 
-func (m *lspManager) converge(sessions map[string]*lspSession) {
+// converge applies document lifecycle work immediately. Ordinary content changes are
+// retained in pending until a quiet period; saves and reconnects always use the latest
+// snapshot without waiting. The return value reports whether a newer pending version
+// was observed and therefore needs a fresh debounce window.
+func (m *lspManager) converge(sessions map[string]*lspSession, pending map[string]lspDocument, flushChanges bool) bool {
 	docs, saves, restart := m.desiredSnapshot()
+	queuedChange := false
+	for path, queued := range pending {
+		doc, ok := docs[path]
+		if !ok || queued.key() != doc.key() {
+			delete(pending, path)
+		}
+	}
 	if restart {
 		for key, session := range sessions {
 			m.closeSession(session)
 			delete(sessions, key)
 		}
+		clear(pending)
 	}
 
 	// Close documents that disappeared or moved to another session before opening their
@@ -279,6 +335,7 @@ func (m *lspManager) converge(sessions map[string]*lspSession) {
 				TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(path)},
 			}); err != nil {
 				m.failSession(session, err)
+				clearPendingSession(pending, session.key)
 				break
 			}
 			delete(session.sent, path)
@@ -304,10 +361,12 @@ func (m *lspManager) converge(sessions map[string]*lspSession) {
 		}
 		if session.server == nil {
 			if time.Now().Before(session.retryAt) {
+				clearPendingSession(pending, session.key)
 				continue
 			}
 			if err := m.startSession(session); err != nil {
 				m.failSession(session, err)
+				clearPendingSession(pending, session.key)
 				continue
 			}
 		}
@@ -323,6 +382,15 @@ func (m *lspManager) converge(sessions map[string]*lspSession) {
 					},
 				})
 			case version != doc.version:
+				queued, wasQueued := pending[doc.path]
+				ready := saves[doc.path] || (flushChanges && wasQueued && queued.version == doc.version && queued.key() == doc.key())
+				if !ready {
+					if !wasQueued || queued.version != doc.version || queued.key() != doc.key() {
+						pending[doc.path] = doc
+						queuedChange = true
+					}
+					continue
+				}
 				err = session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
 					TextDocument: protocol.VersionedTextDocumentIdentifier{
 						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
@@ -335,18 +403,30 @@ func (m *lspManager) converge(sessions map[string]*lspSession) {
 			}
 			if err != nil {
 				m.failSession(session, err)
+				clearPendingSession(pending, session.key)
 				break
 			}
 			session.sent[doc.path] = doc.version
+			delete(pending, doc.path)
 			if saves[doc.path] {
 				text := doc.text
 				if err := session.server.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
 					TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)}, Text: &text,
 				}); err != nil {
 					m.failSession(session, err)
+					clearPendingSession(pending, session.key)
 					break
 				}
 			}
+		}
+	}
+	return queuedChange
+}
+
+func clearPendingSession(pending map[string]lspDocument, key string) {
+	for path, doc := range pending {
+		if doc.key() == key {
+			delete(pending, path)
 		}
 	}
 }
