@@ -78,11 +78,13 @@ func styleFor(tt chroma.TokenType) lipgloss.Style {
 // whole document and bakes per-line spans; HighlightLine is then a lookup. The lexer is
 // fixed at construction (the language profile chooses it), so no per-parse detection.
 type chromaHighlighter struct {
-	lexer chroma.Lexer
-	lines [][]components.Span
+	lexer   chroma.Lexer
+	lines   [][]components.Span
+	restart []int // per row, a nearby root-like opener for provisional fragment parses
 }
 
 var _ components.Highlighter = (*chromaHighlighter)(nil)
+var _ components.HighlightRestartProvider = (*chromaHighlighter)(nil)
 
 func chromaHighlighterFactory(lexer chroma.Lexer) func() components.Highlighter {
 	lexer = chroma.Coalesce(lexer)
@@ -98,6 +100,7 @@ func chromaHighlighterFactory(lexer chroma.Lexer) func() components.Highlighter 
 // and the buffer renders plain, the same as a profile with no highlighter.
 func (h *chromaHighlighter) Parse(doc string) {
 	h.lines = nil
+	h.restart = nil
 	if h.lexer == nil {
 		return
 	}
@@ -108,8 +111,18 @@ func (h *chromaHighlighter) Parse(doc string) {
 	// One row per source line up front, so a token that touches no line (and a document
 	// whose stream ends early) still leaves the rows addressable.
 	h.lines = make([][]components.Span, strings.Count(doc, "\n")+1)
+	h.restart = make([]int, len(h.lines))
+	for row := range h.restart {
+		h.restart[row] = row
+	}
 	row := 0
+	family, familyStart := 0, 0
 	for _, tok := range iter.Tokens() {
+		nextFamily := chromaRestartFamily(tok.Type)
+		if nextFamily == 0 || nextFamily != family {
+			familyStart = row
+		}
+		family = nextFamily
 		style := styleFor(tok.Type)
 		parts := strings.Split(tok.Value, "\n")
 		for i, part := range parts {
@@ -118,6 +131,9 @@ func (h *chromaHighlighter) Parse(doc string) {
 				// trailing newline of their own (Config.EnsureNL), so this can walk one
 				// row past the buffer — the append below is guarded for it.
 				row++
+				if family != 0 && row < len(h.restart) {
+					h.restart[row] = familyStart
+				}
 			}
 			if part == "" || row >= len(h.lines) {
 				continue
@@ -127,6 +143,19 @@ func (h *chromaHighlighter) Parse(doc string) {
 	}
 }
 
+// chromaRestartFamily joins adjacent token leaves that are still part of one string or
+// comment. Coalesce already handles identical leaves; grouping their token hierarchy as
+// well keeps escapes/interpolation attached to the opening delimiter in common lexers.
+func chromaRestartFamily(tt chroma.TokenType) int {
+	if tt.InSubCategory(chroma.LiteralString) {
+		return 1
+	}
+	if tt.InCategory(chroma.Comment) {
+		return 2
+	}
+	return 0
+}
+
 // HighlightLine returns the baked spans for row, or nil when the row is outside what was
 // parsed (the editor renders those plain).
 func (h *chromaHighlighter) HighlightLine(row int) []components.Span {
@@ -134,6 +163,13 @@ func (h *chromaHighlighter) HighlightLine(row int) []components.Span {
 		return nil
 	}
 	return h.lines[row]
+}
+
+func (h *chromaHighlighter) HighlightRestartLine(row int) int {
+	if row < 0 || row >= len(h.restart) {
+		return row
+	}
+	return h.restart[row]
 }
 
 // chromaExts are the extensions gote hands to Chroma. A curated list rather than every

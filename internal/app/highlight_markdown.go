@@ -69,7 +69,10 @@ type markdownHighlighter struct {
 	lineStart []int               // byte offset of each line's first byte
 	intervals [][]mdInterval      // per line, in discovery order
 	spans     [][]components.Span // the baked answer; nil per unstyled line
+	restart   []int               // nearest block opener usable for a preview parse
 }
+
+var _ components.HighlightRestartProvider = (*markdownHighlighter)(nil)
 
 // newMarkdownHighlighter returns a Highlighter for CommonMark markdown, styled
 // with the md*Style defaults: headings bold, *em* italic, **strong** bold,
@@ -94,6 +97,10 @@ func (m *markdownHighlighter) Parse(doc string) {
 		off += len(l) + 1 // the '\n' the split dropped
 	}
 	m.intervals = make([][]mdInterval, len(m.lines))
+	m.restart = make([]int, len(m.lines))
+	for row := range m.restart {
+		m.restart[row] = row
+	}
 
 	root := goldmark.New().Parser().Parse(text.NewReader(m.src))
 	ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -109,15 +116,21 @@ func (m *markdownHighlighter) Parse(doc string) {
 				m.addBlock(r, r, mdStyleHeading)
 			}
 		case *ast.FencedCodeBlock:
-			m.addBlock(m.rowOf(v.Pos()), m.fencedLastRow(v), mdStyleCode)
+			first, last := m.rowOf(v.Pos()), m.fencedLastRow(v)
+			m.setRestart(first, last, first)
+			m.addBlock(first, last, mdStyleCode)
 		case *ast.CodeBlock:
 			if ls := v.Lines(); ls.Len() > 0 {
-				m.addBlock(m.rowOf(ls.At(0).Start), m.rowOf(ls.At(ls.Len()-1).Stop-1), mdStyleCode)
+				first, last := m.rowOf(ls.At(0).Start), m.rowOf(ls.At(ls.Len()-1).Stop-1)
+				m.setRestart(first, last, first)
+				m.addBlock(first, last, mdStyleCode)
 			}
 		case *ast.Blockquote:
 			// A container: its own Lines() is empty, so the range runs from the
 			// opening '>' to the deepest descendant's last line.
-			m.addBlock(m.rowOf(v.Pos()), m.lastRow(v), mdStyleQuote)
+			first, last := m.rowOf(v.Pos()), m.lastRow(v)
+			m.setRestart(first, last, first)
+			m.addBlock(first, last, mdStyleQuote)
 		case *ast.ListItem:
 			// Only the MARKER is styled, not the item's text — the children keep
 			// walking so their own inline constructs still land.
@@ -156,6 +169,22 @@ func (m *markdownHighlighter) HighlightLine(row int) []components.Span {
 		return nil
 	}
 	return m.spans[row]
+}
+
+func (m *markdownHighlighter) HighlightRestartLine(row int) int {
+	if row < 0 || row >= len(m.restart) {
+		return row
+	}
+	return m.restart[row]
+}
+
+func (m *markdownHighlighter) setRestart(rowA, rowB, restart int) {
+	rowA, rowB = max(rowA, 0), min(rowB, len(m.restart)-1)
+	for row := rowA; row <= rowB; row++ {
+		if restart < m.restart[row] {
+			m.restart[row] = restart
+		}
+	}
 }
 
 // rowOf is the line index containing byte offset off, via the line-start table.

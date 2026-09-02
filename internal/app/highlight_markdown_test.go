@@ -65,6 +65,20 @@ func TestMarkdownSpansReconstructDocument(t *testing.T) {
 	}
 }
 
+func TestMarkdownRestartHintTracksFencedBlock(t *testing.T) {
+	doc := "before\n```gdscript\nfunc ready():\n\tpass\n```\nafter"
+	h := newMarkdownHighlighter().(*markdownHighlighter)
+	h.Parse(doc)
+	for _, row := range []int{2, 3, 4} {
+		if got := h.HighlightRestartLine(row); got != 1 {
+			t.Fatalf("fenced row %d restart = %d, want opener row 1", row, got)
+		}
+	}
+	if got := h.HighlightRestartLine(5); got != 5 {
+		t.Fatalf("row after fence restart = %d, want itself", got)
+	}
+}
+
 func TestMarkdownStylesStructuralAndInlineText(t *testing.T) {
 	hl := newMarkdownHighlighter()
 	hl.Parse("# head\n- *em* and `code`")

@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/brohd11/bubblestack/components"
@@ -113,6 +114,56 @@ func TestChromaNilLexer(t *testing.T) {
 	}
 }
 
+func TestChromaRestartHintTracksMultilineGDScriptString(t *testing.T) {
+	h, ok := highlighterFor(t, ".gd").(*chromaHighlighter)
+	if !ok {
+		t.Fatal("GDScript should use the Chroma adapter")
+	}
+	h.Parse("var text = \"\"\"first\nsecond\nthird\"\"\"\nprint(text)")
+	for _, row := range []int{1, 2} {
+		if got := h.HighlightRestartLine(row); got != 0 {
+			t.Fatalf("multiline string row %d restart = %d, want opener row 0", row, got)
+		}
+	}
+	if got := h.HighlightRestartLine(3); got != 3 {
+		t.Fatalf("row after multiline string restart = %d, want itself", got)
+	}
+}
+
+func TestChromaRestartHintTracksBlockComment(t *testing.T) {
+	h, ok := highlighterFor(t, ".go").(*chromaHighlighter)
+	if !ok {
+		t.Fatal("Go should use the Chroma adapter")
+	}
+	h.Parse("package p\n/* first\nsecond\nthird */\nvar x = 1")
+	for _, row := range []int{2, 3} {
+		if got := h.HighlightRestartLine(row); got != 1 {
+			t.Fatalf("block comment row %d restart = %d, want opener row 1", row, got)
+		}
+	}
+}
+
+func TestChromaFactoryParsesIndependentSnapshotsConcurrently(t *testing.T) {
+	profile := languageForPath("concurrent.gd")
+	factory := profile.editor.NewHighlighter
+	docs := []string{
+		strings.Repeat("func one():\n\tprint(\"one\")\n", 20),
+		strings.Repeat("func two():\n\tprint(\"two\")\n", 20),
+	}
+	var wg sync.WaitGroup
+	for i := range docs {
+		wg.Add(1)
+		go func(doc string) {
+			defer wg.Done()
+			for range 4 {
+				h := factory()
+				h.Parse(doc)
+			}
+		}(docs[i])
+	}
+	wg.Wait()
+}
+
 var benchmarkHighlightSpans []components.Span
 
 func BenchmarkChromaHighlighterLargeDocument(b *testing.B) {
@@ -128,5 +179,21 @@ func BenchmarkChromaHighlighterLargeDocument(b *testing.B) {
 	for b.Loop() {
 		hl.Parse(doc)
 		benchmarkHighlightSpans = hl.HighlightLine(10_000)
+	}
+}
+
+func BenchmarkChromaHighlighterViewport(b *testing.B) {
+	profile := languageForPath("viewport.gd")
+	if profile == nil || profile.editor.NewHighlighter == nil {
+		b.Fatal("GDScript highlighter is not configured")
+	}
+	doc := strings.Repeat("func update(delta: float) -> void:\n\tposition.x += delta\n", 12)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(doc)))
+	b.ResetTimer()
+	for b.Loop() {
+		hl := profile.editor.NewHighlighter()
+		hl.Parse(doc)
+		benchmarkHighlightSpans = hl.HighlightLine(20)
 	}
 }

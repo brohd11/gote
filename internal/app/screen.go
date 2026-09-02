@@ -448,7 +448,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		core.StyleList(s.openPanel.List())
 		s.refreshDiagnosticSigns()
 	}
-	return core.Action{}
+	return s.modular.Receive(sh, payload)
 }
 
 // requestVaultSwitch validates the target before consulting dirty state. A broken

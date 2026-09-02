@@ -45,6 +45,30 @@ type Ctx struct {
 	lsp  *lspManager
 }
 
+var _ core.Receiver = (*Ctx)(nil)
+
+// Receive forwards framework broadcasts to every retained editor, including buffers
+// that are currently switched out of the pane. Async highlight work can finish while a
+// different document is visible; without this registry relay its targeted completion
+// would have nowhere live to land and that editor would remain permanently in flight.
+func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
+	var acts []core.Action
+	c.EachDoc(func(_ string, ed *components.EditorScreen) {
+		act := ed.Receive(sh, payload)
+		if act.Msg != nil || act.Cmd != nil {
+			acts = append(acts, act)
+		}
+	})
+	switch len(acts) {
+	case 0:
+		return core.Action{}
+	case 1:
+		return acts[0]
+	default:
+		return core.Seq(acts...)
+	}
+}
+
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
 // fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile, Vault and
 // Dir for ModeVault. A zero Options is the default launch — the directory or vault
