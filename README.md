@@ -54,6 +54,8 @@ Diagnostics appear in their own gutter column and in Actions → Diagnostics. Th
 and editor context menus independently toggle the diagnostics and git gutters and can
 restart failed server connections. Set `auto-lsp: false`, disable an individual entry,
 or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
+Server-specific `initialization_options` can also be overridden; Python's built-in
+options enable pylsp's parameter snippets for callable completions.
 
 ### Single Document
 

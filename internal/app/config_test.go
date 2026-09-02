@@ -139,11 +139,23 @@ language_servers:
 	if got := cfg.LanguageServers["python"].Command; !reflect.DeepEqual(got, []string{"pylsp", "--verbose"}) {
 		t.Fatalf("python command = %v", got)
 	}
+	if got := cfg.LanguageServers["python"].InitializationOptions; got == nil {
+		t.Fatal("custom Python transport should inherit built-in initialization options")
+	}
 
 	cfg = writeConfig(t, "language_servers: {}\n")
 	if cfg.LanguageServers["gdscript"].Address != "127.0.0.1:6005" ||
 		!reflect.DeepEqual(cfg.LanguageServers["python"].Command, []string{"pylsp"}) {
 		t.Fatalf("missing entries should inherit built-ins: %#v", cfg.LanguageServers)
+	}
+
+	cfg = writeConfig(t, `language_servers:
+  python:
+    command: [pylsp]
+    initialization_options: {}
+`)
+	if cfg.LanguageServers["python"].InitializationOptions == nil || len(cfg.LanguageServers["python"].InitializationOptions) != 0 {
+		t.Fatalf("explicit empty initialization options should disable built-ins: %#v", cfg.LanguageServers["python"])
 	}
 }
 

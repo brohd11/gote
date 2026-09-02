@@ -40,11 +40,13 @@ type Config struct {
 
 // LanguageServerConfig selects exactly one transport. Address is a TCP endpoint for a
 // server managed elsewhere; Command is an executable followed by its arguments for a
-// stdio server whose process lifetime belongs to gote.
+// stdio server whose process lifetime belongs to gote. InitializationOptions is the
+// server-specific JSON-shaped object sent during the standard LSP handshake.
 type LanguageServerConfig struct {
-	Disabled bool     `yaml:"disabled"`
-	Address  string   `yaml:"address"`
-	Command  []string `yaml:"command"`
+	Disabled              bool           `yaml:"disabled"`
+	Address               string         `yaml:"address"`
+	Command               []string       `yaml:"command"`
+	InitializationOptions map[string]any `yaml:"initialization_options,omitempty"`
 }
 
 // The values Config.GitGutter takes. Anything else reads as gutterAuto rather than
@@ -92,7 +94,12 @@ func DefaultConfig() Config {
 func defaultLanguageServers() map[string]LanguageServerConfig {
 	return map[string]LanguageServerConfig{
 		"gdscript": {Address: "127.0.0.1:6005", Command: []string{}},
-		"python":   {Command: []string{"pylsp"}},
+		"python": {
+			Command: []string{"pylsp"},
+			InitializationOptions: map[string]any{"pylsp": map[string]any{
+				"plugins": map[string]any{"jedi_completion": map[string]any{"include_params": true}},
+			}},
+		},
 	}
 }
 
@@ -171,6 +178,11 @@ func LoadConfig() (Config, error) {
 		server, ok := cfg.LanguageServers[id]
 		if !ok || (!server.Disabled && server.Address == "" && len(server.Command) == 0) {
 			cfg.LanguageServers[id] = fallback
+			continue
+		}
+		if server.InitializationOptions == nil {
+			server.InitializationOptions = fallback.InitializationOptions
+			cfg.LanguageServers[id] = server
 		}
 	}
 	// An unset or misspelled value is auto, the default: the key is a preference, and

@@ -33,9 +33,10 @@ var (
 	fullPreviewKey = key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "full preview"))
 	// alt+z, not ctrl+w: ctrl+w is the editor's own delete-word-back (and readline's),
 	// and intercepting it here would swallow it before the editor ever sees it.
-	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
-	lineNumsKey = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
-	helpKey     = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
+	wrapKey       = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
+	lineNumsKey   = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
+	completionKey = key.NewBinding(key.WithKeys("ctrl+space"), key.WithHelp("ctrl+space", "completion"))
+	helpKey       = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
 	// The docs list's own key, not the screen's: it acts on the selected row, so it
 	// belongs to the panel that has one (ListPanelOpts.OnKey) and must not fire from
 	// the editor. ctrl+r is free everywhere — gote, the editor, and the router's globals.
@@ -101,6 +102,7 @@ type homeScreen struct {
 	previewMap        []int         // that render's source line → pane row map (RenderMarkdownMapped)
 	previewAt         int           // the editor scroll offset the pane was last synced to; -1 re-syncs
 	lspWaiting        bool          // one blocking manager subscription is already in Bubble Tea
+	completion        completionUI  // parent-owned, input-transparent LSP completion popup
 	sh                *core.Shared  // stashed by Init/SetSize for rebuilds and the crumb
 	w, h              int
 }
@@ -220,26 +222,45 @@ func fileText(path string) string {
 // screen. The returned screen is always the wrapper — the modular swap happens in
 // place, never as a screen replacement.
 func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
+	if tick, ok := msg.(completionTick); ok {
+		act, _ := s.handleCompletionTick(sh, tick)
+		return s, s.finishHomeUpdate(sh, act)
+	}
+	beforeCompletion := s.completionSnapshot()
+	if s.completion.popup != nil {
+		if act, handled := s.completion.popup.Update(sh, msg); handled {
+			return s, s.finishHomeUpdate(sh, act)
+		}
+	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
+		if core.MatchKey(k, completionKey) {
+			return s, s.finishHomeUpdate(sh, s.requestCompletion(sh, "", true))
+		}
 		if core.MatchKey(k, sidebarKey) {
+			s.closeCompletion()
 			s.setSidebar(!s.sidebar)
 			return s, core.Action{}
 		}
 		if core.MatchKey(k, flatKey) {
+			s.closeCompletion()
 			s.setFlat(!s.flat)
 			return s, core.Action{}
 		}
 		if core.MatchKey(k, actionsKey) && !s.modular.Filtering() {
+			s.closeCompletion()
 			return s, core.Push(s.actionsMenu(sh))
 		}
 		if core.MatchKey(k, helpKey) && (!s.modular.Filtering() || k == "alt+?") {
+			s.closeCompletion()
 			return s, core.Push(s.helpScreen())
 		}
 		if core.MatchKey(k, previewKey) {
+			s.closeCompletion()
 			return s, s.cyclePreview()
 		}
 		if core.MatchKey(k, fullPreviewKey) {
+			s.closeCompletion()
 			return s, s.toggleFullPreview()
 		}
 		// esc closes the reader, as it did back when the reader was a pushed screen and
@@ -247,18 +268,30 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		// esc with a Pop the router clamps away at the root, and a list's /-filter still
 		// needs its own esc (Filtering).
 		if s.fullPreview != nil && core.MatchKey(k, core.Keys.Back) && !s.modular.Filtering() {
+			s.closeCompletion()
 			return s, s.closeFullPreview()
 		}
 		if core.MatchKey(k, wrapKey) {
+			s.closeCompletion()
 			s.editor.ToggleWrap()
 			return s, core.Action{}
 		}
 		if core.MatchKey(k, lineNumsKey) {
+			s.closeCompletion()
 			s.editor.ToggleLineNums()
 			return s, core.Action{}
 		}
 	}
 	_, act := s.modular.Update(sh, msg)
+	if act.Msg != nil {
+		s.closeCompletion()
+	} else {
+		act.Cmd = tea.Batch(act.Cmd, s.updateCompletionAfterParent(sh, msg, beforeCompletion))
+	}
+	return s, s.finishHomeUpdate(sh, act)
+}
+
+func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Action {
 	s.refreshPreview()
 	s.syncPreviewScroll()
 	// Batched into the cmd lane rather than folded in with core.Seq: Seq builds an
@@ -271,7 +304,7 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			act.Cmd = tea.Batch(act.Cmd, c.lsp.WaitCmd())
 		}
 	}
-	return s, act
+	return act
 }
 
 // View and HelpView both route through the status helpers (status.go): the router's own
@@ -280,9 +313,9 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 func (s *homeScreen) View(sh *core.Shared) string {
 	body := s.modular.View(sh)
 	if s.minimal {
-		return statusOver(sh, body, s.h)
+		body = statusOver(sh, body, s.h)
 	}
-	return body
+	return s.viewCompletion(sh, body)
 }
 
 func (s *homeScreen) HelpView(sh *core.Shared) string {
@@ -316,6 +349,7 @@ func (s *homeScreen) Filtering() bool { return s.modular.Filtering() }
 // consults the stack top-down, so the gate still answers from under a pushed
 // modal (the save-as/new-file line edit, the help overlay).
 func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
+	s.closeCompletion()
 	dirty := s.dirtyDocs(sh)
 	if len(dirty) == 0 {
 		return core.Action{}, false
@@ -407,6 +441,9 @@ func (s *homeScreen) CrumbLabel(short bool) string {
 // cache themed styles and need an explicit refresh here.
 func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 	if event, ok := payload.(lspEvent); ok {
+		if event.completion != nil {
+			s.applyCompletionResult(event.completion)
+		}
 		s.refreshDiagnosticSigns()
 		s.lspWaiting = true
 		wait := core.Async(Of(sh).lsp.WaitCmd())
@@ -454,6 +491,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 // requestVaultSwitch validates the target before consulting dirty state. A broken
 // saved path must never make the user discard work for a switch that cannot happen.
 func (s *homeScreen) requestVaultSwitch(sh *core.Shared, name string) core.Action {
+	s.closeCompletion()
 	if _, err := vaultPath(Of(sh).Config, name); err != nil {
 		return core.Push(errPopup("open vault", err))
 	}

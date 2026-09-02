@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -21,22 +22,36 @@ import (
 type recordedLSPCall struct {
 	method, text string
 	version      int32
+	position     protocol.Position
+	trigger      protocol.CompletionTriggerKind
+	triggerChar  string
 }
 
 type recordingLSPServer struct {
 	protocol.UnimplementedServer
-	calls  chan recordedLSPCall
-	client protocol.Client
-	mu     sync.Mutex
+	calls             chan recordedLSPCall
+	client            protocol.Client
+	mu                sync.Mutex
+	completionEnabled bool
+	completionResult  protocol.CompletionResult
+	initializeParams  *protocol.InitializeParams
 }
 
 func newRecordingLSPServer() *recordingLSPServer {
 	return &recordingLSPServer{calls: make(chan recordedLSPCall, 32)}
 }
 
-func (s *recordingLSPServer) Initialize(context.Context, *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+func (s *recordingLSPServer) Initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+	s.mu.Lock()
+	s.initializeParams = params
+	enabled := s.completionEnabled
+	s.mu.Unlock()
 	s.calls <- recordedLSPCall{method: "initialize"}
-	return &protocol.InitializeResult{}, nil
+	result := &protocol.InitializeResult{}
+	if enabled {
+		result.Capabilities.CompletionProvider = &protocol.CompletionOptions{TriggerCharacters: []string{"."}}
+	}
+	return result, nil
 }
 
 func (s *recordingLSPServer) Initialized(context.Context, *protocol.InitializedParams) error {
@@ -68,6 +83,17 @@ func (s *recordingLSPServer) DidSave(context.Context, *protocol.DidSaveTextDocum
 func (s *recordingLSPServer) DidClose(context.Context, *protocol.DidCloseTextDocumentParams) error {
 	s.calls <- recordedLSPCall{method: "close"}
 	return nil
+}
+
+func (s *recordingLSPServer) Completion(_ context.Context, params *protocol.CompletionParams) (protocol.CompletionResult, error) {
+	call := recordedLSPCall{method: "completion", position: params.Position, trigger: params.Context.TriggerKind}
+	if params.Context.TriggerCharacter != nil {
+		call.triggerChar = *params.Context.TriggerCharacter
+	}
+	s.calls <- call
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.completionResult, nil
 }
 
 func (s *recordingLSPServer) Shutdown(context.Context) error { return nil }
@@ -154,6 +180,21 @@ func waitDiagnostics(t *testing.T, manager *lspManager, path string) []lspDiagno
 	}
 	t.Fatal("timed out waiting for diagnostics")
 	return nil
+}
+
+func waitCompletionResult(t *testing.T, manager *lspManager) *lspCompletionResult {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case event := <-manager.events:
+			if event.completion != nil {
+				return event.completion
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for LSP completion")
+		}
+	}
 }
 
 func TestLSPTCPDocumentLifecycle(t *testing.T) {
@@ -268,6 +309,88 @@ func TestLSPDebouncesDocumentChanges(t *testing.T) {
 	assertNoLSPCall(t, server.calls, "change", 2*c.lsp.changeDebounce)
 }
 
+func TestLSPCompletionFlushesLatestDocumentAndProjectsItems(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.py")
+	server := newRecordingLSPServer()
+	server.completionEnabled = true
+	server.completionResult = protocol.CompletionItemSlice{
+		{
+			Label: "print", Detail: protocol.NewOptional("function"), FilterText: protocol.NewOptional("print"),
+			TextEdit: &protocol.TextEdit{
+				Range:   protocol.Range{Start: protocol.Position{}, End: protocol.Position{Character: 3}},
+				NewText: "print",
+			},
+		},
+		{Label: "snippet", InsertTextFormat: protocol.InsertTextFormatSnippet, InsertText: protocol.NewOptional("${1:value}")},
+		{Label: "unsupported", InsertTextFormat: protocol.InsertTextFormatSnippet, InsertText: protocol.NewOptional("${TM_FILENAME}")},
+	}
+	address := startRecordingTCPServer(t, server)
+	cfg := DefaultConfig()
+	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
+	c := New("test", cfg, Options{})
+	defer c.close()
+	c.lsp.changeDebounce = time.Second
+	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed.SetText("p")
+	c.lsp.Reconcile(c)
+	waitLSPCall(t, server.calls, "open")
+
+	if !c.lsp.CompletionTrigger(path, ".") {
+		t.Fatal("server completion trigger was not retained")
+	}
+	ed.SetText("pri")
+	c.lsp.Reconcile(c)
+	id := c.lsp.RequestCompletion(path, ed.EditSeq(), protocol.Position{Character: 3}, ".", false)
+	if id == 0 {
+		t.Fatal("completion request was rejected")
+	}
+	var changed, completed recordedLSPCall
+	deadline := time.After(3 * time.Second)
+	for changed.method == "" || completed.method == "" {
+		select {
+		case call := <-server.calls:
+			switch call.method {
+			case "change":
+				changed = call
+			case "completion":
+				completed = call
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for change and completion calls")
+		}
+	}
+	if changed.text != "pri" || completed.position.Character != 3 ||
+		completed.trigger != protocol.CompletionTriggerKindTriggerCharacter || completed.triggerChar != "." {
+		t.Fatalf("completion flush/context: change=%+v completion=%+v", changed, completed)
+	}
+	result := waitCompletionResult(t, c.lsp)
+	if result.id != id || len(result.items) != 2 || result.items[0].Label != "print" ||
+		result.items[0].Edit == nil || result.items[0].Edit.NewText != "print" {
+		t.Fatalf("projected completion = %#v", result)
+	}
+	if item := result.items[1]; !item.Snippet || item.InsertText != "value" ||
+		!reflect.DeepEqual(item.Stops, []components.EditorCompletionStop{{Index: 1, Start: 0, End: 5}}) {
+		t.Fatalf("projected snippet = %#v", item)
+	}
+
+	server.mu.Lock()
+	params := server.initializeParams
+	server.mu.Unlock()
+	if params == nil || params.Capabilities.TextDocument == nil ||
+		params.Capabilities.TextDocument.Completion == nil || params.Capabilities.General == nil ||
+		params.Capabilities.TextDocument.Completion.CompletionItem == nil ||
+		params.Capabilities.TextDocument.Completion.CompletionItem.SnippetSupport == nil ||
+		!*params.Capabilities.TextDocument.Completion.CompletionItem.SnippetSupport ||
+		len(params.Capabilities.General.PositionEncodings) != 1 ||
+		params.Capabilities.General.PositionEncodings[0] != protocol.PositionEncodingKindUTF16 {
+		t.Fatalf("completion client capabilities = %#v", params)
+	}
+	if !strings.Contains(string(params.InitializationOptions), `"include_params":true`) {
+		t.Fatalf("Python initialization options = %s", params.InitializationOptions)
+	}
+}
+
 func TestLSPSaveFlushesPendingChange(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.py")
@@ -289,17 +412,22 @@ func TestLSPSaveFlushesPendingChange(t *testing.T) {
 	c.lsp.DidSave(path)
 
 	deadline := time.After(250 * time.Millisecond)
-	for _, want := range []string{"change", "save"} {
+	seen := map[string]bool{}
+	for len(seen) < 2 {
 		select {
 		case call := <-server.calls:
-			if call.method != want {
-				t.Fatalf("save flush call = %q, want %q", call.method, want)
+			if call.method != "change" && call.method != "save" {
+				continue
 			}
-			if want == "change" && (call.version != 2 || call.text != "saved\n") {
+			if seen[call.method] {
+				t.Fatalf("duplicate save flush call %q", call.method)
+			}
+			seen[call.method] = true
+			if call.method == "change" && (call.version != 2 || call.text != "saved\n") {
 				t.Fatalf("save-flushed didChange = version %d text %q", call.version, call.text)
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for immediate LSP %s", want)
+			t.Fatalf("timed out waiting for immediate LSP change/save; saw %v", seen)
 		}
 	}
 }

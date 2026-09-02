@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -23,10 +24,11 @@ import (
 )
 
 const (
-	lspRetryDelay     = 15 * time.Second
-	lspDialLimit      = 1500 * time.Millisecond
-	lspInitLimit      = 5 * time.Second
-	lspChangeDebounce = 500 * time.Millisecond
+	lspRetryDelay      = 15 * time.Second
+	lspDialLimit       = 1500 * time.Millisecond
+	lspInitLimit       = 5 * time.Second
+	lspCompletionLimit = 2 * time.Second
+	lspChangeDebounce  = 500 * time.Millisecond
 )
 
 // lspDocument is the manager's desired view of one live editor buffer. Version is an
@@ -50,7 +52,42 @@ type lspDiagnostic struct {
 	Message, Source, Code string
 }
 
-type lspEvent struct{ status string }
+type lspCompletionEdit struct {
+	Range   protocol.Range
+	NewText string
+}
+
+type lspCompletionItem struct {
+	Label, Detail, FilterText, SortText, InsertText string
+	Edit                                            *lspCompletionEdit
+	Stops                                           []components.EditorCompletionStop
+	Snippet                                         bool
+	Preselect                                       bool
+}
+
+type lspCompletionRequest struct {
+	id               uint64
+	path             string
+	editSeq          int
+	position         protocol.Position
+	triggerCharacter string
+	manual           bool
+}
+
+type lspCompletionResult struct {
+	id         uint64
+	path       string
+	editSeq    int
+	position   protocol.Position
+	items      []lspCompletionItem
+	incomplete bool
+	err        error
+}
+
+type lspEvent struct {
+	status     string
+	completion *lspCompletionResult
+}
 
 // lspManager is an actor around all server and document lifecycle work. The UI writes
 // the latest desired snapshots under mu and nudges wake; the actor converges sessions
@@ -61,19 +98,23 @@ type lspManager struct {
 	version        string
 	changeDebounce time.Duration
 
-	mu          sync.Mutex
-	desired     map[string]lspDocument
-	saves       map[string]bool
-	diagnostics map[string][]lspDiagnostic
-	restart     bool
-	closed      bool
+	mu                 sync.Mutex
+	desired            map[string]lspDocument
+	saves              map[string]bool
+	diagnostics        map[string][]lspDiagnostic
+	completion         *lspCompletionRequest
+	nextComplete       uint64
+	completionTriggers map[string]map[string]bool
+	restart            bool
+	closed             bool
 
-	wake   chan struct{}
-	stop   chan struct{}
-	done   chan struct{}
-	events chan lspEvent
-	dead   chan deadSession
-	once   sync.Once
+	wake    chan struct{}
+	stop    chan struct{}
+	done    chan struct{}
+	events  chan lspEvent
+	dead    chan deadSession
+	once    sync.Once
+	workers sync.WaitGroup
 }
 
 type deadSession struct {
@@ -89,14 +130,15 @@ type lspSession struct {
 	sent                map[string]int32
 	retryAt             time.Time
 	failure             string
+	completion          *protocol.CompletionOptions
 }
 
 func newLSPManager(cfg Config, version string) *lspManager {
 	return &lspManager{
 		cfg: cfg, version: version, changeDebounce: lspChangeDebounce,
 		desired: map[string]lspDocument{}, saves: map[string]bool{},
-		diagnostics: map[string][]lspDiagnostic{},
-		wake:        make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+		diagnostics: map[string][]lspDiagnostic{}, completionTriggers: map[string]map[string]bool{},
+		wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		events: make(chan lspEvent, 64), dead: make(chan deadSession, 8),
 	}
 }
@@ -153,6 +195,9 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 	for path := range m.desired {
 		if _, ok := next[path]; !ok {
 			delete(m.diagnostics, path)
+			if m.completion != nil && m.completion.path == path {
+				m.completion = nil
+			}
 		}
 	}
 	m.desired = next
@@ -161,6 +206,59 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 		m.signal()
 	}
 	return len(next) > 0
+}
+
+// CompletionTrigger reports whether the initialized server for path declared text as
+// a completion trigger character. Before initialization there is no advertised set and
+// false is returned; manual and identifier-driven requests remain available.
+func (m *lspManager) CompletionTrigger(path, text string) bool {
+	if m == nil || path == "" || text == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc, ok := m.desired[filepath.Clean(path)]
+	if !ok {
+		return false
+	}
+	return m.completionTriggers[doc.key()][text]
+}
+
+// RequestCompletion replaces any queued completion request with the newest editor
+// snapshot. It performs no IO on the UI goroutine and returns the generation carried by
+// the eventual result.
+func (m *lspManager) RequestCompletion(path string, editSeq int, position protocol.Position,
+	triggerCharacter string, manual bool) uint64 {
+	if m == nil || path == "" {
+		return 0
+	}
+	path = filepath.Clean(path)
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return 0
+	}
+	if _, ok := m.desired[path]; !ok {
+		m.mu.Unlock()
+		return 0
+	}
+	m.nextComplete++
+	id := m.nextComplete
+	m.completion = &lspCompletionRequest{
+		id: id, path: path, editSeq: editSeq, position: position,
+		triggerCharacter: triggerCharacter, manual: manual,
+	}
+	m.mu.Unlock()
+	m.signal()
+	return id
+}
+
+func (m *lspManager) takeCompletion() *lspCompletionRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	request := m.completion
+	m.completion = nil
+	return request
 }
 
 func (m *lspManager) DidSave(path string) {
@@ -182,6 +280,8 @@ func (m *lspManager) Restart() {
 	m.mu.Lock()
 	if !m.closed {
 		m.restart = true
+		m.completion = nil
+		m.nextComplete++
 	}
 	m.mu.Unlock()
 	m.signal()
@@ -229,6 +329,7 @@ func (m *lspManager) loop() {
 	}
 	var changeTimer *time.Timer
 	var changeTimerC <-chan time.Time
+	var cancelCompletion context.CancelFunc
 	stopChangeTimer := func() {
 		if changeTimer == nil {
 			return
@@ -254,6 +355,12 @@ func (m *lspManager) loop() {
 		select {
 		case <-m.wake:
 			queued := m.converge(sessions, pending, false)
+			if request := m.takeCompletion(); request != nil {
+				if cancelCompletion != nil {
+					cancelCompletion()
+				}
+				cancelCompletion = m.startCompletion(sessions, pending, *request)
+			}
 			switch {
 			case len(pending) == 0:
 				stopChangeTimer()
@@ -276,9 +383,13 @@ func (m *lspManager) loop() {
 			}
 		case <-m.stop:
 			stopChangeTimer()
+			if cancelCompletion != nil {
+				cancelCompletion()
+			}
 			for _, session := range sessions {
 				m.closeSession(session)
 			}
+			m.workers.Wait()
 			close(m.events)
 			return
 		}
@@ -431,10 +542,161 @@ func clearPendingSession(pending map[string]lspDocument, key string) {
 	}
 }
 
+// startCompletion flushes the requested document to its session and starts the RPC.
+// The notification write happens first on the actor goroutine, so the server observes
+// the exact text whose cursor position the request names. Only the RPC wait is moved to
+// a worker.
+func (m *lspManager) startCompletion(sessions map[string]*lspSession,
+	pending map[string]lspDocument, request lspCompletionRequest) context.CancelFunc {
+	m.mu.Lock()
+	doc, ok := m.desired[request.path]
+	m.mu.Unlock()
+	if !ok || doc.editSeq != request.editSeq {
+		m.emitCompletion(request, nil, false, nil)
+		return nil
+	}
+	session := sessions[doc.key()]
+	if session == nil || session.server == nil || session.completion == nil {
+		m.emitCompletion(request, nil, false, nil)
+		return nil
+	}
+	if session.sent[doc.path] != doc.version {
+		if err := session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
+				Version:                doc.version,
+			},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{
+				&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
+			},
+		}); err != nil {
+			m.failSession(session, err)
+			clearPendingSession(pending, session.key)
+			m.emitCompletion(request, nil, false, err)
+			return nil
+		}
+		session.sent[doc.path] = doc.version
+		delete(pending, doc.path)
+	}
+
+	kind := protocol.CompletionTriggerKindInvoked
+	var trigger *string
+	if !request.manual && request.triggerCharacter != "" {
+		for _, candidate := range session.completion.TriggerCharacters {
+			if candidate == request.triggerCharacter {
+				kind = protocol.CompletionTriggerKindTriggerCharacter
+				value := request.triggerCharacter
+				trigger = &value
+				break
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lspCompletionLimit)
+	server := session.server
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		result, err := server.Completion(ctx, &protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
+				Position:     request.position,
+			},
+			Context: protocol.CompletionContext{TriggerKind: kind, TriggerCharacter: trigger},
+		})
+		items, incomplete := projectCompletions(result)
+		m.emitCompletion(request, items, incomplete, err)
+	}()
+	return cancel
+}
+
+func (m *lspManager) emitCompletion(request lspCompletionRequest, items []lspCompletionItem,
+	incomplete bool, err error) {
+	m.mu.Lock()
+	current := !m.closed && request.id == m.nextComplete
+	m.mu.Unlock()
+	if !current {
+		return
+	}
+	m.emit(lspEvent{completion: &lspCompletionResult{
+		id: request.id, path: request.path, editSeq: request.editSeq, position: request.position,
+		items: items, incomplete: incomplete, err: err,
+	}})
+}
+
+func projectCompletions(result protocol.CompletionResult) ([]lspCompletionItem, bool) {
+	var source []protocol.CompletionItem
+	incomplete := false
+	switch result := result.(type) {
+	case protocol.CompletionItemSlice:
+		source = []protocol.CompletionItem(result)
+	case *protocol.CompletionList:
+		if result != nil {
+			source, incomplete = result.Items, result.IsIncomplete
+		}
+	}
+	items := make([]lspCompletionItem, 0, len(source))
+	for _, item := range source {
+		projected := lspCompletionItem{Label: item.Label}
+		if value, ok := item.Detail.Get(); ok {
+			projected.Detail = value
+		}
+		if value, ok := item.FilterText.Get(); ok {
+			projected.FilterText = value
+		}
+		if projected.FilterText == "" {
+			projected.FilterText = item.Label
+		}
+		if value, ok := item.SortText.Get(); ok {
+			projected.SortText = value
+		}
+		if value, ok := item.InsertText.Get(); ok {
+			projected.InsertText = value
+		}
+		if projected.InsertText == "" {
+			projected.InsertText = item.Label
+		}
+		if value, ok := item.Preselect.Get(); ok {
+			projected.Preselect = value
+		}
+		switch edit := item.TextEdit.(type) {
+		case *protocol.TextEdit:
+			if edit != nil {
+				projected.Edit = &lspCompletionEdit{Range: edit.Range, NewText: edit.NewText}
+			}
+		case *protocol.InsertReplaceEdit:
+			if edit != nil {
+				projected.Edit = &lspCompletionEdit{Range: edit.Replace, NewText: edit.NewText}
+			}
+		}
+		if item.InsertTextFormat == protocol.InsertTextFormatSnippet {
+			text := projected.InsertText
+			if projected.Edit != nil {
+				text = projected.Edit.NewText
+			}
+			expanded, stops, ok := parseLSPSnippet(text)
+			if !ok {
+				continue
+			}
+			projected.Snippet = true
+			projected.Stops = stops
+			if projected.Edit != nil {
+				projected.Edit.NewText = expanded
+			} else {
+				projected.InsertText = expanded
+			}
+		}
+		items = append(items, projected)
+	}
+	return items, incomplete
+}
+
 func (m *lspManager) startSession(session *lspSession) error {
 	cfg, ok := m.cfg.LanguageServers[session.serverID]
 	if !ok || cfg.Disabled {
 		return fmt.Errorf("%s language server is disabled", session.serverID)
+	}
+	if cfg.InitializationOptions == nil {
+		cfg.InitializationOptions = defaultLanguageServers()[session.serverID].InitializationOptions
 	}
 	hasAddress, hasCommand := strings.TrimSpace(cfg.Address) != "", len(cfg.Command) > 0 && strings.TrimSpace(cfg.Command[0]) != ""
 	if hasAddress == hasCommand {
@@ -476,12 +738,22 @@ func (m *lspManager) startSession(session *lspSession) error {
 	pid := int32(os.Getpid())
 	version := protocol.NewOptional(m.version)
 	yes := true
+	var initializationOptions protocol.LSPAny
+	if cfg.InitializationOptions != nil {
+		encoded, marshalErr := json.Marshal(cfg.InitializationOptions)
+		if marshalErr != nil {
+			_ = conn.Close()
+			return fmt.Errorf("initialize options for %s: %w", session.serverID, marshalErr)
+		}
+		initializationOptions = encoded
+	}
 	initCtx, cancel := context.WithTimeout(ctx, lspInitLimit)
 	defer cancel()
-	_, err := server.Initialize(initCtx, &protocol.InitializeParams{
-		ProcessID:  &pid,
-		ClientInfo: protocol.ClientInfo{Name: "gote", Version: version},
-		RootURI:    &rootURI,
+	initialized, err := server.Initialize(initCtx, &protocol.InitializeParams{
+		ProcessID:             &pid,
+		ClientInfo:            protocol.ClientInfo{Name: "gote", Version: version},
+		RootURI:               &rootURI,
+		InitializationOptions: initializationOptions,
 		WorkspaceFoldersInitializeParams: protocol.WorkspaceFoldersInitializeParams{
 			WorkspaceFolders: protocol.NewNullable([]protocol.WorkspaceFolder{{
 				URI: rootURI, Name: filepath.Base(session.root),
@@ -491,6 +763,13 @@ func (m *lspManager) startSession(session *lspSession) error {
 			Workspace: &protocol.WorkspaceClientCapabilities{WorkspaceFolders: &yes},
 			TextDocument: &protocol.TextDocumentClientCapabilities{
 				PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{VersionSupport: &yes},
+				Completion: &protocol.CompletionClientCapabilities{
+					ContextSupport: &yes,
+					CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &yes},
+				},
+			},
+			General: &protocol.GeneralClientCapabilities{
+				PositionEncodings: []protocol.PositionEncodingKind{protocol.PositionEncodingKindUTF16},
 			},
 		},
 	})
@@ -503,6 +782,19 @@ func (m *lspManager) startSession(session *lspSession) error {
 		return fmt.Errorf("initialize %s: %w", session.serverID, err)
 	}
 	session.server, session.conn = server, conn
+	if initialized != nil {
+		session.completion = initialized.Capabilities.CompletionProvider
+	}
+	m.mu.Lock()
+	delete(m.completionTriggers, session.key)
+	if session.completion != nil {
+		triggers := make(map[string]bool, len(session.completion.TriggerCharacters))
+		for _, trigger := range session.completion.TriggerCharacters {
+			triggers[trigger] = true
+		}
+		m.completionTriggers[session.key] = triggers
+	}
+	m.mu.Unlock()
 	session.failure, session.retryAt = "", time.Time{}
 	session.sent = map[string]int32{}
 	go func(key string, watch jsonrpc2.Conn) {
@@ -519,7 +811,10 @@ func (m *lspManager) failSession(session *lspSession, err error) {
 	if session.conn != nil {
 		_ = session.conn.Close()
 	}
-	session.server, session.conn = nil, nil
+	session.server, session.conn, session.completion = nil, nil, nil
+	m.mu.Lock()
+	delete(m.completionTriggers, session.key)
+	m.mu.Unlock()
 	session.sent = map[string]int32{}
 	session.retryAt = time.Now().Add(lspRetryDelay)
 	message := err.Error()
@@ -539,7 +834,10 @@ func (m *lspManager) closeSession(session *lspSession) {
 	_ = session.server.Exit(ctx)
 	cancel()
 	_ = session.conn.Close()
-	session.server, session.conn = nil, nil
+	session.server, session.conn, session.completion = nil, nil, nil
+	m.mu.Lock()
+	delete(m.completionTriggers, session.key)
+	m.mu.Unlock()
 }
 
 func (m *lspManager) emit(event lspEvent) {
