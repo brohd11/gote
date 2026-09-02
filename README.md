@@ -6,6 +6,7 @@ simple TUI text editor built with Go and Bubbletea.
  - simple text editing
  - minimal markdown previewer
  - syntax highlighting for select extensions
+ - GDScript and Python diagnostics through language servers
  - mouse support for scrolling, selection, right click
  - vaults store a collection of files for a focused view
 
@@ -41,6 +42,18 @@ Pass `--vault` to read the argument as a vault name.
 `gote --vault` lists the configured vaults, as does a vault that doesn't exist.
 
 Run `gote config` to edit `~/.gote/config.yml`.
+
+#### Language servers
+
+Language-server support starts lazily when a supported file is opened. Python uses
+[`pylsp`](https://github.com/python-lsp/python-lsp-server) over stdio; install it separately
+with `pip install python-lsp-server`. GDScript connects to the Godot editor's language
+server at `127.0.0.1:6005`, so the matching Godot project must already be running.
+
+Diagnostics appear in their own gutter column and in Actions → Diagnostics. The Actions
+and editor context menus independently toggle the diagnostics and git gutters and can
+restart failed server connections. Set `auto-lsp: false`, disable an individual entry,
+or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
 
 ### Single Document
 

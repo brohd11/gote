@@ -33,7 +33,7 @@ func (s *homeScreen) editorOpts() components.EditorOpts {
 // preview is a markdown reader and refuses everything else, the same gate ctrl+p uses.
 // Each Pick pops the menu itself (the component's convention). No Hints: the menu
 // dispatches no accelerators, so a key-shaped hint would be a promise it doesn't keep.
-func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
+func (s *homeScreen) editorContextItems(sh *core.Shared) []components.MenuItem {
 	return []components.MenuItem{
 		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.cyclePreview())
@@ -49,10 +49,20 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 			s.editor.ToggleLineNums()
 			return core.Pop()
 		}},
+		{Label: "Diagnostics", Pick: func(*core.Shared) core.Action {
+			return core.Replace(s.diagnosticsScreen(sh))
+		}},
+		{Label: "Toggle diagnostics gutter", Pick: func(*core.Shared) core.Action {
+			s.setDiagnosticsGutter(!s.diagnosticsGutter)
+			return core.Pop()
+		}},
 		{Label: "Toggle git gutter", Pick: func(*core.Shared) core.Action {
 			// Seq rather than a bare Pop: turning the column on hands back a baseline
 			// read, and the router collects the cmd lane of every Action in a Seq.
 			return core.Seq(core.Pop(), core.Async(s.setGitGutter(!s.gitGutter)))
+		}},
+		{Label: "Restart language servers", Pick: func(sh *core.Shared) core.Action {
+			return core.Seq(core.Pop(), s.restartLanguageServers(sh))
 		}},
 	}
 }
@@ -65,8 +75,12 @@ func (s *homeScreen) editorContextItems(*core.Shared) []components.MenuItem {
 // somewhere new shows up in it) and the Open list (the row renames, and stays selected
 // because currentPath moved with it). No SetChild — the pane's child never changed.
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
-	Of(sh).RekeyDoc(s.currentPath, path, s.editor)
+	c := Of(sh)
+	c.RekeyDoc(s.currentPath, path, s.editor)
 	s.currentPath = path
+	if c.lsp != nil {
+		c.lsp.DidSave(path)
+	}
 	// Re-read the baseline rather than keep the one in hand: a save-as makes this a
 	// different file to git (very likely one HEAD has never seen), and even a plain save
 	// may follow a commit that moved HEAD out from under the markers.
@@ -119,9 +133,8 @@ func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
 		s.currentPath = ""
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
-	// The column is the screen's preference, not the buffer's: a doc swapped into the
-	// pane has to be told, or the toggle would only hold for the doc it was pressed on.
-	s.editor.ShowSigns(s.gitGutter)
+	// Gutter visibility belongs to the pane, not an individual buffer.
+	s.configureSignColumns()
 	cmd := s.paneChild()
 	return tea.Batch(cmd, s.enforcePreview())
 }

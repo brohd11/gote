@@ -19,6 +19,7 @@ import (
 type Config struct {
 	Extensions []string `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
 	ScanDepth  int      `yaml:"scan_depth"` // default recursive scan depth (default 5)
+	AutoLSP    bool     `yaml:"auto-lsp"`   // lazily start/connect configured servers for supported files
 	// FolderView opens the sidebar on the folder explorer instead of the flat scan list —
 	// a preset for alt+t, not a mode: the scan still runs and the flat list is still
 	// seeded behind it, so the toggle shows it with nothing left to load.
@@ -28,9 +29,22 @@ type Config struct {
 	// see gutterDefault. Auto exists because the two launches want opposite answers
 	// and neither is wrong: `gote <file>` is the chrome-less editor, and a git column
 	// is the kind of thing that launch exists to leave out.
-	GitGutter string                 `yaml:"git_gutter"`
-	Default   string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
-	Vaults    map[string]VaultConfig `yaml:"vaults"`
+	GitGutter string `yaml:"git_gutter"`
+	// LanguageServers owns transport configuration, while language.go owns which files
+	// use which server. A missing entry receives its built-in transport; Disabled is the
+	// explicit way to suppress one without copying the rest of its defaults.
+	LanguageServers map[string]LanguageServerConfig `yaml:"language_servers"`
+	Default         string                          `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
+	Vaults          map[string]VaultConfig          `yaml:"vaults"`
+}
+
+// LanguageServerConfig selects exactly one transport. Address is a TCP endpoint for a
+// server managed elsewhere; Command is an executable followed by its arguments for a
+// stdio server whose process lifetime belongs to gote.
+type LanguageServerConfig struct {
+	Disabled bool     `yaml:"disabled"`
+	Address  string   `yaml:"address"`
+	Command  []string `yaml:"command"`
 }
 
 // The values Config.GitGutter takes. Anything else reads as gutterAuto rather than
@@ -65,7 +79,21 @@ type VaultConfig struct {
 // about how gote launches (resolveDefault maps that path back to ModeHome). It is there
 // to show the user the key exists and what shape its value takes.
 func DefaultConfig() Config {
-	return Config{ScanDepth: 5, GitGutter: gutterAuto, Default: defaultDocsRef, Vaults: map[string]VaultConfig{}}
+	return Config{
+		ScanDepth:       5,
+		AutoLSP:         true,
+		GitGutter:       gutterAuto,
+		LanguageServers: defaultLanguageServers(),
+		Default:         defaultDocsRef,
+		Vaults:          map[string]VaultConfig{},
+	}
+}
+
+func defaultLanguageServers() map[string]LanguageServerConfig {
+	return map[string]LanguageServerConfig{
+		"gdscript": {Address: "127.0.0.1:6005", Command: []string{}},
+		"python":   {Command: []string{"pylsp"}},
+	}
 }
 
 // defaultDocsRef is the home store written the ~ way rather than as this machine's
@@ -135,6 +163,15 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.Vaults == nil {
 		cfg.Vaults = map[string]VaultConfig{}
+	}
+	if cfg.LanguageServers == nil {
+		cfg.LanguageServers = map[string]LanguageServerConfig{}
+	}
+	for id, fallback := range defaultLanguageServers() {
+		server, ok := cfg.LanguageServers[id]
+		if !ok || (!server.Disabled && server.Address == "" && len(server.Command) == 0) {
+			cfg.LanguageServers[id] = fallback
+		}
 	}
 	// An unset or misspelled value is auto, the default: the key is a preference, and
 	// getting it wrong should change what the gutter does, not whether gote starts.

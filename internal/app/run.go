@@ -17,8 +17,10 @@ import (
 // bare argument against the configured vault names is part of the argument grammar, and
 // reading config.yml twice could have it answer the two questions differently.
 func Run(version string, cfg Config, opts Options) error {
+	c := New(version, cfg, opts)
+	defer c.close()
 	return bubblestack.Run(bubblestack.Config{
-		App:    New(version, cfg, opts),
+		App:    c,
 		Status: components.NewStatusLine(),
 		// Theme left unset — bubblestack.Run applies the shared ~/.bubblestack theme.
 		Tabs: []bubblestack.TabEntry{

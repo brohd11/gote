@@ -2007,7 +2007,7 @@ func TestHomeEditorContextItems(t *testing.T) {
 	s, sh := newHome(t)
 
 	rows := s.editorContextItems(sh)
-	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Toggle git gutter"}
+	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Diagnostics", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
 	if len(rows) != len(want) {
 		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
 	}

@@ -42,6 +42,7 @@ type Ctx struct {
 	// open is the set of open buffers — the editor per path, their order, and each
 	// path's origin root. One type because the three always move together; see openset.go.
 	open openSet
+	lsp  *lspManager
 }
 
 // Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
@@ -78,6 +79,9 @@ func New(version string, cfg Config, opts Options) *Ctx {
 		Config:  cfg,
 		open:    newOpenSet(),
 	}
+	if cfg.AutoLSP {
+		c.lsp = newLSPManager(cfg, version)
+	}
 	if opts.DepthSet {
 		c.Depth = opts.Depth
 	}
@@ -101,6 +105,12 @@ func New(version string, cfg Config, opts Options) *Ctx {
 	}
 	c.Seed()
 	return c
+}
+
+func (c *Ctx) close() {
+	if c != nil && c.lsp != nil {
+		c.lsp.Close()
+	}
 }
 
 // Of recovers the gote context from a Shared. Screens call c := app.Of(sh).

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +16,16 @@ import (
 type languageProfile struct {
 	id     string
 	editor components.EditorLanguageConfig
+	lsp    *languageLSP
+}
+
+// languageLSP is Gote-owned activation metadata. Bubblestack receives only editor;
+// server selection and workspace discovery stay beside the rest of the app's language
+// policy.
+type languageLSP struct {
+	server         string
+	rootMarkers    []string
+	requireRootHit bool
 }
 
 var (
@@ -85,7 +96,17 @@ func buildLanguageProfiles() map[string]*languageProfile {
 				cfg.NewHighlighter = chromaHighlighterFactory(gdscript)
 			}
 		}
-		profiles[ext] = &languageProfile{id: id, editor: cfg}
+		profile := &languageProfile{id: id, editor: cfg}
+		switch ext {
+		case ".py":
+			profile.id = "python"
+			profile.lsp = &languageLSP{server: "python", rootMarkers: []string{
+				"pyproject.toml", "setup.cfg", "setup.py", ".git",
+			}}
+		case ".gd":
+			profile.lsp = &languageLSP{server: "gdscript", rootMarkers: []string{"project.godot"}, requireRootHit: true}
+		}
+		profiles[ext] = profile
 	}
 
 	markdown := &languageProfile{
@@ -101,6 +122,32 @@ func buildLanguageProfiles() map[string]*languageProfile {
 	profiles[".md"] = markdown
 	profiles[".markdown"] = markdown
 	return profiles
+}
+
+// lspRootForPath finds the nearest project marker. GDScript has no useful server
+// workspace without project.godot, while pylsp can still operate from the file's own
+// directory when a standalone script has no project marker.
+func lspRootForPath(path string, profile *languageProfile) string {
+	if profile == nil || profile.lsp == nil {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	for {
+		for _, marker := range profile.lsp.rootMarkers {
+			if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+				return dir
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	if profile.lsp.requireRootHit {
+		return ""
+	}
+	return filepath.Dir(path)
 }
 
 func languageForPath(path string) *languageProfile {

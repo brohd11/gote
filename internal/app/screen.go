@@ -34,7 +34,6 @@ var (
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey     = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
 	lineNumsKey = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
-	gutterKey   = key.NewBinding(key.WithKeys("alt+g"), key.WithHelp("alt+g", "git gutter"))
 	helpKey     = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
 	// The docs list's own key, not the screen's: it acts on the selected row, so it
 	// belongs to the panel that has one (ListPanelOpts.OnKey) and must not fire from
@@ -77,29 +76,31 @@ type ReseedMsg struct{}
 // instance so the router never re-Inits it (a re-Init would re-run the editor's file
 // load over a dirty buffer).
 type homeScreen struct {
-	modular       *components.ModularScreen
-	docsPanel     *components.CompactListPanel
-	filePanel     *components.FilePanel // the folder view alt+t swaps into the docs slot
-	openPanel     *components.CompactListPanel
-	editorPanel   *components.ScreenPanel
-	previewPanel  *components.ScrollContainer // the live preview pane
-	editor        *components.EditorScreen    // the editor pane's live buffer (ScreenPanel exposes none)
-	fullPreview   *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
-	currentPath   string                      // the doc the editor pane is showing; "" = the scratch buffer
-	sidebar       bool
-	flat          bool         // the docs slot shows the flat scan (true) or the folder explorer
-	minimal       bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
-	gitGutter     bool         // alt+g: draw change markers against HEAD (see gitgutter.go)
-	gutter        gutter       // the baseline and last-drawn markers behind them
-	launchPreview bool         // --preview: open the reader from Init, once
-	preview       int          // previewOff/previewPane
-	previewPrior  int          // the ctrl+p mode alt+p folded away, restored when the reader closes
-	previewSrc    string       // the buffer text the pane was last rendered from
-	previewW      int          // the width it was last rendered at (a resize must re-wrap)
-	previewMap    []int        // that render's source line → pane row map (RenderMarkdownMapped)
-	previewAt     int          // the editor scroll offset the pane was last synced to; -1 re-syncs
-	sh            *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
-	w, h          int
+	modular           *components.ModularScreen
+	docsPanel         *components.CompactListPanel
+	filePanel         *components.FilePanel // the folder view alt+t swaps into the docs slot
+	openPanel         *components.CompactListPanel
+	editorPanel       *components.ScreenPanel
+	previewPanel      *components.ScrollContainer // the live preview pane
+	editor            *components.EditorScreen    // the editor pane's live buffer (ScreenPanel exposes none)
+	fullPreview       *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
+	currentPath       string                      // the doc the editor pane is showing; "" = the scratch buffer
+	sidebar           bool
+	flat              bool         // the docs slot shows the flat scan (true) or the folder explorer
+	minimal           bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
+	gitGutter         bool         // draw change markers against HEAD (see gitgutter.go)
+	diagnosticsGutter bool         // independently toggle the LSP marker column
+	gutter            gutter       // the baseline and last-drawn markers behind them
+	launchPreview     bool         // --preview: open the reader from Init, once
+	preview           int          // previewOff/previewPane
+	previewPrior      int          // the ctrl+p mode alt+p folded away, restored when the reader closes
+	previewSrc        string       // the buffer text the pane was last rendered from
+	previewW          int          // the width it was last rendered at (a resize must re-wrap)
+	previewMap        []int        // that render's source line → pane row map (RenderMarkdownMapped)
+	previewAt         int          // the editor scroll offset the pane was last synced to; -1 re-syncs
+	lspWaiting        bool         // one blocking manager subscription is already in Bubble Tea
+	sh                *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
+	w, h              int
 }
 
 var _ core.Screen = (*homeScreen)(nil)
@@ -123,7 +124,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
 	// there and nothing writes the choice back.
 	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
-		gitGutter: gutterDefault(c.Config, c.Mode)}
+		gitGutter: gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
@@ -151,7 +152,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	} else {
 		s.editor = components.NewEditorScreen(s.editorOpts())
 	}
-	s.editor.ShowSigns(s.gitGutter)
+	s.configureSignColumns()
 	// --preview needs a document to read, and ModeFile is the only launch that opens one
 	// here — so a vault or scan launch never sets this, which is how the flag comes to be
 	// silently ignored for every target that is not a single markdown file.
@@ -191,7 +192,15 @@ func (s *homeScreen) Init(sh *core.Shared) tea.Cmd {
 		s.modular = s.buildModular() // rebuilt so the bar names the way back to the editor
 		_ = s.editorPanel.SetChild(s.fullPreview)
 	}
-	return s.modular.Init(sh)
+	c := Of(sh)
+	if c.lsp == nil {
+		return s.modular.Init(sh)
+	}
+	if !c.lsp.Reconcile(c) {
+		return s.modular.Init(sh)
+	}
+	s.lspWaiting = true
+	return tea.Batch(s.modular.Init(sh), c.lsp.WaitCmd())
 }
 
 // fileText reads a document for the launch reader. An unreadable path renders as an empty
@@ -219,7 +228,7 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			return s, core.Action{}
 		}
 		if core.MatchKey(k, actionsKey) && !s.modular.Filtering() {
-			return s, core.Push(actionsMenu(sh))
+			return s, core.Push(s.actionsMenu(sh))
 		}
 		if core.MatchKey(k, helpKey) && (!s.modular.Filtering() || k == "alt+?") {
 			return s, core.Push(s.helpScreen())
@@ -245,9 +254,6 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			s.editor.ToggleLineNums()
 			return s, core.Action{}
 		}
-		if core.MatchKey(k, gutterKey) {
-			return s, core.Async(s.setGitGutter(!s.gitGutter))
-		}
 	}
 	_, act := s.modular.Update(sh, msg)
 	s.refreshPreview()
@@ -256,6 +262,12 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	// Action carrying only a control message, which would drop whatever cmd the panes
 	// just returned (the editor's clipboard writes, a list's own async work).
 	act.Cmd = tea.Batch(act.Cmd, s.refreshGutter())
+	if c := Of(sh); c.lsp != nil {
+		if c.lsp.Reconcile(c) && !s.lspWaiting {
+			s.lspWaiting = true
+			act.Cmd = tea.Batch(act.Cmd, c.lsp.WaitCmd())
+		}
+	}
 	return s, act
 }
 
@@ -391,12 +403,29 @@ func (s *homeScreen) CrumbLabel(short bool) string {
 // The editor and panel frames read theme colors while rendering; only bubbles lists
 // cache themed styles and need an explicit refresh here.
 func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
+	if event, ok := payload.(lspEvent); ok {
+		s.refreshDiagnosticSigns()
+		s.lspWaiting = true
+		wait := core.Async(Of(sh).lsp.WaitCmd())
+		if event.status != "" {
+			return core.Seq(core.SetStatusAndLog(event.status), wait)
+		}
+		return wait
+	}
 	if _, ok := payload.(ReseedMsg); ok {
 		c := Of(sh)
 		c.Seed()
 		s.docsPanel.SetItems(docRows(c))
 		s.filePanel.Refresh()
 		s.openPanel.SetItems(openDocItems(c, s.currentPath))
+		if c.lsp != nil {
+			active := c.lsp.Reconcile(c)
+			s.refreshDiagnosticSigns()
+			if active && !s.lspWaiting {
+				s.lspWaiting = true
+				return core.Async(c.lsp.WaitCmd())
+			}
+		}
 		return core.Action{}
 	}
 	if msg, ok := payload.(baselineMsg); ok {
@@ -410,6 +439,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		core.StyleList(s.docsPanel.List())
 		core.StyleList(s.filePanel.List())
 		core.StyleList(s.openPanel.List())
+		s.refreshDiagnosticSigns()
 	}
 	return core.Action{}
 }
@@ -452,6 +482,9 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	// The launch mode this screen was built for is gone; a vault is the full editor, so
 	// the auto default has to be asked again rather than carrying ModeFile's answer over.
 	gutterCmd := s.setGitGutter(gutterDefault(c.Config, ModeVault))
+	if c.lsp != nil {
+		c.lsp.Reconcile(c)
+	}
 	focus := s.rebuildModular(sh, 0)
 	return core.Seq(core.Async(tea.Batch(cmd, focus, gutterCmd)), core.ResetToRoot())
 }

@@ -184,9 +184,9 @@ func TestGutterDefault(t *testing.T) {
 // nothing.
 func TestHomeGutterDefaults(t *testing.T) {
 	s, _ := newHome(t)
-	if !s.gitGutter || !s.editor.SignsMode() {
+	if !s.gitGutter || !s.editor.SignColumnMode(gitSignColumn) {
 		t.Errorf("the full editor should open with the gutter on, screen=%v editor=%v",
-			s.gitGutter, s.editor.SignsMode())
+			s.gitGutter, s.editor.SignColumnMode(gitSignColumn))
 	}
 
 	file := filepath.Join(t.TempDir(), "solo.md")
@@ -194,28 +194,29 @@ func TestHomeGutterDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, _ := newHomeWith(t, Options{Mode: ModeFile, File: file})
-	if m.gitGutter || m.editor.SignsMode() {
+	if m.gitGutter || m.editor.SignColumnMode(gitSignColumn) {
 		t.Error("a single-file launch should open without the gutter")
 	}
 }
 
-// TestHomeGutterToggle: alt+g flips the column, and the flip has to reach the editor and
-// survive a document switch — the preference belongs to the pane, not to a buffer.
+// TestHomeGutterToggle: gutter control is menu-only (alt+g was freed), and the toggle
+// still has to survive a document switch because the preference belongs to the pane.
 func TestHomeGutterToggle(t *testing.T) {
 	s, sh := newHome(t)
 	s.Update(sh, altKey('g'))
-	if s.gitGutter || s.editor.SignsMode() {
-		t.Fatal("alt+g should turn the gutter off")
+	if !s.gitGutter || !s.editor.SignColumnMode(gitSignColumn) {
+		t.Fatal("alt+g should no longer claim the git gutter")
 	}
+	s.setGitGutter(false)
 
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	if s.editor.SignsMode() {
+	if s.editor.SignColumnMode(gitSignColumn) {
 		t.Error("a doc opened while the gutter is off should not draw the column")
 	}
 
-	s.Update(sh, altKey('g'))
-	if !s.gitGutter || !s.editor.SignsMode() {
-		t.Error("alt+g again should bring it back, on the doc now in the pane")
+	s.setGitGutter(true)
+	if !s.gitGutter || !s.editor.SignColumnMode(gitSignColumn) {
+		t.Error("the menu toggle should bring it back on the doc now in the pane")
 	}
 }
 
@@ -255,7 +256,7 @@ func TestHomeGutterMarksARealRepo(t *testing.T) {
 	if got := kind(signAt(t, s, 1)); got != "mod" {
 		t.Errorf("the edited line should be marked modified, got %s", got)
 	}
-	if _, ok := s.editor.Signs()[0]; ok {
+	if _, ok := s.editor.SignsForColumn(gitSignColumn)[0]; ok {
 		t.Error("an unchanged line should carry no marker")
 	}
 
@@ -303,7 +304,7 @@ func TestHomeGutterToggleDraws(t *testing.T) {
 
 func signAt(t *testing.T, s *homeScreen, line int) components.Sign {
 	t.Helper()
-	sign, ok := s.editor.Signs()[line]
+	sign, ok := s.editor.SignsForColumn(gitSignColumn)[line]
 	if !ok {
 		t.Fatalf("no marker on line %d", line)
 	}

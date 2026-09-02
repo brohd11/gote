@@ -139,12 +139,12 @@ func gutterDefault(cfg Config, mode Mode) bool {
 func (s *homeScreen) setGitGutter(on bool) tea.Cmd {
 	s.gitGutter = on
 	if s.editor != nil {
-		s.editor.ShowSigns(on)
+		s.editor.ShowSignColumn(gitSignColumn, on)
 	}
 	if !on {
 		s.gutter = gutter{}
 		if s.editor != nil {
-			s.editor.SetSigns(nil)
+			s.editor.SetSignColumn(gitSignColumn, nil)
 		}
 		return nil
 	}
@@ -170,7 +170,7 @@ func (s *homeScreen) refreshGutter() tea.Cmd {
 	if s.currentPath == "" {
 		if s.gutter.path != "" || s.gutter.drawn {
 			s.gutter = gutter{}
-			s.editor.SetSigns(nil)
+			s.editor.SetSignColumn(gitSignColumn, nil)
 		}
 		return nil
 	}
@@ -204,7 +204,7 @@ func (s *homeScreen) drawGutter() {
 		return
 	}
 	s.gutter.src, s.gutter.drawn = src, true
-	s.editor.SetSigns(markers(s.gutter.base, src, s.gutter.state))
+	s.editor.SetSignColumn(gitSignColumn, markers(s.gutter.base, src, s.gutter.state))
 }
 
 // loadBaseline reads HEAD's copy of path in the cmd lane, where every other bit of IO in

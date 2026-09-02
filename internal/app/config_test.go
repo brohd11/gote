@@ -104,7 +104,7 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "folder_view:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "git_gutter:", "language_servers:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}
@@ -119,6 +119,31 @@ func TestEnsureConfig(t *testing.T) {
 	raw, err = os.ReadFile(path)
 	if err != nil || string(raw) != "scan_depth: 9\n" {
 		t.Fatalf("an existing config must not be rewritten, got %q (%v)", raw, err)
+	}
+}
+
+func TestLanguageServerConfig(t *testing.T) {
+	cfg := writeConfig(t, `auto-lsp: false
+language_servers:
+  gdscript:
+    disabled: true
+  python:
+    command: [pylsp, --verbose]
+`)
+	if cfg.AutoLSP {
+		t.Fatal("auto-lsp: false should disable automatic activation")
+	}
+	if !cfg.LanguageServers["gdscript"].Disabled {
+		t.Fatal("disabled should remain the explicit per-language opt-out")
+	}
+	if got := cfg.LanguageServers["python"].Command; !reflect.DeepEqual(got, []string{"pylsp", "--verbose"}) {
+		t.Fatalf("python command = %v", got)
+	}
+
+	cfg = writeConfig(t, "language_servers: {}\n")
+	if cfg.LanguageServers["gdscript"].Address != "127.0.0.1:6005" ||
+		!reflect.DeepEqual(cfg.LanguageServers["python"].Command, []string{"pylsp"}) {
+		t.Fatalf("missing entries should inherit built-ins: %#v", cfg.LanguageServers)
 	}
 }
 
