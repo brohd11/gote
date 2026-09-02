@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/aymanbagabas/go-udiff v0.4.1
-	github.com/brohd11/bubblestack v0.2.0
+	github.com/brohd11/bubblestack v0.2.1
 	github.com/brohd11/gitstack v0.2.0
 	github.com/brohd11/goutil v0.1.6
 	github.com/spf13/cobra v1.10.2
