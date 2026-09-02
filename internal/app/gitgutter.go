@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/brohd11/bubblestack/components"
@@ -30,13 +31,18 @@ import (
 // caching per open doc would only add an invalidation problem (HEAD moves under a
 // commit) for no visible gain.
 type gutter struct {
-	path    string        // the doc base belongs to; "" ⇒ nothing loaded
-	loading string        // a read in flight for this path, so it is issued once
-	base    string        // HEAD's copy of it
-	state   repo.Baseline // and whether HEAD had one at all
-	src     string        // the buffer text the drawn signs were computed from
-	drawn   bool          // src is meaningful — an empty buffer is a real state, not "unset"
+	path        string        // the doc base belongs to; "" ⇒ nothing loaded
+	loading     string        // a read in flight for this path, so it is issued once
+	base        string        // HEAD's copy of it
+	state       repo.Baseline // and whether HEAD had one at all
+	seq         int           // editor generation the drawn signs were computed from
+	drawn       bool          // seq is meaningful — generation zero is a real state
+	pending     bool          // a debounce wake is already scheduled for pendingPath/pendingSeq
+	pendingPath string
+	pendingSeq  int
 }
+
+const gitGutterDebounce = 250 * time.Millisecond
 
 // baselineMsg carries a finished HeadBlob read. It travels as a PropagateAll payload
 // rather than as a plain async result because a plain result reaches only the screen on
@@ -47,6 +53,12 @@ type baselineMsg struct {
 	path  string // guarded against on receipt: the pane may have moved on
 	base  string
 	state repo.Baseline
+}
+
+type gutterRefreshMsg struct {
+	target *homeScreen
+	path   string
+	seq    int
 }
 
 // The markers, in the vocabulary git's own diffs use — green added, red removed — with
@@ -151,17 +163,22 @@ func (s *homeScreen) setGitGutter(on bool) tea.Cmd {
 	return s.refreshGutter()
 }
 
-// refreshGutter brings the markers up to date with the buffer, and is called once per
-// message from Update — the same place and for the same reason as refreshPreview, which
-// re-renders a whole markdown document on the same schedule. The text comparison is what
-// makes that affordable: a diff runs only when the buffer actually changed, so mouse
-// motion, scrolling and every navigation key cost one string compare.
-//
-// Diffing synchronously rather than behind a debounce timer is deliberate. The diff is
-// pure and fast (gopls runs the same algorithm on every keystroke), and a timer would
-// buy nothing here while adding the stale-result problem that comes with it — an answer
-// arriving after the edit that invalidated it. The only slow part is the git read, and
-// that is already async and happens once per document.
+func (s *homeScreen) gitGutterDelay() time.Duration {
+	if s.gutterDebounce <= 0 {
+		return gitGutterDebounce
+	}
+	return s.gutterDebounce
+}
+
+func (s *homeScreen) gutterRefreshCmd(path string, seq int) tea.Cmd {
+	return tea.Tick(s.gitGutterDelay(), func(time.Time) tea.Msg {
+		return core.PropagateAll(gutterRefreshMsg{target: s, path: path, seq: seq})
+	})
+}
+
+// refreshGutter brings the markers up to date with the buffer. It is called once per
+// message, but unchanged messages compare only path and EditSeq: joining the buffer and
+// diffing it wait until the latest edit has been quiet for the debounce window.
 func (s *homeScreen) refreshGutter() tea.Cmd {
 	if !s.gitGutter || s.editor == nil {
 		return nil
@@ -175,10 +192,19 @@ func (s *homeScreen) refreshGutter() tea.Cmd {
 		return nil
 	}
 	if s.gutter.path != s.currentPath {
+		s.gutter.pending = false
 		return s.loadBaseline(s.currentPath)
 	}
-	s.drawGutter()
-	return nil
+	seq := s.editor.EditSeq()
+	if s.gutter.drawn && s.gutter.seq == seq {
+		return nil
+	}
+	if s.gutter.pending && s.gutter.pendingPath == s.currentPath && s.gutter.pendingSeq == seq {
+		return nil
+	}
+	s.gutter.pending = true
+	s.gutter.pendingPath, s.gutter.pendingSeq = s.currentPath, seq
+	return s.gutterRefreshCmd(s.currentPath, seq)
 }
 
 // drawGutter recomputes the markers, when the buffer has moved since the ones on screen
@@ -200,11 +226,25 @@ func (s *homeScreen) drawGutter() {
 		return
 	}
 	src := s.editor.Text()
-	if s.gutter.drawn && src == s.gutter.src {
+	s.gutter.seq, s.gutter.drawn = s.editor.EditSeq(), true
+	s.gutter.pending = false
+	s.editor.SetSignColumn(gitSignColumn, markers(s.gutter.base, src, s.gutter.state))
+}
+
+func (s *homeScreen) applyGutterRefresh(m gutterRefreshMsg) {
+	if m.target != s {
 		return
 	}
-	s.gutter.src, s.gutter.drawn = src, true
-	s.editor.SetSignColumn(gitSignColumn, markers(s.gutter.base, src, s.gutter.state))
+	if s.gutter.pending && s.gutter.pendingPath == m.path && s.gutter.pendingSeq == m.seq {
+		s.gutter.pending = false
+	}
+	if !s.gitGutter || s.editor == nil || m.path != s.currentPath || m.path != s.gutter.path {
+		return
+	}
+	if m.seq != s.editor.EditSeq() {
+		return
+	}
+	s.drawGutter()
 }
 
 // loadBaseline reads HEAD's copy of path in the cmd lane, where every other bit of IO in
@@ -237,7 +277,7 @@ func (s *homeScreen) applyBaseline(m baselineMsg) {
 		return
 	}
 	s.gutter.path, s.gutter.base, s.gutter.state = m.path, m.base, m.state
-	s.gutter.src, s.gutter.drawn = "", false // the markers on screen predate this baseline
+	s.gutter.drawn, s.gutter.pending = false, false
 	s.drawGutter()
 }
 

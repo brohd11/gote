@@ -112,3 +112,21 @@ func TestChromaNilLexer(t *testing.T) {
 		t.Fatal("a lexer-less highlighter should answer nothing")
 	}
 }
+
+var benchmarkHighlightSpans []components.Span
+
+func BenchmarkChromaHighlighterLargeDocument(b *testing.B) {
+	profile := languageForPath("large.gd")
+	if profile == nil || profile.editor.NewHighlighter == nil {
+		b.Fatal("GDScript highlighter is not configured")
+	}
+	hl := profile.editor.NewHighlighter()
+	doc := strings.Repeat("func update(delta: float) -> void:\n\tposition.x += delta\n", 10_000)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(doc)))
+	b.ResetTimer()
+	for b.Loop() {
+		hl.Parse(doc)
+		benchmarkHighlightSpans = hl.HighlightLine(10_000)
+	}
+}

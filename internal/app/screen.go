@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"strings"
+	"time"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
@@ -86,20 +87,21 @@ type homeScreen struct {
 	fullPreview       *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
 	currentPath       string                      // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar           bool
-	flat              bool         // the docs slot shows the flat scan (true) or the folder explorer
-	minimal           bool         // ModeFile: the editor alone, all chrome masked, sidebar unreachable
-	gitGutter         bool         // draw change markers against HEAD (see gitgutter.go)
-	diagnosticsGutter bool         // independently toggle the LSP marker column
-	gutter            gutter       // the baseline and last-drawn markers behind them
-	launchPreview     bool         // --preview: open the reader from Init, once
-	preview           int          // previewOff/previewPane
-	previewPrior      int          // the ctrl+p mode alt+p folded away, restored when the reader closes
-	previewSrc        string       // the buffer text the pane was last rendered from
-	previewW          int          // the width it was last rendered at (a resize must re-wrap)
-	previewMap        []int        // that render's source line → pane row map (RenderMarkdownMapped)
-	previewAt         int          // the editor scroll offset the pane was last synced to; -1 re-syncs
-	lspWaiting        bool         // one blocking manager subscription is already in Bubble Tea
-	sh                *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
+	flat              bool          // the docs slot shows the flat scan (true) or the folder explorer
+	minimal           bool          // ModeFile: the editor alone, all chrome masked, sidebar unreachable
+	gitGutter         bool          // draw change markers against HEAD (see gitgutter.go)
+	diagnosticsGutter bool          // independently toggle the LSP marker column
+	gutter            gutter        // the baseline and last-drawn markers behind them
+	gutterDebounce    time.Duration // internal test seam; production uses gitGutterDebounce
+	launchPreview     bool          // --preview: open the reader from Init, once
+	preview           int           // previewOff/previewPane
+	previewPrior      int           // the ctrl+p mode alt+p folded away, restored when the reader closes
+	previewSrc        string        // the buffer text the pane was last rendered from
+	previewW          int           // the width it was last rendered at (a resize must re-wrap)
+	previewMap        []int         // that render's source line → pane row map (RenderMarkdownMapped)
+	previewAt         int           // the editor scroll offset the pane was last synced to; -1 re-syncs
+	lspWaiting        bool          // one blocking manager subscription is already in Bubble Tea
+	sh                *core.Shared  // stashed by Init/SetSize for rebuilds and the crumb
 	w, h              int
 }
 
@@ -124,7 +126,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
 	// there and nothing writes the choice back.
 	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
-		gitGutter: gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil}
+		gitGutter: gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil,
+		gutterDebounce: gitGutterDebounce}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
 	// a core.Borderer child).
@@ -430,6 +433,10 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 	}
 	if msg, ok := payload.(baselineMsg); ok {
 		s.applyBaseline(msg)
+		return core.Action{}
+	}
+	if msg, ok := payload.(gutterRefreshMsg); ok {
+		s.applyGutterRefresh(msg)
 		return core.Action{}
 	}
 	if msg, ok := payload.(SwitchVaultMsg); ok {

@@ -302,6 +302,71 @@ func TestHomeGutterToggleDraws(t *testing.T) {
 	}
 }
 
+func TestHomeGutterDebouncesByEditSequence(t *testing.T) {
+	s, _ := newHome(t)
+	path := filepath.Join(t.TempDir(), "large.go")
+	s.currentPath = path
+	s.editor.SetText("one\nTWO\n")
+	s.gutter = gutter{path: path, base: "one\ntwo\n", state: repo.BaselineOK}
+	s.drawGutter()
+	initialSeq := s.gutter.seq
+	if got := kind(signAt(t, s, 1)); got != "mod" {
+		t.Fatalf("initial marker = %s, want mod", got)
+	}
+
+	s.editor.SetText("ONE\nTWO\n")
+	firstSeq := s.editor.EditSeq()
+	if cmd := s.refreshGutter(); cmd == nil {
+		t.Fatal("an edited buffer should schedule a gutter refresh")
+	}
+	if cmd := s.refreshGutter(); cmd != nil {
+		t.Fatal("the same pending generation scheduled a duplicate refresh")
+	}
+	if _, ok := s.editor.SignsForColumn(gitSignColumn)[0]; ok {
+		t.Fatal("cached gutter markers changed before the debounce completed")
+	}
+
+	s.editor.SetText("ONE\ntwo\n")
+	latestSeq := s.editor.EditSeq()
+	if cmd := s.refreshGutter(); cmd == nil {
+		t.Fatal("a newer edit should schedule its own refresh")
+	}
+	s.applyGutterRefresh(gutterRefreshMsg{target: s, path: path, seq: firstSeq})
+	if s.gutter.seq != initialSeq {
+		t.Fatal("a stale gutter refresh replaced the cached markers")
+	}
+	s.applyGutterRefresh(gutterRefreshMsg{target: s, path: path, seq: latestSeq})
+	if s.gutter.seq != latestSeq {
+		t.Fatalf("drawn gutter seq = %d, want %d", s.gutter.seq, latestSeq)
+	}
+	if got := kind(signAt(t, s, 0)); got != "mod" {
+		t.Fatalf("latest marker = %s, want mod", got)
+	}
+	if _, ok := s.editor.SignsForColumn(gitSignColumn)[1]; ok {
+		t.Fatal("latest gutter retained a marker for the restored line")
+	}
+}
+
+func BenchmarkHomeGutterCachedRefresh(b *testing.B) {
+	line := strings.Repeat("0123456789", 8)
+	content := strings.Repeat(line+"\n", 20_000) + line
+	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed.SetText(content)
+	s := &homeScreen{
+		currentPath: "large.go", editor: ed, gitGutter: true,
+		gutter:         gutter{path: "large.go", base: content, state: repo.BaselineOK},
+		gutterDebounce: gitGutterDebounce,
+	}
+	s.drawGutter()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if cmd := s.refreshGutter(); cmd != nil {
+			b.Fatal("unchanged gutter scheduled work")
+		}
+	}
+}
+
 func signAt(t *testing.T, s *homeScreen, line int) components.Sign {
 	t.Helper()
 	sign, ok := s.editor.SignsForColumn(gitSignColumn)[line]
