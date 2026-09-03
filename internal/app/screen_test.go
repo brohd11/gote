@@ -21,6 +21,20 @@ import (
 
 // newHome builds the real home screen against an empty temp store — the same
 // wiring Run assembles, minus the bubbletea program.
+// testConfig is DefaultConfig with automatic language servers off, for the screen tests
+// that open a file some language actually has a server for. They assert SCREEN behavior,
+// and a live manager would have them spawn whatever real server the machine happens to
+// have installed — and hang them, because pumpModel drains the manager's WaitCmd
+// subscription synchronously and a server that fails to start goes quiet for its whole
+// retry delay between events. Tests meaning to exercise the manager build their own
+// config, in lsp_test.go; the rest keep DefaultConfig, which leaves Ctx.lsp non-nil for
+// the diagnostics injected straight into it.
+func testConfig() Config {
+	cfg := DefaultConfig()
+	cfg.AutoLSP = false
+	return cfg
+}
+
 func newHome(t *testing.T) (*homeScreen, *core.Shared) {
 	t.Helper()
 	return newHomeWith(t, Options{})
@@ -979,7 +993,7 @@ func TestReaderRestoresTheSidePane(t *testing.T) {
 // does nothing at all over a file its renderer would mangle — the same gate ctrl+p uses.
 // Nothing is pushed either way: the reader is a pane child, so the stack never moves.
 func TestFullPreviewKey(t *testing.T) {
-	s, sh := newHome(t)
+	s, sh := newHomeCfg(t, testConfig(), Options{})
 	dir := t.TempDir()
 
 	s.openDoc(sh, filepath.Join(dir, "a.md"))
@@ -1088,7 +1102,7 @@ func TestLaunchPreview(t *testing.T) {
 
 	frame := func(opts Options) string {
 		t.Helper()
-		sh := core.NewShared(New("test", DefaultConfig(), opts))
+		sh := core.NewShared(New("test", testConfig(), opts))
 		sh.Chrome = &core.Chrome{Breadcrumb: core.NewBreadcrumbPane()}
 		r := core.NewRouter(sh, []core.TabEntry{
 			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},

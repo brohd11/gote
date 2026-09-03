@@ -152,7 +152,9 @@ language_servers:
 	cfg = writeConfig(t, "language_servers: {}\n")
 	if cfg.LanguageServers["gdscript"].Address != "127.0.0.1:6005" ||
 		!reflect.DeepEqual(cfg.LanguageServers["python"].Command, []string{"pylsp"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["bash"].Command, []string{"bash-language-server", "start"}) {
+		!reflect.DeepEqual(cfg.LanguageServers["bash"].Command, []string{"bash-language-server", "start"}) ||
+		!reflect.DeepEqual(cfg.LanguageServers["go"].Command, []string{"gopls"}) ||
+		cfg.LanguageServers["go"].InitializationOptions["usePlaceholders"] != true {
 		t.Fatalf("missing entries should inherit built-ins: %#v", cfg.LanguageServers)
 	}
 

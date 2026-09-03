@@ -538,6 +538,51 @@ func TestLSPRoots(t *testing.T) {
 	}
 }
 
+// A module inside a go.work belongs to the workspace, so the outer marker has to beat the
+// nearer go.mod — otherwise every module in a monorepo gets its own gopls.
+func TestLSPRootPrefersWorkspace(t *testing.T) {
+	goProfile := languageForPath("main.go")
+	if goProfile == nil || goProfile.lsp == nil {
+		t.Fatal("Go should carry LSP activation metadata")
+	}
+	write := func(t *testing.T, dir, name string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	work := t.TempDir()
+	mod := filepath.Join(work, "mod")
+	pkg := filepath.Join(mod, "internal", "app")
+	write(t, work, "go.work")
+	write(t, mod, "go.mod")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := lspRootForPath(filepath.Join(pkg, "main.go"), goProfile); got != work {
+		t.Fatalf("Go root = %q, want the workspace %q", got, work)
+	}
+
+	// The same tree without the workspace file falls back to the module, exactly as it
+	// did before workspaceMarkers existed.
+	lone := t.TempDir()
+	loneMod := filepath.Join(lone, "mod")
+	write(t, loneMod, "go.mod")
+	if got := lspRootForPath(filepath.Join(loneMod, "main.go"), goProfile); got != loneMod {
+		t.Fatalf("Go root = %q, want the module %q", got, loneMod)
+	}
+
+	// No marker at all still opens a session, from the file's own directory.
+	bare := t.TempDir()
+	if got := lspRootForPath(filepath.Join(bare, "main.go"), goProfile); got != bare {
+		t.Fatalf("unmarked Go root = %q, want %q", got, bare)
+	}
+}
+
 func TestLSPInvalidTransportBackoffAndRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "main.py")
 	cfg := DefaultConfig()

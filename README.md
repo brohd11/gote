@@ -6,7 +6,7 @@ simple TUI text editor built with Go and Bubbletea.
  - simple text editing
  - minimal markdown previewer
  - syntax highlighting for select extensions
- - Shell, GDScript and Python diagnostics through language servers
+ - Go, Shell, GDScript and Python diagnostics through language servers
  - mouse support for scrolling, selection, right click
  - vaults store a collection of files for a focused view
 
@@ -52,8 +52,16 @@ Language-server support starts lazily when a supported file is opened. Python us
 with `pip install python-lsp-server`. Shell scripts (`.sh`, `.bash`, and anything a `#!`
 line names as a POSIX shell) use
 [`bash-language-server`](https://github.com/bash-lsp/bash-language-server), also over stdio;
-install it with `npm i -g bash-language-server`. GDScript connects to the Godot editor's
-language server at `127.0.0.1:6005`, so the matching Godot project must already be running.
+install it with `npm i -g bash-language-server`. Go uses
+[`gopls`](https://pkg.go.dev/golang.org/x/tools/gopls); install it with
+`go install golang.org/x/tools/gopls@latest`, and note that `go install` writes to
+`$(go env GOPATH)/bin`, which has to be on your PATH for a bare `gopls` command to start
+(otherwise put the full path in `command`). GDScript connects to the Godot editor's language
+server at `127.0.0.1:6005`, so the matching Godot project must already be running.
+
+A Go file inside a `go.work` workspace starts one server for the whole workspace rather than
+one per module, so cross-module definitions resolve and a monorepo costs a single gopls. A
+module with no workspace above it roots at its own `go.mod`.
 
 `.zsh` and `.fish` files get the shell editing behavior — quote and bracket pairing, and
 indent on Enter — but no language server: `bash-language-server` reports zsh-only and fish

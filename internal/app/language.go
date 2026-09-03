@@ -25,9 +25,14 @@ type languageProfile struct {
 // server selection and workspace discovery stay beside the rest of the app's language
 // policy.
 type languageLSP struct {
-	server         string
-	rootMarkers    []string
-	requireRootHit bool
+	server string
+	// workspaceMarkers name a root that OUTRANKS a nearer rootMarkers hit, for languages
+	// where an inner project is part of an outer one. Go is the case: a module inside a
+	// go.work belongs to the workspace, and one gopls over the whole thing is both more
+	// correct (cross-module definitions resolve) and far cheaper than a process per module.
+	workspaceMarkers []string
+	rootMarkers      []string
+	requireRootHit   bool
 }
 
 var (
@@ -93,6 +98,8 @@ func buildLanguageProfiles() map[string]*languageProfile {
 		case ".py":
 			cfg.IndentSpaces = 4
 			cfg.OnEnter = colonBlockEnter
+		case ".go":
+			cfg.OnEnter = goEnter
 		case ".sh", ".bash", ".zsh":
 			cfg.AutoClosingPairs = shellPairs
 			cfg.SurroundingPairs = shellPairs
@@ -127,6 +134,14 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			profile.lsp = &languageLSP{server: "python", rootMarkers: []string{
 				"pyproject.toml", "setup.cfg", "setup.py", ".git",
 			}}
+		case ".go":
+			// No id pin: Chroma's first alias for *.go is already "go", which is the LSP
+			// language identifier too.
+			profile.lsp = &languageLSP{
+				server:           "go",
+				workspaceMarkers: []string{"go.work"},
+				rootMarkers:      []string{"go.mod", ".git"},
+			}
 		case ".zsh":
 			// Chroma tokenizes zsh with its Bash lexer, so the alias this profile inherited
 			// is "bash". Pin the real name: nothing reads it while zsh has no server, and a
@@ -160,30 +175,50 @@ func buildLanguageProfiles() map[string]*languageProfile {
 	return profiles
 }
 
-// lspRootForPath finds the nearest project marker. GDScript has no useful server
-// workspace without project.godot, while pylsp can still operate from the file's own
-// directory when a standalone script has no project marker.
+// lspRootForPath finds the workspace a file belongs to. workspaceMarkers get a full walk
+// of their own first: an outer marker outranking a nearer ordinary one is the only way to
+// say "this project is part of a larger one", which Go's go.work needs and would otherwise
+// lose to the module's own go.mod several directories below it. Falling through costs
+// nothing — with no workspace marker the ordinary rootMarkers walk runs exactly as it did.
+//
+// After both walks miss, GDScript has no useful server workspace at all without
+// project.godot, while pylsp and the rest can still operate from the file's own directory.
 func lspRootForPath(path string, profile *languageProfile) string {
 	if profile == nil || profile.lsp == nil {
 		return ""
 	}
 	dir := filepath.Dir(path)
+	if root := nearestMarker(dir, profile.lsp.workspaceMarkers); root != "" {
+		return root
+	}
+	if root := nearestMarker(dir, profile.lsp.rootMarkers); root != "" {
+		return root
+	}
+	if profile.lsp.requireRootHit {
+		return ""
+	}
+	return dir
+}
+
+// nearestMarker walks from dir to the filesystem root and answers the first directory
+// holding any of markers. An empty list never matches, which is what lets a profile leave
+// workspaceMarkers unset and keep its original single-walk behavior.
+func nearestMarker(dir string, markers []string) string {
+	if len(markers) == 0 {
+		return ""
+	}
 	for {
-		for _, marker := range profile.lsp.rootMarkers {
+		for _, marker := range markers {
 			if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
 				return dir
 			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			break
+			return ""
 		}
 		dir = parent
 	}
-	if profile.lsp.requireRootHit {
-		return ""
-	}
-	return filepath.Dir(path)
 }
 
 // extByFilename resolves the dotfiles that carry a language with no extension of their
@@ -574,6 +609,26 @@ func colonBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterA
 		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
 	case blockEndStatements[firstWord(trimmed)]:
 		return components.EditorEnterAction{Prefix: dropIndentUnit(ctx.LeadingIndent, ctx.IndentUnit)}, true
+	}
+	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
+}
+
+// goEnter is colonBlockEnter without the dedent, and the omission is the point. Python
+// needs `return`/`pass` to step back out because nothing closes a Python block; Go closes
+// with a brace that the bracket rule has already placed BELOW the caret, so Enter under a
+// `return err` should land inside the block, above the `}` already sitting there.
+func goEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+	if !afterLeadingIndent(ctx) {
+		return components.EditorEnterAction{}, false
+	}
+	if insideBracket(ctx.Before, ctx.After) {
+		return bracketBlock(ctx), true
+	}
+	trimmed := strings.TrimSpace(ctx.Before)
+	// A trailing colon in Go is a switch case, a default, or a label — each of which opens
+	// a body one level in.
+	if endsWithOpener(trimmed) || strings.HasSuffix(trimmed, ":") {
+		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
 	}
 	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
 }

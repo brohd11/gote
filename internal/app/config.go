@@ -98,6 +98,10 @@ func defaultLanguageServers() map[string]LanguageServerConfig {
 	return map[string]LanguageServerConfig{
 		"bash":     {Command: []string{"bash-language-server", "start"}},
 		"gdscript": {Address: "127.0.0.1:6005", Command: []string{}},
+		"go": {
+			Command:               []string{"gopls"},
+			InitializationOptions: map[string]any{"usePlaceholders": true},
+		},
 		"python": {
 			Command: []string{"pylsp"},
 			InitializationOptions: map[string]any{"pylsp": map[string]any{

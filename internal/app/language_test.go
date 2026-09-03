@@ -353,6 +353,7 @@ func TestBracketBlockEnter(t *testing.T) {
 		{"python nested brackets", "main.py", "    xs = []", "    xs = [\n        \n    ]"},
 		{"python parens", "main.py", "f()", "f(\n    \n)"},
 		{"gdscript uses its tab unit", "player.gd", "var d = {}", "var d = {\n\t\n}"},
+		{"go composite literal", "main.go", "\tx := T{}", "\tx := T{\n\t\t\n\t}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ed := editorForLanguage(tc.path, tc.content)
@@ -375,6 +376,56 @@ func TestBracketBlockEnter(t *testing.T) {
 	pressEditor(ed, "end", "left", "enter")
 	if got, want := ed.Text(), "s = \"\n\""; got != want {
 		t.Fatalf("quote Enter = %q, want a plain split %q", got, want)
+	}
+}
+
+func TestGoEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"func brace", "func f() {", "func f() {\n\t"},
+		{"nested brace", "\tif err != nil {", "\tif err != nil {\n\t\t"},
+		{"switch", "\tswitch x {", "\tswitch x {\n\t\t"},
+		{"case", "\tcase 1:", "\tcase 1:\n\t\t"},
+		{"default", "\tdefault:", "\tdefault:\n\t\t"},
+		{"label", "loop:", "loop:\n\t"},
+		{"multiline call", "\tfmt.Println(", "\tfmt.Println(\n\t\t"},
+		// The one place Go parts ways with colonBlockEnter. Go's block closes with a brace
+		// the bracket rule has already put below the caret, so Enter under a return belongs
+		// INSIDE the block; dedenting here would step over the "}" that is already there.
+		{"return carries, never dedents", "\t\treturn err", "\t\treturn err\n\t\t"},
+		{"break carries", "\t\tbreak", "\t\tbreak\n\t\t"},
+		{"closing brace carries", "\t}", "\t}\n\t"},
+		{"complete literal carries", "\txs := []int{1, 2}", "\txs := []int{1, 2}\n\t"},
+		{"plain line", "package main", "package main\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("main.go", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("Go Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGoProfile(t *testing.T) {
+	profile := languageForPath("main.go")
+	if profile == nil || profile.id != "go" {
+		t.Fatalf("Go profile = %#v, want id \"go\"", profile)
+	}
+	if profile.lsp == nil || profile.lsp.server != "go" {
+		t.Fatalf("Go lsp = %#v, want the go server", profile.lsp)
+	}
+	// gofmt indents with tabs, which is what IndentSpaces 0 already means.
+	if profile.editor.IndentSpaces != 0 {
+		t.Fatalf("Go IndentSpaces = %d, want a literal tab", profile.editor.IndentSpaces)
+	}
+	if !hasPair(profile.editor.AutoClosingPairs, '`', '`') {
+		t.Fatal("Go should pair backticks: raw string literals")
+	}
+	if hasPair(profile.editor.AutoClosingPairs, '\'', '\'') {
+		t.Fatal("Go should leave single quotes literal: apostrophes in comments beat rune literals")
 	}
 }
 
