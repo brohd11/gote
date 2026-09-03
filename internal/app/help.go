@@ -81,11 +81,12 @@ func (s *homeScreen) helpText() string {
 	// here alongside. The description is gote's own: quitting dirty prompts first.
 	quitKey := core.Hint("quit (confirms unsaved changes)",
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
-	writeSection("general", []key.Binding{
-		quitKey,
-		sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey,
-		wrapKey, lineNumsKey, helpKey,
-	})
+	general := []key.Binding{quitKey, sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey,
+		wrapKey, lineNumsKey, helpKey}
+	if !s.minimal {
+		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
+	}
+	writeSection("general", general)
 	// These act on the selected row, so they are the docs list's keys rather than the
 	// screen's — and, off the bar, this is the only place they are written down.
 	// The language-server section. These fire from the editor (they all carry a

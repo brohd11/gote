@@ -27,6 +27,12 @@ Default mode, shows a sidebar with docs in a location folder, as well as a list 
 `gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
 
+Press `ctrl+n` to create a pathless buffer in the Open list. New buffers use the first
+available `unsaved_N` name, so closing or saving one releases its number; typing or
+pasting into the empty startup buffer adds it to Open the same way. `ctrl+s` gives an
+unsaved buffer a filename, after which it is listed and managed like any other document.
+This shortcut is intentionally unavailable in the chrome-less single-document mode.
+
 The sidebar lists the scan flat by default; `alt+t` swaps it for a folder-by-folder view of
 the same tree (`alt+r` there switches row density). Set `folder_view: true` in the config to
 open on the folder view instead — it only picks the starting view, the scan runs either way.

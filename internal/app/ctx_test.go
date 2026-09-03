@@ -28,7 +28,7 @@ func TestCloseDoc(t *testing.T) {
 	if got := order(c); len(got) != 2 || got[0] != "a" || got[1] != "c" {
 		t.Fatalf("open order after close = %v, want [a c]", got)
 	}
-	if _, ok := c.open.byPath["b"]; ok {
+	if _, ok := c.open.getPath("b"); ok {
 		t.Fatal("the closed doc must leave the open set")
 	}
 
@@ -218,10 +218,10 @@ func TestAddAndSwitchVault(t *testing.T) {
 	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
 		t.Fatalf("switched context = %+v", c)
 	}
-	if len(c.open.byPath) != 0 || len(c.open.order) != 0 || len(c.open.roots) != 0 {
-		t.Fatalf("switch should close open session: open=%v order=%v roots=%v", c.open.byPath, c.open.order, c.open.roots)
+	if len(c.open.byID) != 0 || len(c.open.byPath) != 0 || len(c.open.order) != 0 {
+		t.Fatalf("switch should close open session: byID=%v byPath=%v order=%v", c.open.byID, c.open.byPath, c.open.order)
 	}
-	if c.open.byPath[filepath.Join(home, "old.md")] == old {
+	if got, ok := c.Doc(filepath.Join(home, "old.md")); ok && got == old {
 		t.Fatal("old editor survived vault switch")
 	}
 
@@ -269,13 +269,13 @@ func TestRekeyDoc(t *testing.T) {
 
 	// A rename keeps the row where it was, so the selection doesn't jump.
 	c := newCtx("a", "b", "c")
-	ed := c.open.byPath["b"]
+	ed, _ := c.Doc("b")
 	c.RekeyDoc("b", "b2", ed)
 	eq(t, order(c), []string{"a", "b2", "c"})
-	if c.open.byPath["b2"] != ed {
+	if got, _ := c.Doc("b2"); got != ed {
 		t.Fatal("the renamed path should answer with the same editor")
 	}
-	if _, ok := c.open.byPath["b"]; ok {
+	if _, ok := c.Doc("b"); ok {
 		t.Fatal("the old path must leave the open set")
 	}
 
@@ -284,25 +284,25 @@ func TestRekeyDoc(t *testing.T) {
 	scratch := components.NewEditorScreen(components.EditorOpts{})
 	c.RekeyDoc("", "fresh.md", scratch)
 	eq(t, order(c), []string{"a", "fresh.md"})
-	if c.open.byPath["fresh.md"] != scratch {
+	if got, _ := c.Doc("fresh.md"); got != scratch {
 		t.Fatal("saving the scratch buffer should register it")
 	}
 
 	// Saving onto a path another buffer holds leaves one row for it, not two.
 	c = newCtx("a", "b")
-	ed = c.open.byPath["a"]
+	ed, _ = c.Doc("a")
 	c.RekeyDoc("a", "b", ed)
 	eq(t, order(c), []string{"b"})
-	if c.open.byPath["b"] != ed {
+	if got, _ := c.Doc("b"); got != ed {
 		t.Fatal("the saved buffer should be the one the path resolves to")
 	}
 
 	// The ordinary same-path save changes nothing.
 	c = newCtx("a", "b")
-	ed = c.open.byPath["a"]
+	ed, _ = c.Doc("a")
 	c.RekeyDoc("a", "a", ed)
 	eq(t, order(c), []string{"a", "b"})
-	if c.open.byPath["a"] != ed {
+	if got, _ := c.Doc("a"); got != ed {
 		t.Fatal("a same-path save must leave the entry alone")
 	}
 }
@@ -331,7 +331,24 @@ func TestOpenDocsKeepOriginRoot(t *testing.T) {
 		t.Fatalf("rekeyed open doc = %v, want path %q rooted at %q", docs, renamed, root)
 	}
 	c.CloseDoc(renamed)
-	if _, ok := c.open.roots[renamed]; ok {
+	if _, ok := c.open.byID[renamed]; ok {
 		t.Fatal("closing a doc must remove its origin root")
+	}
+}
+
+func TestUnsavedBuffersHaveIdentityWithoutAFilePath(t *testing.T) {
+	c := &Ctx{open: newOpenSet()}
+	id, name := c.newUnsavedIdentity()
+	ed := components.NewEditorScreen(components.EditorOpts{Title: name})
+	c.trackUnsaved(id, name, ed)
+
+	docs := c.OpenDocs()
+	if len(docs) != 1 || docs[0].ID != id || docs[0].Name != "unsaved_1" || docs[0].Path != "" {
+		t.Fatalf("pathless Open metadata = %+v", docs)
+	}
+	visited := false
+	c.EachDoc(func(string, *components.EditorScreen) { visited = true })
+	if visited {
+		t.Fatal("file-backed consumers must not receive unsaved buffers")
 	}
 }

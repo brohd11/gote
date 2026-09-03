@@ -13,10 +13,12 @@ import (
 	"github.com/brohd11/goutil/textfile"
 )
 
-// DocFile is one seedable document: a file the configured filter accepts.
+// DocFile describes a disk-backed Docs row or a retained Open row. ID is populated only
+// for Open rows; Path is populated only once the buffer has a filesystem identity.
 type DocFile struct {
+	ID   string // open-buffer identity; empty on disk-backed Docs rows
 	Name string // base name, shown in the list
-	Path string // absolute path, the editor's load/save target
+	Path string // absolute load/save target; empty for an unsaved Open row
 	Root string // origin root used to render stable relative path context
 }
 
@@ -213,6 +215,13 @@ func (i docItem) Title() string {
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
 
+func (i docItem) identity() string {
+	if i.doc.ID != "" {
+		return i.doc.ID
+	}
+	return i.doc.Path
+}
+
 // Mark flags a buffer with unsaved changes, matching the marker the editor pane's own
 // title bar carries. core.MarkItem reserves its width before the name is truncated, so it
 // is still readable on a row the sidebar has narrowed — see core.CompactDelegate.
@@ -223,6 +232,9 @@ func (i docItem) Mark() string {
 	return ""
 }
 func (i docItem) SuffixText() string {
+	if i.doc.Path == "" {
+		return ""
+	}
 	rel, err := filepath.Rel(i.doc.Root, i.doc.Path)
 	if err != nil {
 		return ""
@@ -249,12 +261,12 @@ func docItems(docs []DocFile, currentPath string) []list.Item {
 // what the buffer holds right now — including the one being typed into, whose editor is
 // the very instance the pane is showing. A path whose buffer went missing gets a nil
 // probe and simply shows no marker.
-func openDocItems(c *Ctx, currentPath string) []list.Item {
+func openDocItems(c *Ctx, currentID string) []list.Item {
 	docs := c.OpenDocs()
 	items := make([]list.Item, 0, len(docs))
 	for _, d := range docs {
-		item := docItem{doc: d, current: d.Path == currentPath && currentPath != ""}
-		if ed, ok := c.Doc(d.Path); ok && ed != nil {
+		item := docItem{doc: d, current: d.ID == currentID && currentID != ""}
+		if ed, ok := c.buffer(d.ID); ok && ed != nil {
 			item.dirty = ed.Dirty
 		}
 		items = append(items, item)

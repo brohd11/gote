@@ -39,8 +39,8 @@ type Ctx struct {
 	Files     []DocFile
 	Config    Config
 
-	// open is the set of open buffers — the editor per path, their order, and each
-	// path's origin root. One type because the three always move together; see openset.go.
+	// open is the set of retained buffers — their stable identities, optional paths,
+	// display names, origin roots, editors and order; see openset.go.
 	open openSet
 	lsp  *lspManager
 }
@@ -53,7 +53,8 @@ var _ core.Receiver = (*Ctx)(nil)
 // would have nowhere live to land and that editor would remain permanently in flight.
 func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
 	var acts []core.Action
-	c.EachDoc(func(_ string, ed *components.EditorScreen) {
+	c.open.each(func(entry *openEntry) {
+		ed := entry.editor
 		act := ed.Receive(sh, payload)
 		if act.Msg != nil || act.Cmd != nil {
 			acts = append(acts, act)
@@ -307,45 +308,96 @@ func (c *Ctx) SwitchVault(name string) error {
 // newly created editors, since an already-open doc keeps its existing editor — and its
 // buffer — untouched. See homeScreen.editorOpts for what gote passes.
 func (c *Ctx) OpenDoc(path string, opts components.EditorOpts) *components.EditorScreen {
-	if ed, ok := c.open.get(path); ok {
-		return ed
+	if entry, ok := c.open.getPath(path); ok {
+		return entry.editor
 	}
 	opts.Path = path
 	ed := components.NewEditorScreen(opts)
-	c.open.add(path, c.rootForPath(path), ed)
+	c.open.addFile(path, c.rootForPath(path), ed)
 	return ed
 }
 
 // Doc returns the editor open for path, if there is one.
-func (c *Ctx) Doc(path string) (*components.EditorScreen, bool) { return c.open.get(path) }
+func (c *Ctx) Doc(path string) (*components.EditorScreen, bool) {
+	entry, ok := c.open.getPath(path)
+	if !ok {
+		return nil, false
+	}
+	return entry.editor, true
+}
 
-// EachDoc visits every open buffer in opening order.
-func (c *Ctx) EachDoc(fn func(path string, ed *components.EditorScreen)) { c.open.each(fn) }
+// buffer returns the retained editor identified by id, whether saved or unsaved.
+func (c *Ctx) buffer(id string) (*components.EditorScreen, bool) {
+	entry, ok := c.open.get(id)
+	if !ok {
+		return nil, false
+	}
+	return entry.editor, true
+}
 
-// RekeyDoc re-files ed under newPath after a save-as, keeping Open and OpenOrder
-// consistent with a buffer that renamed itself. old == "" registers a buffer that was
-// not tracked at all (the scratch editor, which saving is exactly what gives an
-// identity); old == newPath is the ordinary same-path save and does nothing. The entry
-// keeps its slot in OpenOrder so the open-docs list doesn't jump under the selection.
+// bufferInfo returns the Open-list metadata for id.
+func (c *Ctx) bufferInfo(id string) (DocFile, bool) {
+	entry, ok := c.open.get(id)
+	if !ok {
+		return DocFile{}, false
+	}
+	return DocFile{ID: entry.id, Name: entry.name, Path: entry.path, Root: entry.root}, true
+}
+
+// newUnsavedIdentity finds the lowest unsaved_N suffix not currently retained. Saving
+// or closing a pathless buffer therefore releases its number for the next one. The NUL
+// in the opaque id cannot occur in a filesystem path, so identity and path cannot clash.
+func (c *Ctx) newUnsavedIdentity() (id, name string) {
+	for n := 1; ; n++ {
+		id = fmt.Sprintf("\x00gote:unsaved:%d", n)
+		if _, used := c.open.get(id); used {
+			continue
+		}
+		return id, fmt.Sprintf("unsaved_%d", n)
+	}
+}
+
+// trackUnsaved promotes a pathless editor into the retained Open set.
+func (c *Ctx) trackUnsaved(id, name string, ed *components.EditorScreen) {
+	if _, exists := c.open.get(id); exists {
+		return
+	}
+	c.open.addUnsaved(id, name, ed)
+}
+
+// EachDoc visits every saved open buffer in opening order. Pathless buffers are retained
+// by the context but deliberately excluded from file-backed consumers such as LSP.
+func (c *Ctx) EachDoc(fn func(path string, ed *components.EditorScreen)) {
+	c.open.each(func(entry *openEntry) {
+		if entry.path != "" {
+			fn(entry.path, entry.editor)
+		}
+	})
+}
+
+// RekeyDoc re-files ed under newPath after a save-as, keeping the Open metadata
+// consistent with a buffer that gained or changed its path. An untracked startup buffer
+// is registered here; an already-retained buffer keeps its slot so the Open list does
+// not jump under the selection. An ordinary same-path save does nothing.
 // Saving over a path that some OTHER buffer already holds drops that buffer's entry:
 // the list is keyed by path and two rows for one file would both claim to be it.
-func (c *Ctx) RekeyDoc(old, newPath string, ed *components.EditorScreen) {
+func (c *Ctx) RekeyDoc(oldID, newPath string, ed *components.EditorScreen) {
 	if newPath == "" || ed == nil {
 		return
 	}
-	if cur, ok := c.open.get(newPath); old == newPath && ok && cur == ed {
+	if cur, ok := c.open.getPath(newPath); oldID == newPath && ok && cur.editor == ed {
 		return
 	}
-	c.open.rekey(old, newPath, ed)
+	c.open.rekey(oldID, newPath, ed)
 }
 
 // OpenDocs lists the open buffers in opening order, for the open-docs list.
 func (c *Ctx) OpenDocs() []DocFile { return c.open.docs() }
 
-// CloseDoc removes path from the open set (an empty or unknown path is a no-op,
-// which makes the scratch editor's exit free) and returns the doc to switch to:
+// CloseDoc removes id from the open set (an unknown id is a no-op, which makes an
+// untracked startup editor's exit free) and returns the buffer to switch to:
 // the one after it in open order, else the new last, else "" when none remain.
-func (c *Ctx) CloseDoc(path string) (next string) { return c.open.remove(path) }
+func (c *Ctx) CloseDoc(id string) (next string) { return c.open.remove(id) }
 
 // rootForPath records where a document came from when it first enters Open. Seeded
 // docs carry an exact root; other paths use the active mode, while a standalone or

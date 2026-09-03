@@ -6,106 +6,150 @@ import (
 	"github.com/brohd11/bubblestack/components"
 )
 
-// openSet is the set of open buffers: the editor keyed by path, the order they were opened
-// in (what the open-docs list shows), and each path's origin root (which mode switches must
-// not disturb).
-//
-// The three move together on every operation — an add touches all three, a close removes
-// from all three, and a save-as has to rewrite a key in two maps while holding a slot in the
-// slice. Keeping them in step was previously the caller's job at each site; making them one
-// type is what stops a future operation from updating two of the three.
+// openEntry is one retained editor buffer. id is its stable in-memory identity; path is
+// empty until an unsaved buffer is written for the first time. Keeping those facts apart
+// lets the Open list retain pathless buffers without handing a made-up filename to the
+// editor, LSP, git gutter, or filesystem.
+type openEntry struct {
+	id     string
+	name   string
+	path   string
+	root   string
+	editor *components.EditorScreen
+}
+
+// openSet owns every retained buffer, in opening order. Saved buffers use their path as
+// their id; unsaved buffers use an opaque id allocated by Ctx. byPath indexes real files
+// so Ctx.OpenDoc can still answer "already open" by filename.
 type openSet struct {
-	byPath map[string]*components.EditorScreen
-	order  []string          // insertion order; the open-docs list reads it
-	roots  map[string]string // path → the root it was discovered under
+	byID   map[string]*openEntry
+	byPath map[string]string // real path -> id
+	order  []string          // ids, in opening order
 }
 
 func newOpenSet() openSet {
-	return openSet{
-		byPath: map[string]*components.EditorScreen{},
-		roots:  map[string]string{},
-	}
+	return openSet{byID: map[string]*openEntry{}, byPath: map[string]string{}}
 }
 
-// reset empties the set, for a vault switch closing the whole session.
 func (o *openSet) reset() { *o = newOpenSet() }
 
-// get returns the editor registered for path, if any.
-func (o *openSet) get(path string) (*components.EditorScreen, bool) {
-	ed, ok := o.byPath[path]
-	return ed, ok
+func (o *openSet) get(id string) (*openEntry, bool) {
+	entry, ok := o.byID[id]
+	return entry, ok
 }
 
-// len reports how many buffers are open.
+func (o *openSet) getPath(path string) (*openEntry, bool) {
+	id, ok := o.byPath[path]
+	if !ok {
+		return nil, false
+	}
+	return o.get(id)
+}
+
 func (o *openSet) len() int { return len(o.order) }
 
-// add registers ed under path at the end of the order. The caller supplies root because
-// only the Ctx knows how a path was discovered (see Ctx.rootForPath).
-func (o *openSet) add(path, root string, ed *components.EditorScreen) {
-	if o.byPath == nil {
-		o.byPath = map[string]*components.EditorScreen{}
-	}
-	if o.roots == nil {
-		o.roots = map[string]string{}
-	}
-	o.byPath[path] = ed
-	o.roots[path] = root
-	o.order = append(o.order, path)
+func (o *openSet) addFile(path, root string, ed *components.EditorScreen) {
+	o.add(openEntry{id: path, name: docName(path), path: path, root: root, editor: ed})
 }
 
-// rekey re-files ed from old to newPath after a save-as. old == "" registers a buffer that
-// was not tracked at all (the scratch editor, which saving is exactly what gives an
-// identity). The entry keeps its slot in the order so the open-docs list doesn't jump under
-// the selection. Saving over a path some OTHER buffer already holds drops that buffer's
-// entry: the list is keyed by path, and two rows for one file would both claim to be it.
-func (o *openSet) rekey(old, newPath string, ed *components.EditorScreen) {
-	root := o.roots[old]
-	if root == "" {
-		root = filepath.Dir(newPath)
-	}
-	delete(o.byPath, old)
-	delete(o.roots, old)
-	if o.byPath == nil {
-		o.byPath = map[string]*components.EditorScreen{}
-	}
-	if o.roots == nil {
-		o.roots = map[string]string{}
-	}
-	o.byPath[newPath] = ed
-	o.roots[newPath] = root
+func (o *openSet) addUnsaved(id, name string, ed *components.EditorScreen) {
+	o.add(openEntry{id: id, name: name, editor: ed})
+}
 
-	at := -1
+func (o *openSet) add(entry openEntry) {
+	if entry.id == "" || entry.editor == nil {
+		return
+	}
+	if o.byID == nil {
+		o.byID = map[string]*openEntry{}
+	}
+	if o.byPath == nil {
+		o.byPath = map[string]string{}
+	}
+	copy := entry
+	o.byID[entry.id] = &copy
+	if entry.path != "" {
+		o.byPath[entry.path] = entry.id
+	}
+	o.order = append(o.order, entry.id)
+}
+
+// rekey gives a buffer its saved-file identity. A tracked buffer keeps its own slot and
+// displaces any other buffer already holding newPath. An untracked startup buffer adopts
+// an existing target's slot, or appends when the target was not already open.
+func (o *openSet) rekey(oldID, newPath string, ed *components.EditorScreen) {
+	if newPath == "" || ed == nil {
+		return
+	}
+	if entry, ok := o.get(oldID); ok && entry.path == newPath && entry.editor == ed {
+		return
+	}
+
+	old, tracked := o.get(oldID)
+	targetID := o.byPath[newPath]
+	root := filepath.Dir(newPath)
+	if tracked && old.root != "" {
+		root = old.root
+	}
+
+	if tracked {
+		delete(o.byID, oldID)
+		if old.path != "" {
+			delete(o.byPath, old.path)
+		}
+	}
+	if targetID != "" {
+		delete(o.byID, targetID)
+		delete(o.byPath, newPath)
+	}
+
+	entry := &openEntry{id: newPath, name: docName(newPath), path: newPath, root: root, editor: ed}
+	if o.byID == nil {
+		o.byID = map[string]*openEntry{}
+	}
+	if o.byPath == nil {
+		o.byPath = map[string]string{}
+	}
+	o.byID[newPath] = entry
+	o.byPath[newPath] = newPath
+
+	placed := false
 	filtered := o.order[:0]
-	for _, p := range o.order {
-		switch p {
-		case old:
-			at = len(filtered)
-			filtered = append(filtered, newPath) // in place, so the row stays put
-		case newPath:
-			if at < 0 && old == "" {
-				at = len(filtered) // an untracked buffer taking an open path's slot
+	for _, id := range o.order {
+		switch {
+		case tracked && id == oldID:
+			if !placed {
 				filtered = append(filtered, newPath)
+				placed = true
+			}
+		case id == targetID:
+			if !tracked && !placed {
+				filtered = append(filtered, newPath)
+				placed = true
 			}
 		default:
-			filtered = append(filtered, p)
+			filtered = append(filtered, id)
 		}
 	}
 	o.order = filtered
-	if at < 0 {
+	if !placed {
 		o.order = append(o.order, newPath)
 	}
 }
 
-// remove drops path and reports the doc to switch to: the one after it in open order, else
-// the new last, else "" when none remain. An unknown path is a no-op returning "".
-func (o *openSet) remove(path string) (next string) {
-	if _, ok := o.byPath[path]; !ok {
+// remove drops id and returns the buffer id to show next: the one after it, else the
+// new last, else empty when no retained buffers remain.
+func (o *openSet) remove(id string) (next string) {
+	entry, ok := o.get(id)
+	if !ok {
 		return ""
 	}
-	delete(o.byPath, path)
-	delete(o.roots, path)
-	for i, p := range o.order {
-		if p != path {
+	delete(o.byID, id)
+	if entry.path != "" {
+		delete(o.byPath, entry.path)
+	}
+	for i, candidate := range o.order {
+		if candidate != id {
 			continue
 		}
 		o.order = append(o.order[:i], o.order[i+1:]...)
@@ -120,18 +164,24 @@ func (o *openSet) remove(path string) (next string) {
 	return ""
 }
 
-// docs lists the open buffers in opening order, for the open-docs list.
 func (o *openSet) docs() []DocFile {
 	docs := make([]DocFile, 0, len(o.order))
-	for _, path := range o.order {
-		docs = append(docs, DocFile{Name: docName(path), Path: path, Root: o.roots[path]})
+	for _, id := range o.order {
+		entry := o.byID[id]
+		if entry == nil {
+			continue
+		}
+		docs = append(docs, DocFile{
+			ID: entry.id, Name: entry.name, Path: entry.path, Root: entry.root,
+		})
 	}
 	return docs
 }
 
-// each visits every open buffer in opening order.
-func (o *openSet) each(fn func(path string, ed *components.EditorScreen)) {
-	for _, path := range o.order {
-		fn(path, o.byPath[path])
+func (o *openSet) each(fn func(*openEntry)) {
+	for _, id := range o.order {
+		if entry := o.byID[id]; entry != nil {
+			fn(entry)
+		}
 	}
 }

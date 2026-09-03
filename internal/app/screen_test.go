@@ -313,7 +313,7 @@ func TestEditorExitClosesDoc(t *testing.T) {
 
 	s.Update(sh, keyMsg("ctrl+x")) // clean buffer: closes b
 	s.Receive(sh, ReseedMsg{})     // the router applies the hook's broadcast
-	if _, ok := c.open.byPath[b]; ok {
+	if _, ok := c.Doc(b); ok {
 		t.Fatal("the exited doc must leave the open set")
 	}
 	if s.currentPath != a {
@@ -329,8 +329,153 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	if s.currentPath != "" || len(c.OpenDocs()) != 0 {
 		t.Fatalf("the last exit should clear everything: path %q, open %v", s.currentPath, c.OpenDocs())
 	}
-	if !strings.Contains(stripANSI(s.View(sh)), "Editor") {
-		t.Fatalf("the pane should show a fresh scratch editor, render:\n%s", stripANSI(s.View(sh)))
+	if !strings.Contains(stripANSI(s.View(sh)), "unsaved_1") {
+		t.Fatalf("the pane should show the next fresh unsaved buffer, render:\n%s", stripANSI(s.View(sh)))
+	}
+}
+
+func TestTypingPromotesStartupBuffer(t *testing.T) {
+	s, sh := newHome(t)
+	c := Of(sh)
+	ed := s.editor
+
+	if got := c.OpenDocs(); len(got) != 0 {
+		t.Fatalf("the untouched startup buffer must stay out of Open, got %+v", got)
+	}
+	// Reach the editor and try two no-op edits first: neither changes the buffer.
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("left"))
+	s.Update(sh, keyMsg("backspace"))
+	if got := c.OpenDocs(); len(got) != 0 {
+		t.Fatalf("navigation and an empty deletion must not promote the buffer, got %+v", got)
+	}
+
+	s.Update(sh, keyMsg("draft"))
+	got := c.OpenDocs()
+	if len(got) != 1 || got[0].Name != "unsaved_1" || got[0].Path != "" || got[0].ID != s.currentID {
+		t.Fatalf("the first edit should create the unsaved_1 Open row, got %+v", got)
+	}
+	if tracked, _ := c.buffer(got[0].ID); tracked != ed {
+		t.Fatal("promotion must retain the exact startup editor")
+	}
+	if marks := openMarks(s); !reflect.DeepEqual(marks, []string{"• unsaved_1 (*)"}) {
+		t.Fatalf("the promoted row should be current and dirty, got %v", marks)
+	}
+	if len(c.Files) != 0 {
+		t.Fatalf("an unsaved buffer must not enter the disk-backed Docs list, got %+v", c.Files)
+	}
+}
+
+func TestCtrlNRetainsMultipleUnsavedBuffers(t *testing.T) {
+	s, sh := newHome(t)
+	c := Of(sh)
+
+	s.Update(sh, keyMsg("ctrl+n"))
+	first := s.editor
+	if got := c.OpenDocs(); len(got) != 1 || got[0].Name != "unsaved_1" || got[0].Path != "" {
+		t.Fatalf("the first ctrl+n should promote the startup buffer, got %+v", got)
+	}
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("ctrl+n should focus the editor, got %s", got)
+	}
+	s.Update(sh, keyMsg("first"))
+
+	s.Update(sh, keyMsg("ctrl+n"))
+	second := s.editor
+	if first == second {
+		t.Fatal("a repeated ctrl+n must create a distinct editor")
+	}
+	got := c.OpenDocs()
+	if len(got) != 2 || got[0].Name != "unsaved_1" || got[1].Name != "unsaved_2" {
+		t.Fatalf("unsaved buffers should retain creation order, got %+v", got)
+	}
+	if marks := openMarks(s); !reflect.DeepEqual(marks, []string{"unsaved_1 (*)", "• unsaved_2"}) {
+		t.Fatalf("the Open rows should preserve dirty and current state, got %v", marks)
+	}
+
+	s.switchBuffer(sh, got[0].ID)
+	if s.editor != first || s.editor.Text() != "first" {
+		t.Fatalf("switching back must restore the first buffer, editor=%p text=%q", s.editor, s.editor.Text())
+	}
+}
+
+func TestCtrlXClosesUnsavedBufferAndSwitchesBack(t *testing.T) {
+	s, sh := newHome(t)
+	s.Update(sh, keyMsg("ctrl+n"))
+	first := s.editor
+	s.Update(sh, keyMsg("ctrl+n"))
+
+	s.Update(sh, keyMsg("ctrl+x"))
+	s.Receive(sh, ReseedMsg{})
+	if s.editor != first || s.currentName != "unsaved_1" || s.currentPath != "" {
+		t.Fatalf("closing unsaved_2 should restore unsaved_1, editor=%p name=%q path=%q",
+			s.editor, s.currentName, s.currentPath)
+	}
+	if docs := Of(sh).OpenDocs(); len(docs) != 1 || docs[0].Name != "unsaved_1" {
+		t.Fatalf("the closed unsaved buffer should leave Open, got %+v", docs)
+	}
+}
+
+func TestCtrlNUsesFirstAvailableUnsavedName(t *testing.T) {
+	s, sh := newHome(t)
+	s.Update(sh, keyMsg("ctrl+n"))
+	firstID := s.currentID
+	s.Update(sh, keyMsg("ctrl+n"))
+
+	s.switchBuffer(sh, firstID)
+	s.Update(sh, keyMsg("ctrl+x"))
+	s.Receive(sh, ReseedMsg{})
+	s.Update(sh, keyMsg("ctrl+n"))
+
+	docs := Of(sh).OpenDocs()
+	if len(docs) != 2 || docs[0].Name != "unsaved_2" || docs[1].Name != "unsaved_1" {
+		t.Fatalf("the first available suffix should fill the gap, got %+v", docs)
+	}
+	if s.currentName != "unsaved_1" {
+		t.Fatalf("the new current buffer = %q, want reused unsaved_1", s.currentName)
+	}
+}
+
+func TestFirstCtrlNAfterOpeningAFileUsesUnsavedOne(t *testing.T) {
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(t.TempDir(), "existing.md"))
+	s.Update(sh, keyMsg("ctrl+n"))
+
+	got := Of(sh).OpenDocs()
+	if len(got) != 2 || got[1].Name != "unsaved_1" {
+		t.Fatalf("discarding the untouched startup buffer must not skip its name, got %+v", got)
+	}
+}
+
+func TestCtrlNLeavesFullPreviewForNewEditor(t *testing.T) {
+	s, sh := newHome(t)
+	s.Update(sh, keyMsg("ctrl+n"))
+	s.Update(sh, keyMsg("# first"))
+	s.Update(sh, altP)
+	if s.fullPreview == nil {
+		t.Fatal("setup: alt+p should put the reader in the editor pane")
+	}
+
+	s.Update(sh, keyMsg("ctrl+n"))
+	if s.fullPreview != nil || s.currentName != "unsaved_2" || s.currentPath != "" {
+		t.Fatalf("ctrl+n should return to a new pathless editor, preview=%v name=%q path=%q",
+			s.fullPreview != nil, s.currentName, s.currentPath)
+	}
+	if got := focusedPane(s, sh); got != "editor" {
+		t.Fatalf("the new editor should hold focus, got %s", got)
+	}
+}
+
+func TestPastePromotesStartupBuffer(t *testing.T) {
+	s, sh := newHome(t)
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, keyMsg("shift+tab"))
+	s.Update(sh, tea.PasteMsg{Content: "pasted\ntext"})
+
+	got := Of(sh).OpenDocs()
+	if len(got) != 1 || got[0].Name != "unsaved_1" || s.editor.Text() != "pasted\ntext" {
+		t.Fatalf("a bracketed paste should promote and fill unsaved_1, open=%+v text=%q", got, s.editor.Text())
 	}
 }
 
@@ -352,7 +497,7 @@ func TestEditorEscReleasesFocus(t *testing.T) {
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("esc should hand focus to the docs list, got %s", got)
 	}
-	if _, ok := c.open.byPath[path]; !ok {
+	if _, ok := c.Doc(path); !ok {
 		t.Fatal("esc must not close the buffer")
 	}
 	if s.currentPath != path {
@@ -610,8 +755,8 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 	help := s.helpText()
 	for _, want := range []string{
 		"panes", "back", "select", // navigation, the hints the bar still shows
-		"filter",                       // navigation too, but off the bar — the overlay is its only home
-		"ctrl+b", "sidebar", "actions", // moved off the bar
+		"filter",                                                     // navigation too, but off the bar — the overlay is its only home
+		"ctrl+b", "sidebar", "ctrl+n", "new unsaved file", "actions", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", // gote's alt chords
 		"alt+c", "alt+v", "alt+backspace", // the editor's, via HelpBindings
@@ -1231,10 +1376,10 @@ func TestEditorSavedRekeys(t *testing.T) {
 		t.Fatal("a save must not swap the pane's editor")
 	}
 	c := Of(sh)
-	if c.open.byPath[renamed] != ed {
+	if got, _ := c.Doc(renamed); got != ed {
 		t.Fatal("the new path should resolve to the same buffer")
 	}
-	if _, ok := c.open.byPath[old]; ok {
+	if _, ok := c.Doc(old); ok {
 		t.Fatal("the old path must leave the open set")
 	}
 	// The close path keys off currentPath, so the rename is what keeps ctrl+x working.
@@ -1261,7 +1406,7 @@ func TestMinimalMode(t *testing.T) {
 	if s.currentPath != file {
 		t.Fatalf("the editor should boot on %q, got %q", file, s.currentPath)
 	}
-	if Of(sh).open.byPath[file] != s.editor {
+	if got, _ := Of(sh).Doc(file); got != s.editor {
 		t.Fatal("the minimal buffer should be registered in the open set, as a picked doc is")
 	}
 	if mask := s.ChromeMask(); !mask.Help || !mask.Breadcrumb {
@@ -1275,6 +1420,14 @@ func TestMinimalMode(t *testing.T) {
 	// The editor pane is the only slot, so it is slot 0 and holds focus.
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("focus should be on the editor, got %s", got)
+	}
+	before := s.editor
+	s.Update(sh, keyMsg("ctrl+n"))
+	if s.editor != before || len(Of(sh).OpenDocs()) != 1 || !s.minimal {
+		t.Fatal("ctrl+n must stay inactive in chrome-less single-file mode")
+	}
+	if strings.Contains(s.helpText(), "ctrl+n") {
+		t.Fatal("single-file help must not advertise the inactive ctrl+n shortcut")
 	}
 	if act := s.editorExit(sh); act.Cmd == nil {
 		t.Fatal("ctrl+x should quit in minimal mode (the root screen cannot be popped)")
@@ -1485,8 +1638,8 @@ func TestQuitGate(t *testing.T) {
 	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("x"))
 
-	if names := s.dirtyDocs(sh); len(names) != 1 || names[0] != "scratch" {
-		t.Fatalf("dirtyDocs should name the scratch buffer, got %v", names)
+	if names := s.dirtyDocs(sh); len(names) != 1 || names[0] != "unsaved_1" {
+		t.Fatalf("dirtyDocs should name the promoted unsaved buffer, got %v", names)
 	}
 	act, handled := s.QuitGate(sh)
 	if !handled || act.Msg == nil {
@@ -1518,7 +1671,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	if act := s.requestVaultSwitch(sh, "notes"); msgType(act) != "core.pushMsg" {
 		t.Fatalf("dirty switch should push the unsaved popup, got %s", msgType(act))
 	}
-	if c.Mode == ModeVault || s.editor != oldEditor || c.open.byPath[oldPath] != oldEditor {
+	if got, _ := c.Doc(oldPath); c.Mode == ModeVault || s.editor != oldEditor || got != oldEditor {
 		t.Fatal("requesting a dirty switch mutated the session before confirmation")
 	}
 
@@ -1529,8 +1682,8 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
 		t.Fatalf("active vault = mode %v name %q dir %q", c.Mode, c.VaultName, c.ScanDir)
 	}
-	if len(c.open.byPath) != 0 || len(c.open.order) != 0 || len(c.open.roots) != 0 {
-		t.Fatalf("confirmed switch left open state: %v %v %v", c.open.byPath, c.open.order, c.open.roots)
+	if len(c.open.byID) != 0 || len(c.open.byPath) != 0 || len(c.open.order) != 0 {
+		t.Fatalf("confirmed switch left open state: %v %v %v", c.open.byID, c.open.byPath, c.open.order)
 	}
 	if s.editor == oldEditor || s.editor.Dirty() || s.currentPath != "" {
 		t.Fatal("confirmed switch should install a fresh clean scratch editor")
@@ -1539,7 +1692,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 		t.Fatalf("switch layout = preview %d sidebar %v minimal %v", s.preview, s.sidebar, s.minimal)
 	}
 	view := stripANSI(s.View(sh))
-	if !strings.Contains(view, "vault.md") || strings.Contains(view, "unsaved") {
+	if !strings.Contains(view, "vault.md") || strings.Contains(view, "old.md") || strings.Contains(view, "(*)") {
 		t.Fatalf("switched view did not show only the new vault:\n%s", view)
 	}
 	if got := s.CrumbLabel(false); got != "vault: notes" {
@@ -1822,6 +1975,48 @@ func TestSaveAsConfirmFlow(t *testing.T) {
 	}
 }
 
+func TestSaveUnsavedBufferBecomesNormalDocument(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	model, cmd := model.Update(keyMsg("ctrl+n"))
+	model = pumpModel(model, cmd)
+	ed := s.editor
+	model, cmd = model.Update(keyMsg("draft body"))
+	model = pumpModel(model, cmd)
+
+	model, _ = model.Update(keyMsg("ctrl+s"))
+	edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
+	if edit == nil {
+		t.Fatal("ctrl+s on an unsaved buffer should raise the filename box")
+	}
+	dir, err := DocsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "saved.md")
+	edit.SetValue(path)
+	model, cmd = model.Update(keyMsg("enter"))
+	model = pumpModel(model, cmd)
+
+	if b, err := os.ReadFile(path); err != nil || string(b) != "draft body" {
+		t.Fatalf("first save wrote %q, err %v", b, err)
+	}
+	if s.editor != ed || s.currentID != path || s.currentPath != path || s.currentName != "saved.md" {
+		t.Fatalf("the same editor should acquire the saved identity: id=%q path=%q name=%q", s.currentID, s.currentPath, s.currentName)
+	}
+	docs := Of(sh).OpenDocs()
+	if len(docs) != 1 || docs[0].ID != path || docs[0].Path != path || docs[0].Name != "saved.md" {
+		t.Fatalf("the Open row should be rekeyed to the real file, got %+v", docs)
+	}
+	if files := Of(sh).Files; len(files) != 1 || files[0].Path != path {
+		t.Fatalf("the saved file should appear in Docs after reseed, got %+v", files)
+	}
+	model, cmd = model.Update(keyMsg("ctrl+n"))
+	model = pumpModel(model, cmd)
+	if s.currentName != "unsaved_1" {
+		t.Fatalf("saving should release the suffix for reuse, got %q", s.currentName)
+	}
+}
+
 // pressDelete sends ctrl+d and returns the confirm it pushed, if any.
 func pressDelete(model tea.Model) (tea.Model, *components.DialogScreen) {
 	model, _ = model.Update(keyMsg("ctrl+d"))
@@ -1954,10 +2149,10 @@ func TestRenameOpenDoc(t *testing.T) {
 		t.Fatalf("the editor should have followed the file, crumb = %q", got)
 	}
 	c := Of(sh)
-	if c.open.byPath[renamed] != ed {
+	if got, _ := c.Doc(renamed); got != ed {
 		t.Fatal("the new path should resolve to the same buffer")
 	}
-	if _, ok := c.open.byPath[filepath.Join(dir, "old.md")]; ok {
+	if _, ok := c.Doc(filepath.Join(dir, "old.md")); ok {
 		t.Fatal("the old path must leave the open set")
 	}
 	if len(c.open.order) != 1 || c.open.order[0] != renamed {
@@ -2063,8 +2258,8 @@ func TestReselectOpenDocKeepsBuffer(t *testing.T) {
 	if !ed.Dirty() {
 		t.Fatal("the dirty flag should have survived the switch")
 	}
-	if c := Of(sh); len(c.open.byPath) != 1 {
-		t.Fatalf("re-selecting must not open a second buffer, open = %d", len(c.open.byPath))
+	if c := Of(sh); len(c.open.byID) != 1 {
+		t.Fatalf("re-selecting must not open a second buffer, open = %d", len(c.open.byID))
 	}
 }
 

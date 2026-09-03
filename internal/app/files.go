@@ -67,6 +67,9 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 	if !ok {
 		return core.Action{}
 	}
+	if di.doc.Path == "" {
+		return s.switchBuffer(sh, di.identity())
+	}
 	return s.openDoc(sh, di.doc.Path)
 }
 
@@ -82,15 +85,32 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	_, was := c.Doc(path)
 	ed := c.OpenDoc(path, s.editorOpts())
 	s.seedForPreview(ed, path, !was)
-	s.currentPath = path
+	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 	s.editor = ed
 	s.configureSignColumns()
-	s.openPanel.SetItems(openDocItems(c, s.currentPath))
+	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	// paneChild rather than SetChild: with the reader up, a pick opens INTO the preview —
 	// the pane keeps a reader, rebuilt around the doc that was just picked.
 	cmd := s.paneChild()
 	// After the swap, so the layout enforcePreview rebuilds is sized around the new buffer.
 	cmd = tea.Batch(cmd, s.enforcePreview())
+	focus := s.modular.FocusSlot(s.editorSlot())
+	return core.Async(tea.Batch(cmd, focus))
+}
+
+// switchBuffer shows an already-retained Open row, including a pathless unsaved one.
+func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
+	c := Of(sh)
+	doc, ok := c.bufferInfo(id)
+	if !ok {
+		return core.Action{}
+	}
+	ed, _ := c.buffer(id)
+	s.currentID, s.currentPath, s.currentName = doc.ID, doc.Path, doc.Name
+	s.editor = ed
+	s.configureSignColumns()
+	s.openPanel.SetItems(openDocItems(c, s.currentID))
+	cmd := tea.Batch(s.paneChild(), s.enforcePreview())
 	focus := s.modular.FocusSlot(s.editorSlot())
 	return core.Async(tea.Batch(cmd, focus))
 }
@@ -215,7 +235,7 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 		ed.SetPath(path)
 		c.RekeyDoc(doc.Path, path, ed)
 		if s.currentPath == doc.Path {
-			s.currentPath = path
+			s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 			// A rename can take a file out of markdown under a live preview.
 			act = core.Async(s.enforcePreview())
 		}
@@ -274,7 +294,7 @@ func (s *homeScreen) submitDelete(sh *core.Shared, doc DocFile) core.Action {
 	if _, open := c.Doc(doc.Path); open {
 		next := c.CloseDoc(doc.Path)
 		if doc.Path == s.currentPath {
-			act = core.Async(s.showDoc(c, next))
+			act = core.Async(s.showBuffer(c, next))
 			s.refreshPreview()
 		}
 	}

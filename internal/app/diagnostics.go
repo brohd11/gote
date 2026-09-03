@@ -120,7 +120,7 @@ func renderDiagnostics(c *Ctx, current string, width int) string {
 	}
 	paths := make([]string, 0, len(c.OpenDocs()))
 	for _, doc := range c.OpenDocs() {
-		if doc.Path != current {
+		if doc.Path != "" && doc.Path != current {
 			paths = append(paths, doc.Path)
 		}
 	}

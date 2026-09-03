@@ -37,6 +37,7 @@ var (
 	wrapKey       = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
 	lineNumsKey   = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
 	completionKey = key.NewBinding(key.WithKeys("ctrl+space"), key.WithHelp("ctrl+space", "completion"))
+	newBufferKey  = key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new unsaved file"))
 	helpKey       = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))
 	// The docs list's own key, not the screen's: it acts on the selected row, so it
 	// belongs to the panel that has one (ListPanelOpts.OnKey) and must not fire from
@@ -98,7 +99,9 @@ type homeScreen struct {
 	previewPanel      *components.ScrollContainer // the live preview pane
 	editor            *components.EditorScreen    // the editor pane's live buffer (ScreenPanel exposes none)
 	fullPreview       *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
-	currentPath       string                      // the doc the editor pane is showing; "" = the scratch buffer
+	currentID         string                      // stable buffer identity; path for saved docs, opaque for unsaved
+	currentPath       string                      // filesystem path; empty while the current buffer is unsaved
+	currentName       string                      // visible filename or unsaved_N label
 	sidebar           bool
 	sidebarW          int           // adjusted sidebar width; zero uses sidebarWidth
 	sidebarRows       []float64     // adjusted Docs/Open split, retained across layout rebuilds
@@ -175,10 +178,12 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// registered under its path and a save-as rekeys it the same way. ScreenPanel.Init
 	// forwards Init to its child, so the file read fires at startup unprompted.
 	if minimal {
+		s.currentID = c.FilePath
 		s.currentPath = c.FilePath
+		s.currentName = docName(c.FilePath)
 		s.editor = c.OpenDoc(c.FilePath, s.editorOpts())
 	} else {
-		s.editor = components.NewEditorScreen(s.editorOpts())
+		s.installScratch(c)
 	}
 	s.configureSignColumns()
 	// --preview needs a document to read, and ModeFile is the only launch that opens one
@@ -261,6 +266,13 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
+		if core.MatchKey(k, newBufferKey) {
+			if s.minimal {
+				return s, core.Action{}
+			}
+			s.closeCompletion()
+			return s, s.finishHomeUpdate(sh, s.newUnsavedBuffer(sh))
+		}
 		if core.MatchKey(k, completionKey) {
 			return s, s.finishHomeUpdate(sh, s.requestCompletion(sh, "", true))
 		}
@@ -313,6 +325,7 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		}
 	}
 	_, act := s.modular.Update(sh, msg)
+	s.promoteEditedScratch(sh)
 	if act.Msg != nil {
 		s.closeCompletion()
 	} else {
@@ -492,19 +505,21 @@ func dirtyPopup(dirty []string, consequence string, onYes func(*core.Shared) cor
 	return popup
 }
 
-// dirtyDocs names every open buffer with unsaved changes: the live editor first
-// (it is the only home of the scratch buffer, which isn't in the open set), then
-// each dirty doc in the ctx's open set, in opening order.
+// dirtyDocs names every retained buffer with unsaved changes: the live editor first,
+// then the remaining Open rows in opening order. The final fallback covers a pathless
+// editor dirtied outside the ordinary Update route before promotion can run.
 func (s *homeScreen) dirtyDocs(sh *core.Shared) []string {
 	var names []string
 	if s.editor != nil && s.editor.Dirty() {
-		names = append(names, s.previewName()) // "scratch" or the current doc's name
+		names = append(names, s.previewName())
 	}
-	Of(sh).EachDoc(func(path string, ed *components.EditorScreen) {
-		if ed != nil && ed != s.editor && ed.Dirty() {
-			names = append(names, docName(path))
+	c := Of(sh)
+	for _, doc := range c.OpenDocs() {
+		ed, ok := c.buffer(doc.ID)
+		if ok && ed != nil && ed != s.editor && ed.Dirty() {
+			names = append(names, doc.Name)
 		}
-	})
+	}
 	return names
 }
 
@@ -572,7 +587,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		c.Seed()
 		s.docsPanel.SetItems(docRows(c))
 		s.filePanel.Refresh()
-		s.openPanel.SetItems(openDocItems(c, s.currentPath))
+		s.openPanel.SetItems(openDocItems(c, s.currentID))
 		if c.lsp != nil {
 			active := c.lsp.Reconcile(c)
 			s.refreshDiagnosticSigns()
@@ -626,8 +641,7 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	if err := c.SwitchVault(name); err != nil {
 		return core.Replace(errPopup("open vault", err))
 	}
-	s.currentPath = ""
-	s.editor = components.NewEditorScreen(s.editorOpts())
+	s.installScratch(c)
 	s.fullPreview = nil // the vault's scratch buffer is the editor, not a reader over it
 	cmd := s.editorPanel.SetChild(s.editor)
 	s.docsPanel.SetItems(docRows(c))

@@ -28,6 +28,50 @@ func (s *homeScreen) editorOpts() components.EditorOpts {
 	}
 }
 
+// installScratch puts a fresh, untracked pathless editor in the pane. It previews its
+// unsaved_N identity immediately so the title is stable if the first edit promotes it;
+// the Open row itself is deferred until that edit or ctrl+n.
+func (s *homeScreen) installScratch(c *Ctx) {
+	id, name := c.newUnsavedIdentity()
+	opts := s.editorOpts()
+	opts.Title, opts.Crumb = name, name
+	s.currentID, s.currentPath, s.currentName = id, "", name
+	s.editor = components.NewEditorScreen(opts)
+}
+
+// newUnsavedBuffer implements ctrl+n in the multi-document workspace. The untouched
+// startup scratch already is the new blank buffer, so its first ctrl+n promotes it. From
+// any retained buffer a new named editor is created, registered, shown and focused.
+func (s *homeScreen) newUnsavedBuffer(sh *core.Shared) core.Action {
+	c := Of(sh)
+	closePreview := s.closeFullPreview()
+	if _, tracked := c.buffer(s.currentID); !tracked && s.currentPath == "" && !s.editor.Dirty() {
+		c.trackUnsaved(s.currentID, s.currentName, s.editor)
+	} else {
+		s.installScratch(c)
+		c.trackUnsaved(s.currentID, s.currentName, s.editor)
+		s.configureSignColumns()
+	}
+	s.gutter = gutter{}
+	s.openPanel.SetItems(openDocItems(c, s.currentID))
+	cmd := tea.Batch(s.paneChild(), s.enforcePreview(), s.modular.FocusSlot(s.editorSlot()))
+	return core.Seq(closePreview, core.Async(cmd))
+}
+
+// promoteEditedScratch retains the startup/after-close scratch as soon as an actual
+// mutation makes it dirty. Navigation and no-op editing leave it outside Open.
+func (s *homeScreen) promoteEditedScratch(sh *core.Shared) {
+	if s.minimal || s.currentPath != "" || s.editor == nil || !s.editor.Dirty() {
+		return
+	}
+	c := Of(sh)
+	if _, tracked := c.buffer(s.currentID); tracked {
+		return
+	}
+	c.trackUnsaved(s.currentID, s.currentName, s.editor)
+	s.openPanel.SetItems(openDocItems(c, s.currentID))
+}
+
 // editorContextItems are gote's rows on the editor's right-click menu, below the
 // clipboard verbs: the view toggles that otherwise only exist as chords. They are built
 // fresh on every press, which is what lets Disabled track the current document — the
@@ -110,13 +154,18 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 // because currentPath moved with it). No SetChild — the pane's child never changed.
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
-	c.RekeyDoc(s.currentPath, path, s.editor)
+	if s.currentPath == "" {
+		// A first save can happen before typing (and therefore before automatic
+		// promotion). Retain it briefly so rekey can preserve the normal Open slot.
+		c.trackUnsaved(s.currentID, s.currentName, s.editor)
+	}
+	c.RekeyDoc(s.currentID, path, s.editor)
 	// Both paths, because a save is the only thing that can change a file's first line
 	// under gote: the old name may have just lost a shebang, the new one may have gained
 	// one, and a save-as onto an existing path inherits whatever was cached for it.
 	forgetSniffedLanguage(s.currentPath)
 	forgetSniffedLanguage(path)
-	s.currentPath = path
+	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 	if c.lsp != nil {
 		c.lsp.DidSave(path)
 		s.formatOnSave(sh)
@@ -147,7 +196,7 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 		return core.Async(tea.Quit)
 	}
 	c := Of(sh)
-	cmd := s.showDoc(c, c.CloseDoc(s.currentPath))
+	cmd := s.showBuffer(c, c.CloseDoc(s.currentID))
 	if !s.sidebar {
 		s.setSidebar(true)
 	}
@@ -156,8 +205,8 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.PropagateAll(ReseedMsg{}))
 }
 
-// showDoc points the editor pane at path — an already-open doc, since the caller took it
-// from the open set — or at a fresh scratch buffer when path is "" and no doc remains.
+// showBuffer points the editor pane at id — an already-open buffer, since the caller took
+// it from the open set — or at a fresh scratch buffer when id is empty and no doc remains.
 // Shared by ctrl+x and the docs list's delete: both take a document away from the pane
 // and have to leave it showing something. enforcePreview runs after the swap, so the
 // layout is rebuilt around the new buffer (openDoc's ordering); the returned cmd is the
@@ -165,13 +214,12 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 //
 // No seeding here, unlike openDoc: every doc this can be handed is already in the open
 // set and therefore already loaded, and the "" case is a scratch buffer with no file.
-func (s *homeScreen) showDoc(c *Ctx, path string) tea.Cmd {
-	if path != "" {
-		s.currentPath = path
-		s.editor = c.OpenDoc(path, s.editorOpts())
+func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
+	if doc, ok := c.bufferInfo(id); ok {
+		s.currentID, s.currentPath, s.currentName = doc.ID, doc.Path, doc.Name
+		s.editor, _ = c.buffer(id)
 	} else {
-		s.currentPath = ""
-		s.editor = components.NewEditorScreen(s.editorOpts())
+		s.installScratch(c)
 	}
 	// Gutter visibility belongs to the pane, not an individual buffer.
 	s.configureSignColumns()

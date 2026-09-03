@@ -165,9 +165,12 @@ func (s *homeScreen) seedForPreview(ed *components.EditorScreen, path string, fr
 	}
 }
 
-// previewName labels the preview with the doc being edited, or the scratch buffer.
+// previewName labels the preview with the saved filename or unsaved_N identity.
 func (s *homeScreen) previewName() string {
 	if s.currentPath == "" {
+		if s.currentName != "" {
+			return s.currentName
+		}
 		return "scratch"
 	}
 	return docName(s.currentPath)

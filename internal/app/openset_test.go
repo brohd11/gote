@@ -10,7 +10,7 @@ import (
 func seeded(paths ...string) *openSet {
 	o := newOpenSet()
 	for _, p := range paths {
-		o.add(p, "/root", components.NewEditorScreen(components.EditorOpts{}))
+		o.addFile(p, "/root", components.NewEditorScreen(components.EditorOpts{}))
 	}
 	return &o
 }
@@ -31,15 +31,16 @@ func wantOrder(t *testing.T, o *openSet, want ...string) {
 // describe the same set of paths. Every test below asserts it after mutating.
 func wantConsistent(t *testing.T, o *openSet) {
 	t.Helper()
-	if len(o.byPath) != len(o.order) || len(o.roots) != len(o.order) {
-		t.Fatalf("structures disagree: order=%v byPath=%d roots=%d", o.order, len(o.byPath), len(o.roots))
+	if len(o.byID) != len(o.order) {
+		t.Fatalf("structures disagree: order=%v byID=%d", o.order, len(o.byID))
 	}
-	for _, p := range o.order {
-		if _, ok := o.byPath[p]; !ok {
-			t.Errorf("%q is in the order but has no editor", p)
+	for _, id := range o.order {
+		entry, ok := o.byID[id]
+		if !ok || entry == nil || entry.editor == nil {
+			t.Errorf("%q is in the order but has no editor", id)
 		}
-		if _, ok := o.roots[p]; !ok {
-			t.Errorf("%q is in the order but has no root", p)
+		if entry != nil && entry.path != "" && o.byPath[entry.path] != id {
+			t.Errorf("%q has no matching path index", id)
 		}
 	}
 }
@@ -48,13 +49,13 @@ func wantConsistent(t *testing.T, o *openSet) {
 // jumps out from under the user mid-save.
 func TestOpenSetRekeyKeepsSlot(t *testing.T) {
 	o := seeded("a", "b", "c")
-	ed := o.byPath["b"]
+	ed := o.byID["b"].editor
 
 	o.rekey("b", "b2", ed)
 
 	wantOrder(t, o, "a", "b2", "c")
 	wantConsistent(t, o)
-	if got, _ := o.get("b2"); got != ed {
+	if got, _ := o.get("b2"); got.editor != ed {
 		t.Error("the renamed path should answer with the same editor")
 	}
 	if _, ok := o.get("b"); ok {
@@ -78,8 +79,31 @@ func TestOpenSetRekeyUntracked(t *testing.T) {
 	o.rekey("", "b", scratch)
 	wantOrder(t, o, "a", "b")
 	wantConsistent(t, o)
-	if got, _ := o.get("b"); got != scratch {
+	if got, _ := o.get("b"); got.editor != scratch {
 		t.Error("the saved buffer should be the one the path resolves to")
+	}
+}
+
+func TestOpenSetRetainsAndRekeysUnsaved(t *testing.T) {
+	o := newOpenSet()
+	first := components.NewEditorScreen(components.EditorOpts{})
+	second := components.NewEditorScreen(components.EditorOpts{})
+	o.addUnsaved("u1", "unsaved_1", first)
+	o.addUnsaved("u2", "unsaved_2", second)
+
+	wantOrder(t, &o, "u1", "u2")
+	wantConsistent(t, &o)
+	docs := o.docs()
+	if len(docs) != 2 || docs[0].Name != "unsaved_1" || docs[0].Path != "" || docs[1].Name != "unsaved_2" {
+		t.Fatalf("unsaved docs = %+v", docs)
+	}
+
+	o.rekey("u1", "/root/saved.md", first)
+	wantOrder(t, &o, "/root/saved.md", "u2")
+	wantConsistent(t, &o)
+	entry, ok := o.getPath("/root/saved.md")
+	if !ok || entry.editor != first || entry.name != "saved.md" {
+		t.Fatalf("saved entry = %+v, ok=%v", entry, ok)
 	}
 }
 
@@ -89,15 +113,15 @@ func TestOpenSetRekeyUntracked(t *testing.T) {
 func TestOpenSetRekeyInheritsRoot(t *testing.T) {
 	o := newOpenSet()
 	ed := components.NewEditorScreen(components.EditorOpts{})
-	o.add("/vault/notes/a.md", "/vault", ed)
+	o.addFile("/vault/notes/a.md", "/vault", ed)
 	o.rekey("/vault/notes/a.md", "/vault/notes/b.md", ed)
-	if got := o.roots["/vault/notes/b.md"]; got != "/vault" {
+	if got := o.byID["/vault/notes/b.md"].root; got != "/vault" {
 		t.Errorf("root after rename = %q, want the original /vault", got)
 	}
 
 	scratch := components.NewEditorScreen(components.EditorOpts{})
 	o.rekey("", "/elsewhere/new.md", scratch)
-	if got := o.roots["/elsewhere/new.md"]; got != "/elsewhere" {
+	if got := o.byID["/elsewhere/new.md"].root; got != "/elsewhere" {
 		t.Errorf("root for a newly identified buffer = %q, want its directory", got)
 	}
 }
@@ -143,11 +167,11 @@ func TestOpenSetResetClearsAll(t *testing.T) {
 	o := seeded("a", "b")
 	o.reset()
 	wantConsistent(t, o)
-	if o.len() != 0 || len(o.byPath) != 0 || len(o.roots) != 0 {
-		t.Fatalf("reset left state: order=%v byPath=%v roots=%v", o.order, o.byPath, o.roots)
+	if o.len() != 0 || len(o.byID) != 0 || len(o.byPath) != 0 {
+		t.Fatalf("reset left state: order=%v byID=%v byPath=%v", o.order, o.byID, o.byPath)
 	}
 	// The zeroed set must still be usable — reset is not a teardown.
-	o.add("c", "/root", components.NewEditorScreen(components.EditorOpts{}))
+	o.addFile("c", "/root", components.NewEditorScreen(components.EditorOpts{}))
 	wantOrder(t, o, "c")
 	wantConsistent(t, o)
 }
@@ -157,14 +181,14 @@ func TestOpenSetResetClearsAll(t *testing.T) {
 func TestOpenSetEachInOrder(t *testing.T) {
 	o := seeded("a", "b", "c")
 	var seen []string
-	o.each(func(path string, ed *components.EditorScreen) {
-		if ed == nil {
-			t.Errorf("%q visited with a nil editor", path)
+	o.each(func(entry *openEntry) {
+		if entry.editor == nil {
+			t.Errorf("%q visited with a nil editor", entry.id)
 		}
-		if ed != o.byPath[path] {
-			t.Errorf("%q visited with the wrong editor", path)
+		if entry != o.byID[entry.id] {
+			t.Errorf("%q visited with the wrong entry", entry.id)
 		}
-		seen = append(seen, path)
+		seen = append(seen, entry.id)
 	})
 	if len(seen) != 3 || seen[0] != "a" || seen[1] != "b" || seen[2] != "c" {
 		t.Errorf("each visited %v, want [a b c]", seen)
