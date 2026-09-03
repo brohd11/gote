@@ -183,9 +183,9 @@ func (h *chromaHighlighter) HighlightRestartLine(row int) int {
 var chromaExts = []string{
 	".go", ".py", ".rb", ".rs", ".java", ".lua", ".php", ".pl", ".r",
 	".js", ".jsx", ".ts", ".tsx",
-	".c", ".h", ".cc", ".cpp", ".hpp", ".cs", ".kt", ".swift", ".dart",
+	".c", ".h", ".cc", ".cpp", ".hpp", ".hh", ".cs", ".kt", ".swift", ".dart",
 	".sh", ".bash", ".zsh", ".fish", ".vim",
 	".json", ".yaml", ".yml", ".toml", ".ini", ".xml", ".csv",
 	".html", ".css", ".scss", ".sql", ".diff", ".patch",
-	".tf", ".gradle", ".proto", ".mk", ".gd",
+	".tf", ".gradle", ".proto", ".mk", ".gd", ".glsl",
 }

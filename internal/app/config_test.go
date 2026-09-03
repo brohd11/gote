@@ -154,7 +154,13 @@ language_servers:
 		!reflect.DeepEqual(cfg.LanguageServers["python"].Command, []string{"pylsp"}) ||
 		!reflect.DeepEqual(cfg.LanguageServers["bash"].Command, []string{"bash-language-server", "start"}) ||
 		!reflect.DeepEqual(cfg.LanguageServers["go"].Command, []string{"gopls"}) ||
-		cfg.LanguageServers["go"].InitializationOptions["usePlaceholders"] != true {
+		cfg.LanguageServers["go"].InitializationOptions["usePlaceholders"] != true ||
+		!reflect.DeepEqual(cfg.LanguageServers["clangd"].Command, []string{"clangd"}) ||
+		!reflect.DeepEqual(cfg.LanguageServers["csharp"].Command, []string{"csharp-ls"}) ||
+		!reflect.DeepEqual(cfg.LanguageServers["rust"].Command, []string{"rust-analyzer"}) ||
+		!reflect.DeepEqual(cfg.LanguageServers["lua"].Command, []string{"lua-language-server"}) ||
+		!reflect.DeepEqual(cfg.LanguageServers["typescript"].Command,
+			[]string{"typescript-language-server", "--stdio"}) {
 		t.Fatalf("missing entries should inherit built-ins: %#v", cfg.LanguageServers)
 	}
 

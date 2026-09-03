@@ -6,7 +6,8 @@ simple TUI text editor built with Go and Bubbletea.
  - simple text editing
  - minimal markdown previewer
  - syntax highlighting for select extensions
- - Go, Shell, GDScript and Python diagnostics through language servers
+ - diagnostics and completion through language servers for nine languages
+ - brace-aware indent on Enter for the C family, Go, Rust, JS/TS and friends
  - mouse support for scrolling, selection, right click
  - vaults store a collection of files for a focused view
 
@@ -47,17 +48,33 @@ default is `false`.
 
 #### Language servers
 
-Language-server support starts lazily when a supported file is opened. Python uses
-[`pylsp`](https://github.com/python-lsp/python-lsp-server) over stdio; install it separately
-with `pip install python-lsp-server`. Shell scripts (`.sh`, `.bash`, and anything a `#!`
-line names as a POSIX shell) use
-[`bash-language-server`](https://github.com/bash-lsp/bash-language-server), also over stdio;
-install it with `npm i -g bash-language-server`. Go uses
-[`gopls`](https://pkg.go.dev/golang.org/x/tools/gopls); install it with
-`go install golang.org/x/tools/gopls@latest`, and note that `go install` writes to
-`$(go env GOPATH)/bin`, which has to be on your PATH for a bare `gopls` command to start
-(otherwise put the full path in `command`). GDScript connects to the Godot editor's language
-server at `127.0.0.1:6005`, so the matching Godot project must already be running.
+Language-server support starts lazily when a supported file is opened. Every server is
+optional: gote spawns one only when you open a file for it, and a server that isn't installed
+costs one status line, not a broken editor.
+
+| Files | Server | Install |
+| --- | --- | --- |
+| `.c .h .cc .cpp .hpp .hh` | [`clangd`](https://clangd.llvm.org) | ships with Xcode CLT, or `brew install llvm` |
+| `.go` | [`gopls`](https://pkg.go.dev/golang.org/x/tools/gopls) | `go install golang.org/x/tools/gopls@latest` |
+| `.py` | [`pylsp`](https://github.com/python-lsp/python-lsp-server) | `pip install python-lsp-server` |
+| `.sh .bash` + `#!` shells | [`bash-language-server`](https://github.com/bash-lsp/bash-language-server) | `npm i -g bash-language-server` |
+| `.rs` | [`rust-analyzer`](https://rust-analyzer.github.io) | `rustup component add rust-analyzer` |
+| `.js .jsx .ts .tsx` | [`typescript-language-server`](https://github.com/typescript-language-server/typescript-language-server) | `npm i -g typescript-language-server typescript` |
+| `.cs` | [`csharp-ls`](https://github.com/razzmatazz/csharp-language-server) | `dotnet tool install -g csharp-ls` |
+| `.lua` | [`lua-language-server`](https://luals.github.io) | `brew install lua-language-server` |
+| `.gd` | the Godot editor's own server | run the Godot project |
+
+GDScript is the one that is not a subprocess: it connects to `127.0.0.1:6005`, so the matching
+Godot project has to already be open in Godot. Anything installed with `go install` or
+`dotnet tool install` lands in a directory (`$(go env GOPATH)/bin`, `~/.dotnet/tools`) that has
+to be on your PATH for the bare command to start — otherwise put the full path in `command`.
+
+C# is the weak spot, and deliberately so. The good server — Microsoft's Roslyn language server
+— ships as a payload inside the VS Code C# extension and loads nothing from a standard LSP
+handshake, waiting instead on a non-standard notification naming a solution, so a general
+client cannot drive it. `csharp-ls` is the standalone one that speaks plain LSP; it is less
+capable, but it works. Its root is found by pattern (`*.sln`, then `*.csproj`), since those
+files are named after the project rather than by convention.
 
 A Go file inside a `go.work` workspace starts one server for the whole workspace rather than
 one per module, so cross-module definitions resolve and a monorepo costs a single gopls. A

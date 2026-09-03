@@ -76,10 +76,46 @@ var (
 	languageByExt = buildLanguageProfiles()
 )
 
+// braceIndent are the languages whose blocks are delimited by braces, mapped to the indent
+// unit each one's formatter reaches for — 0 meaning a literal tab. Membership here IS the
+// profile: an extension listed gets braceBlockEnter and this unit, and nothing else about it
+// has to be said. Ruby, Lua, Perl, R, vim, TOML, INI, HTML, XML, SQL, CSV, make and diff are
+// absent deliberately — none is brace-delimited, and each wants its own grammar rather than
+// this one. A language server is a separate question: .lua has one and no entry here.
+var braceIndent = map[string]int{
+	// Tabs. gofmt's answer for Go, and the C family keeps the literal tab it already
+	// defaulted to rather than picking a side in a split convention — alt+i overrides per
+	// buffer, and a project that disagrees says so in its own .editorconfig.
+	".go": 0, ".c": 0, ".h": 0, ".cc": 0, ".cpp": 0, ".hpp": 0, ".hh": 0,
+	".cs": 4, ".java": 4, ".rs": 4, ".kt": 4, ".swift": 4, ".php": 4,
+	".js": 2, ".jsx": 2, ".ts": 2, ".tsx": 2, ".json": 2, ".css": 2, ".scss": 2,
+	".dart": 2, ".proto": 2, ".tf": 2, ".gradle": 2, ".glsl": 2,
+}
+
+// forcedLexers name the chroma lexer an extension must use instead of whatever
+// lexers.Match answers for it. Two different problems land here. Some extensions are
+// claimed by SEVERAL lexers and Match's tiebreak picks the wrong one. Others are claimed by
+// NONE, even though the language's lexer exists under its own name — GLSL registers itself
+// for *.vert, *.frag and *.geo only, so listing *.glsl in chromaExts achieves nothing on its
+// own: the nil check below would drop it right back out.
+//
+// Naming the lexer also keeps a source buffer and a fenced preview block on one tokenizer,
+// since fences resolve by lexer name rather than by extension.
+var forcedLexers = map[string]string{
+	".gd":   "gdscript", // Match also offers the legacy gdscript3
+	".h":    "cpp",      // C and Objective-C both claim *.h; the name tiebreak picks C
+	".glsl": "glsl",     // the GLSL lexer claims only *.vert, *.frag and *.geo
+}
+
 func buildLanguageProfiles() map[string]*languageProfile {
 	profiles := make(map[string]*languageProfile, len(chromaExts)+2)
 	for _, ext := range chromaExts {
 		lexer := lexers.Match("file" + ext)
+		if name, ok := forcedLexers[ext]; ok {
+			if forced := lexers.Get(name); forced != nil {
+				lexer = forced
+			}
+		}
 		if lexer == nil {
 			continue
 		}
@@ -92,14 +128,14 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			AutoClosingPairs: codePairs,
 			SurroundingPairs: codePairs,
 		}
+		if spaces, ok := braceIndent[ext]; ok {
+			cfg.IndentSpaces = spaces
+			cfg.OnEnter = braceBlockEnter
+		}
 		switch ext {
-		case ".json":
-			cfg.IndentSpaces = 2
 		case ".py":
 			cfg.IndentSpaces = 4
 			cfg.OnEnter = colonBlockEnter
-		case ".go":
-			cfg.OnEnter = goEnter
 		case ".sh", ".bash", ".zsh":
 			cfg.AutoClosingPairs = shellPairs
 			cfg.SurroundingPairs = shellPairs
@@ -116,16 +152,9 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			cfg.IndentSpaces = 2
 			cfg.OnEnter = yamlEnter
 		case ".gd":
-			id = "gdscript"
 			cfg.AutoClosingPairs = gdscriptPairs
 			cfg.SurroundingPairs = gdscriptPairs
 			cfg.OnEnter = colonBlockEnter
-			// Chroma has both current "gdscript" and legacy "gdscript3"
-			// lexers claiming *.gd. Pick the named current lexer deliberately so
-			// source buffers and ```gdscript preview fences share one tokenizer.
-			if gdscript := lexers.Get("gdscript"); gdscript != nil {
-				cfg.NewHighlighter = chromaHighlighterFactory(gdscript)
-			}
 		}
 		profile := &languageProfile{id: id, editor: cfg}
 		switch ext {
@@ -142,6 +171,33 @@ func buildLanguageProfiles() map[string]*languageProfile {
 				workspaceMarkers: []string{"go.work"},
 				rootMarkers:      []string{"go.mod", ".git"},
 			}
+		case ".c", ".cc", ".cpp", ".hpp", ".hh", ".h":
+			// .h needs no id pin: forcedLexers already put it on the C++ lexer, whose first
+			// alias is "cpp". clangd reads the compilation database for the real language
+			// anyway, so the identifier only has to be one it recognizes.
+			profile.lsp = &languageLSP{server: "clangd", rootMarkers: []string{
+				"compile_commands.json", ".clangd", "compile_flags.txt", "CMakeLists.txt", ".git",
+			}}
+		case ".cs":
+			profile.lsp = &languageLSP{server: "csharp", rootMarkers: []string{
+				"*.sln", "*.csproj", ".git",
+			}}
+		case ".rs":
+			profile.lsp = &languageLSP{server: "rust", rootMarkers: []string{"Cargo.toml", ".git"}}
+		case ".lua":
+			profile.lsp = &languageLSP{server: "lua", rootMarkers: []string{
+				".luarc.json", ".luarc.jsonc", ".git",
+			}}
+		// Chroma's first aliases here are "js" and "ts"; the LSP identifiers are these.
+		// typescript-language-server dispatches on them, so the spelling is load-bearing.
+		case ".js", ".jsx", ".ts", ".tsx":
+			profile.id = map[string]string{
+				".js": "javascript", ".jsx": "javascriptreact",
+				".ts": "typescript", ".tsx": "typescriptreact",
+			}[ext]
+			profile.lsp = &languageLSP{server: "typescript", rootMarkers: []string{
+				"tsconfig.json", "jsconfig.json", "package.json", ".git",
+			}}
 		case ".zsh":
 			// Chroma tokenizes zsh with its Bash lexer, so the alias this profile inherited
 			// is "bash". Pin the real name: nothing reads it while zsh has no server, and a
@@ -209,6 +265,15 @@ func nearestMarker(dir string, markers []string) string {
 	}
 	for {
 		for _, marker := range markers {
+			// A marker carrying a wildcard is matched as a pattern: some ecosystems name the
+			// project file after the project (C#'s *.sln) rather than by convention, so there
+			// is nothing exact to stat for.
+			if strings.ContainsAny(marker, "*?[") {
+				if hits, _ := filepath.Glob(filepath.Join(dir, marker)); len(hits) > 0 {
+					return dir
+				}
+				continue
+			}
 			if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
 				return dir
 			}
@@ -613,11 +678,15 @@ func colonBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterA
 	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
 }
 
-// goEnter is colonBlockEnter without the dedent, and the omission is the point. Python
-// needs `return`/`pass` to step back out because nothing closes a Python block; Go closes
-// with a brace that the bracket rule has already placed BELOW the caret, so Enter under a
-// `return err` should land inside the block, above the `}` already sitting there.
-func goEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+// braceBlockEnter serves every brace-delimited language in braceIndent. It is
+// colonBlockEnter without the dedent, and the omission is the point: Python needs
+// `return`/`pass` to step back out because nothing closes a Python block, while a brace
+// language closes with a `}` the bracket rule has already placed BELOW the caret — so Enter
+// under a `return err` should land inside the block, above the brace already sitting there.
+//
+// The trailing colon covers switch cases, defaults and labels across the whole family, and
+// in JS/TS an object key whose value starts on the next line.
+func braceBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
 		return components.EditorEnterAction{}, false
 	}

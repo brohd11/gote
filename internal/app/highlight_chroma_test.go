@@ -95,11 +95,24 @@ func TestChromaOutOfRange(t *testing.T) {
 	}
 }
 
-// TestChromaExtsAllResolve guards the curated profile list against typos.
+// TestChromaExtsAllResolve guards the curated profile list against typos. An extension
+// resolves either because chroma matches a lexer to its filename or because forcedLexers
+// names one for it — the second is how *.glsl earns its place, since GLSL registers itself
+// only for *.vert, *.frag and *.geo. Either way the outcome that matters is the same: the
+// extension must come out of buildLanguageProfiles with a profile, because an entry that
+// resolves to nothing is dropped silently and edits as plain text.
 func TestChromaExtsAllResolve(t *testing.T) {
 	for _, ext := range chromaExts {
-		if lexers.Match("f"+ext) == nil {
-			t.Errorf("no chroma lexer matches %q — drop it from chromaExts", ext)
+		if lexers.Match("f"+ext) == nil && forcedLexers[ext] == "" {
+			t.Errorf("no chroma lexer matches %q — name one in forcedLexers or drop it", ext)
+		}
+		if languageForPath("f"+ext) == nil {
+			t.Errorf("%q built no profile, so it edits literally", ext)
+		}
+	}
+	for ext, name := range forcedLexers {
+		if lexers.Get(name) == nil {
+			t.Errorf("forcedLexers[%q] names %q, which chroma does not have", ext, name)
 		}
 	}
 }

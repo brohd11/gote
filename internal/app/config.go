@@ -96,8 +96,13 @@ func DefaultConfig() Config {
 
 func defaultLanguageServers() map[string]LanguageServerConfig {
 	return map[string]LanguageServerConfig{
-		"bash":     {Command: []string{"bash-language-server", "start"}},
-		"gdscript": {Address: "127.0.0.1:6005", Command: []string{}},
+		"bash":       {Command: []string{"bash-language-server", "start"}},
+		"clangd":     {Command: []string{"clangd"}},
+		"csharp":     {Command: []string{"csharp-ls"}},
+		"gdscript":   {Address: "127.0.0.1:6005", Command: []string{}},
+		"lua":        {Command: []string{"lua-language-server"}},
+		"rust":       {Command: []string{"rust-analyzer"}},
+		"typescript": {Command: []string{"typescript-language-server", "--stdio"}},
 		"go": {
 			Command:               []string{"gopls"},
 			InitializationOptions: map[string]any{"usePlaceholders": true},

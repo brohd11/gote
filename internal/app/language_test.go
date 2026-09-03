@@ -429,6 +429,134 @@ func TestGoProfile(t *testing.T) {
 	}
 }
 
+// Every extension in braceIndent has to have actually produced a profile. This is the guard
+// against the bug that motivated forcedLexers: chroma matching no lexer for an extension
+// drops it from languageByExt silently, which is how *.glsl sat in chromaExts editing as
+// plain text. A table entry with no profile behind it is the failure to catch.
+func TestBraceLanguageProfiles(t *testing.T) {
+	for ext, spaces := range braceIndent {
+		profile := languageForPath("file" + ext)
+		if profile == nil {
+			t.Errorf("%s has no profile — chroma matched no lexer, so it edits literally", ext)
+			continue
+		}
+		if profile.editor.OnEnter == nil {
+			t.Errorf("%s should carry the brace Enter handler", ext)
+		}
+		if profile.editor.IndentSpaces != spaces {
+			t.Errorf("%s IndentSpaces = %d, want %d", ext, profile.editor.IndentSpaces, spaces)
+		}
+		if profile.editor.NewHighlighter == nil {
+			t.Errorf("%s should carry a highlighter", ext)
+		}
+	}
+	// Not brace languages: each closes its blocks with a keyword, not a "}".
+	for _, ext := range []string{".rb", ".lua", ".pl", ".r", ".vim", ".toml", ".ini", ".html", ".xml", ".sql"} {
+		if profile := languageForPath("file" + ext); profile != nil && profile.editor.OnEnter != nil {
+			t.Errorf("%s should not have picked up the brace Enter handler", ext)
+		}
+	}
+}
+
+func TestBraceLanguageEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, content, want string
+	}{
+		{"c++ brace", "os.cpp", "void f() {", "void f() {\n\t"},
+		{"c++ nested", "os.cpp", "\tif (x) {", "\tif (x) {\n\t\t"},
+		{"c++ case", "os.cpp", "\t\tcase 1:", "\t\tcase 1:\n\t\t\t"},
+		{"c++ access specifier", "os.h", "public:", "public:\n\t"},
+		// The family-wide reason there is no dedent: the "}" is already below the caret.
+		{"c++ return carries", "os.cpp", "\t\treturn err;", "\t\treturn err;\n\t\t"},
+		{"c++ closing brace carries", "os.cpp", "\t}", "\t}\n\t"},
+		{"c# four spaces", "Gen.cs", "    if (x) {", "    if (x) {\n        "},
+		{"rust four spaces", "main.rs", "fn main() {", "fn main() {\n    "},
+		{"typescript two spaces", "app.ts", "function f() {", "function f() {\n  "},
+		{"typescript object key", "app.ts", "  key:", "  key:\n    "},
+		{"json two spaces", "pkg.json", `  "deps": {`, "  \"deps\": {\n    "},
+		{"css two spaces", "app.css", ".btn {", ".btn {\n  "},
+		{"glsl two spaces", "sky.glsl", "void main() {", "void main() {\n  "},
+		{"plain line carries", "os.cpp", "\tint x = 1;", "\tint x = 1;\n\t"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage(tc.path, tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("brace Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// Bracket block-open reaches the whole family, with each language's own unit.
+	for _, tc := range []struct{ name, path, content, want string }{
+		{"c++ tab", "os.cpp", "\tState s = {}", "\tState s = {\n\t\t\n\t}"},
+		{"c# four", "Gen.cs", "    var s = []", "    var s = [\n        \n    ]"},
+		{"json two", "pkg.json", `"deps": {}`, "\"deps\": {\n  \n}"},
+	} {
+		t.Run(tc.name+" block", func(t *testing.T) {
+			ed := editorForLanguage(tc.path, tc.content)
+			pressEditor(ed, "end", "left", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("bracket Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The C family's highlighting and server wiring, including the two extensions that were
+// broken or missing before forcedLexers and the chromaExts addition.
+func TestCFamilyProfiles(t *testing.T) {
+	cppLexer := lexers.Get("cpp")
+	if cppLexer == nil {
+		t.Fatal("chroma should ship a C++ lexer")
+	}
+	for _, path := range []string{"os.cpp", "os.hpp", "os.cc", "os.hh", "os.h"} {
+		profile := languageForPath(path)
+		if profile == nil {
+			t.Fatalf("%s has no profile", path)
+		}
+		if profile.lsp == nil || profile.lsp.server != "clangd" {
+			t.Errorf("%s lsp = %#v, want clangd", path, profile.lsp)
+		}
+	}
+	// *.h is claimed by both the C and Objective-C lexers; forcedLexers takes C++ instead.
+	header, ok := languageForPath("os.h").editor.NewHighlighter().(*chromaHighlighter)
+	if !ok || header.lexer.Config().Name != cppLexer.Config().Name {
+		t.Fatalf(".h lexer = %v, want C++", header.lexer.Config().Name)
+	}
+	if got := languageForPath("os.h").id; got != "cpp" {
+		t.Errorf(".h language id = %q, want cpp", got)
+	}
+	if got := languageForPath("main.c").id; got != "c" {
+		t.Errorf(".c language id = %q, want c", got)
+	}
+	// *.glsl is claimed by NO lexer by filename; without forcedLexers it has no profile.
+	shader := languageForPath("sky.glsl")
+	if shader == nil || shader.id != "glsl" {
+		t.Fatalf("glsl profile = %#v, want id glsl", shader)
+	}
+	if shader.lsp != nil {
+		t.Errorf("glsl should have no language server, got %#v", shader.lsp)
+	}
+}
+
+// typescript-language-server dispatches on these identifiers, and chroma's first aliases
+// ("js", "ts") are not them.
+func TestJSLanguageIDs(t *testing.T) {
+	for path, want := range map[string]string{
+		"app.js": "javascript", "app.jsx": "javascriptreact",
+		"app.ts": "typescript", "app.tsx": "typescriptreact",
+	} {
+		profile := languageForPath(path)
+		if profile == nil || profile.id != want {
+			t.Errorf("%s id = %#v, want %q", path, profile, want)
+		}
+		if profile != nil && (profile.lsp == nil || profile.lsp.server != "typescript") {
+			t.Errorf("%s lsp = %#v, want the typescript server", path, profile.lsp)
+		}
+	}
+}
+
 func TestYAMLEnter(t *testing.T) {
 	for _, tc := range []struct {
 		name, content, want string

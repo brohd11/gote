@@ -583,6 +583,51 @@ func TestLSPRootPrefersWorkspace(t *testing.T) {
 	}
 }
 
+// C# names its project file after the project, so the marker has to be a pattern rather
+// than something exact to stat for.
+func TestGlobRootMarkers(t *testing.T) {
+	csharp := languageForPath("Gen.cs")
+	if csharp == nil || csharp.lsp == nil {
+		t.Fatal("C# should carry LSP activation metadata")
+	}
+
+	root := t.TempDir()
+	deep := filepath.Join(root, "glue", "GodotSharp", "Godot.SourceGenerators")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sln := filepath.Join(root, "glue", "GodotSharp")
+	if err := os.WriteFile(filepath.Join(sln, "GodotSharp.sln"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := lspRootForPath(filepath.Join(deep, "Gen.cs"), csharp); got != sln {
+		t.Fatalf("C# root = %q, want the solution directory %q", got, sln)
+	}
+
+	// A pattern that matches nothing keeps walking rather than claiming the directory.
+	bare := t.TempDir()
+	nested := filepath.Join(bare, "src")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := lspRootForPath(filepath.Join(nested, "Gen.cs"), csharp); got != nested {
+		t.Fatalf("unmatched C# root = %q, want the file's own directory %q", got, nested)
+	}
+
+	// Exact markers are untouched by the pattern branch.
+	py := t.TempDir()
+	if err := os.WriteFile(filepath.Join(py, "pyproject.toml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(py, "pkg")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := lspRootForPath(filepath.Join(pkg, "main.py"), languageForPath("main.py")); got != py {
+		t.Fatalf("Python root = %q, want %q", got, py)
+	}
+}
+
 func TestLSPInvalidTransportBackoffAndRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "main.py")
 	cfg := DefaultConfig()
