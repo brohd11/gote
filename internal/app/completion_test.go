@@ -102,6 +102,53 @@ func TestCompletionPopupFuzzyFiltersAndRanks(t *testing.T) {
 	}
 }
 
+func TestCompletionDoesNotInstallPopupWithoutFuzzyMatches(t *testing.T) {
+	s, sh := completionHome(t)
+	s.Update(sh, keyMsg("# nope"))
+	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
+	lspPosition, ok := editorPositionToLSP(s.editor, position)
+	if !ok {
+		t.Fatal("could not convert cursor")
+	}
+	s.completion.requestID = 7
+	s.completion.path = s.currentPath
+	s.applyCompletionResult(&lspCompletionResult{
+		id: 7, path: s.currentPath, editSeq: s.editor.EditSeq(), position: lspPosition,
+		items: []lspCompletionItem{{Label: "print", FilterText: "print", InsertText: "print"}},
+	})
+	if s.completion.popup != nil || s.completion.list != nil {
+		t.Fatalf("unmatched result left an invisible completion installed: popup=%v list=%v",
+			s.completion.popup != nil, s.completion.list != nil)
+	}
+
+	s.Update(sh, keyMsg("enter"))
+	if got := s.editor.Text(); got != "# nope\n" {
+		t.Fatalf("Enter after unmatched completion = %q, want newline", got)
+	}
+}
+
+func TestCompletionClosesWhenTypingRemovesLastMatch(t *testing.T) {
+	s, sh := completionHome(t)
+	s.Update(sh, keyMsg("# pr"))
+	showCompletion(t, s,
+		lspCompletionItem{Label: "print", FilterText: "print", InsertText: "print"},
+	)
+
+	_, act := s.Update(sh, keyMsg("z"))
+	if s.completion.popup != nil || s.completion.list != nil {
+		t.Fatalf("zero-match query left an invisible completion installed: popup=%v list=%v",
+			s.completion.popup != nil, s.completion.list != nil)
+	}
+	if act.Cmd == nil {
+		t.Fatal("zero-match query did not retain the completion debounce")
+	}
+
+	s.Update(sh, keyMsg("enter"))
+	if got := s.editor.Text(); got != "# prz\n" {
+		t.Fatalf("Enter after locally emptied completion = %q, want newline", got)
+	}
+}
+
 func TestCompletionSeedUsesFirstIdentifierRune(t *testing.T) {
 	ed := components.NewEditorScreen(components.EditorOpts{})
 	tests := []struct {

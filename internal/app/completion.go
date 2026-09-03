@@ -151,6 +151,12 @@ func (s *homeScreen) updateCompletionAfterParent(sh *core.Shared, msg tea.Msg, b
 			return nil
 		}
 		s.completion.list.SetQuery(query)
+		if s.completion.list.Len() == 0 {
+			// An empty filtered list renders nothing but would still consume the
+			// popup's Enter/Tab/navigation keys. Remove it now; the debounce below
+			// remains active and may replace it with a fresh server result.
+			s.closeCompletion()
+		}
 	}
 	return s.scheduleCompletion()
 }
@@ -207,6 +213,12 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 	list.SetItems(items)
 	if query == "" && preselect >= 0 {
 		list.Select(preselect)
+	}
+	if list.Len() == 0 {
+		// The server returned candidates, but none are valid for the current local
+		// fuzzy query. Do not install an invisible popup that can capture input.
+		s.closeCompletion()
+		return
 	}
 	s.completion.list = list
 	s.completion.popup = &components.FloatingPopup{Content: list.View, Handle: list.Update}
