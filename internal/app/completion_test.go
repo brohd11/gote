@@ -34,7 +34,7 @@ func completionHome(t *testing.T) (*homeScreen, *core.Shared) {
 
 func showCompletion(t *testing.T, s *homeScreen, items ...lspCompletionItem) {
 	t.Helper()
-	position := s.editor.CursorPosition()
+	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
 	lspPosition, ok := editorPositionToLSP(s.editor, position)
 	if !ok {
 		t.Fatal("could not convert cursor")
@@ -88,6 +88,7 @@ func TestCompletionPopupFuzzyFiltersAndRanks(t *testing.T) {
 		lspCompletionItem{Label: "print", FilterText: "print", InsertText: "print"},
 		lspCompletionItem{Label: "unrelated", FilterText: "unrelated", InsertText: "unrelated"},
 	)
+	s.Update(sh, keyMsg("down")) // a manual choice for the old query
 	s.Update(sh, keyMsg("n"))
 	s.Update(sh, keyMsg("t"))
 	view := stripANSI(s.View(sh))
@@ -98,6 +99,77 @@ func TestCompletionPopupFuzzyFiltersAndRanks(t *testing.T) {
 	s.Update(sh, keyMsg("tab"))
 	if got := s.editor.Text(); got != "print" {
 		t.Fatalf("accepted fuzzy completion = %q, want print", got)
+	}
+}
+
+func TestCompletionSeedUsesFirstIdentifierRune(t *testing.T) {
+	ed := components.NewEditorScreen(components.EditorOpts{})
+	tests := []struct {
+		name       string
+		text       string
+		caret      components.EditorPosition
+		wantStart  components.EditorPosition
+		wantSeed   components.EditorPosition
+		wantQuery  string
+		wantLSPCol uint32
+	}{
+		{"member", "ins.bg", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, components.EditorPosition{Column: 5}, "bg", 5},
+		{"ordinary", "bg", components.EditorPosition{Column: 2}, components.EditorPosition{}, components.EditorPosition{Column: 1}, "bg", 1},
+		{"empty member", "ins.", components.EditorPosition{Column: 4}, components.EditorPosition{Column: 4}, components.EditorPosition{Column: 4}, "", 4},
+		// The first rune is one editor column but two UTF-16 code units.
+		{"utf16", "obj.𐐀x", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, components.EditorPosition{Column: 5}, "𐐀x", 6},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ed.SetText(tc.text)
+			start := completionIdentifierStart(ed, tc.caret)
+			seed := completionSeedPosition(ed, tc.caret)
+			query, ok := completionQuery(ed, start, tc.caret)
+			lspSeed, lspOK := editorPositionToLSP(ed, seed)
+			if !ok || !lspOK || start != tc.wantStart || seed != tc.wantSeed || query != tc.wantQuery || lspSeed.Character != tc.wantLSPCol {
+				t.Fatalf("start=%+v seed=%+v query=%q lsp=%+v; want start=%+v seed=%+v query=%q col=%d",
+					start, seed, query, lspSeed, tc.wantStart, tc.wantSeed, tc.wantQuery, tc.wantLSPCol)
+			}
+		})
+	}
+}
+
+func TestCompletionSeededTextEditReplacesFullFuzzyQuery(t *testing.T) {
+	s, sh := completionHome(t)
+	s.Update(sh, keyMsg("ins.bg"))
+	showCompletion(t, s, lspCompletionItem{
+		Label: "begins_with", FilterText: "begins_with", InsertText: "begins_with",
+		Edit: &lspCompletionEdit{
+			Range:   protocol.Range{Start: protocol.Position{Character: 4}, End: protocol.Position{Character: 5}},
+			NewText: "begins_with",
+		},
+	})
+	s.Update(sh, keyMsg("tab"))
+	if got := s.editor.Text(); got != "ins.begins_with" {
+		t.Fatalf("seeded completion edit = %q, want full member query replaced", got)
+	}
+}
+
+func TestCompletionPreselectOnlyOverridesEmptyQuery(t *testing.T) {
+	s, sh := completionHome(t)
+	s.Update(sh, keyMsg("bg"))
+	showCompletion(t, s,
+		lspCompletionItem{Label: "bg", FilterText: "bg", InsertText: "BEST"},
+		lspCompletionItem{Label: "boring", FilterText: "boring", InsertText: "PRESELECT", Preselect: true},
+	)
+	s.Update(sh, keyMsg("tab"))
+	if got := s.editor.Text(); got != "BEST" {
+		t.Fatalf("non-empty fuzzy query accepted %q, want best match", got)
+	}
+
+	empty, emptySH := completionHome(t)
+	showCompletion(t, empty,
+		lspCompletionItem{Label: "first", InsertText: "FIRST"},
+		lspCompletionItem{Label: "preferred", InsertText: "PREFERRED", Preselect: true},
+	)
+	empty.Update(emptySH, keyMsg("tab"))
+	if got := empty.editor.Text(); got != "PREFERRED" {
+		t.Fatalf("empty-query completion accepted %q, want LSP preselect", got)
 	}
 }
 

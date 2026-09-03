@@ -26,8 +26,8 @@ type completionUI struct {
 	generation uint64
 	requestID  uint64
 	path       string
-	resultSeq  int
-	resultPos  protocol.Position
+	resultPos  protocol.Position // seeded LSP request position
+	resultEnd  protocol.Position // real caret when that result was installed
 	start      components.EditorPosition
 }
 
@@ -82,7 +82,7 @@ func (s *homeScreen) requestCompletion(sh *core.Shared, trigger string, manual b
 	}
 	c := Of(sh)
 	c.lsp.Reconcile(c)
-	position := s.editor.CursorPosition()
+	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
 	protocolPosition, ok := editorPositionToLSP(s.editor, position)
 	if !ok {
 		s.closeCompletion()
@@ -162,12 +162,14 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 		return
 	}
 	position := s.editor.CursorPosition()
-	protocolPosition, ok := editorPositionToLSP(s.editor, position)
-	if !ok || protocolPosition != result.position || result.err != nil || len(result.items) == 0 {
+	start := completionIdentifierStart(s.editor, position)
+	seed := completionSeedPosition(s.editor, position)
+	protocolSeed, ok := editorPositionToLSP(s.editor, seed)
+	protocolEnd, endOK := editorPositionToLSP(s.editor, position)
+	if !ok || !endOK || protocolSeed != result.position || result.err != nil || len(result.items) == 0 {
 		s.closeCompletion()
 		return
 	}
-	start := completionIdentifierStart(s.editor, position)
 	query, ok := completionQuery(s.editor, start, position)
 	if !ok {
 		s.closeCompletion()
@@ -184,8 +186,8 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 		}
 	}
 	s.completion.start = start
-	s.completion.resultSeq = result.editSeq
 	s.completion.resultPos = result.position
+	s.completion.resultEnd = protocolEnd
 	list := components.NewPopupList(components.PopupListOpts[lspCompletionItem]{
 		MaxVisible: 8, MaxWidth: 56,
 		Fuzzy: true,
@@ -199,11 +201,11 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 		},
 	})
 	list.SetQuery(query)
-	// Seed after the initial query so the list selects its highest-ranked match. Later
-	// query changes preserve that selected source item, and an explicit LSP preselect
-	// below still wins when it survives the filter.
+	// Seed after the initial query so the list selects its highest-ranked match. An LSP
+	// preselect is useful when there is no local ranking signal, but must not override a
+	// non-empty fuzzy query's answer.
 	list.SetItems(items)
-	if preselect >= 0 {
+	if query == "" && preselect >= 0 {
 		list.Select(preselect)
 	}
 	s.completion.list = list
@@ -225,10 +227,10 @@ func (s *homeScreen) acceptCompletion(item lspCompletionItem) {
 			return
 		}
 		end := components.EditorPosition{}
-		if s.editor.EditSeq() != s.completion.resultSeq && item.Edit.Range.End == s.completion.resultPos {
-			// The only edits allowed to keep this popup alive are identifier typing and
-			// backspace at the request caret, so extending the server's original end to
-			// the current caret is a safe rebase.
+		if item.Edit.Range.End == s.completion.resultPos || item.Edit.Range.End == s.completion.resultEnd {
+			// Extend an edit ending at either the request seed or the result's real
+			// caret through the current locally matched query. The first covers servers
+			// editing only the seed; the second keeps typing-after-result rebasing intact.
 			end = current
 		} else {
 			var endOK bool
@@ -281,6 +283,19 @@ func completionIdentifierStart(editor *components.EditorScreen, position compone
 		column--
 	}
 	return components.EditorPosition{Line: position.Line, Column: column}
+}
+
+// completionSeedPosition is the deliberately broad LSP position: after the first
+// identifier rune, while completionQuery continues through the real caret. Thus both
+// "bg" and "value.bg" ask the server for its "b" candidates and let the popup fuzzy
+// match the full "bg" locally. With no identifier at the caret (including immediately
+// after a member-access trigger), the real caret remains the request position.
+func completionSeedPosition(editor *components.EditorScreen, position components.EditorPosition) components.EditorPosition {
+	start := completionIdentifierStart(editor, position)
+	if start.Line == position.Line && start.Column < position.Column {
+		return components.EditorPosition{Line: position.Line, Column: start.Column + 1}
+	}
+	return position
 }
 
 func completionQuery(editor *components.EditorScreen, start, end components.EditorPosition) (string, bool) {
