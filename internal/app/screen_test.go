@@ -2,7 +2,7 @@ package app
 
 import (
 	"fmt"
-	"github.com/charmbracelet/x/ansi"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
+	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -155,6 +156,50 @@ func TestHomePaneNavigation(t *testing.T) {
 	}
 	if !strings.Contains(stripANSI(s.View(sh)), "hi    X") {
 		t.Fatal("the editor buffer should survive leaving and re-entering the pane")
+	}
+}
+
+func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
+	s, _ := newHome(t)
+
+	// The initial focus is the Docs pane, so both nudges move its trailing
+	// boundaries: the sidebar/editor seam and the Docs/Open seam.
+	s.modular.SetResizing(true)
+	s.modular.Nudge(5, 4)
+	s.modular.SetResizing(false)
+	if s.sidebarW != sidebarWidth+5 {
+		t.Fatalf("saved sidebar width = %d, want %d", s.sidebarW, sidebarWidth+5)
+	}
+	if len(s.sidebarRows) != 2 || s.sidebarRows[0] <= 0.5 || s.sidebarRows[1] >= 0.5 {
+		t.Fatalf("saved Docs/Open split = %v, want the Docs pane enlarged", s.sidebarRows)
+	}
+
+	s.setSidebar(false)
+	s.setSidebar(true)
+	if got := s.editorLeft(); got != sidebarWidth+5 {
+		t.Fatalf("sidebar rebuild restored editor left edge %d, want %d", got, sidebarWidth+5)
+	}
+	state := s.modular.ResizeState()
+	if len(state.Rows) == 0 || !reflect.DeepEqual(state.Rows[0], s.sidebarRows) {
+		t.Fatalf("sidebar row split after rebuild = %v, want %v", state.Rows, s.sidebarRows)
+	}
+
+	// With the preview present, setPreview focuses the editor. Its trailing edge
+	// is the editor/preview flex seam, whose ratio must survive both column toggles.
+	s.setPreview(previewPane)
+	s.modular.SetResizing(true)
+	s.modular.Nudge(7, 0)
+	s.modular.SetResizing(false)
+	if s.editorFlex <= 0.5 {
+		t.Fatalf("saved editor flex share = %g, want greater than half", s.editorFlex)
+	}
+	wantFlex := s.editorFlex
+	s.setPreview(previewOff)
+	s.setSidebar(false)
+	s.setPreview(previewPane)
+	state = s.modular.ResizeState()
+	if len(state.Flex) != 2 || math.Abs(state.Flex[0]-wantFlex) > 1e-9 {
+		t.Fatalf("editor flex after rebuilds = %v, want leading share %g", state.Flex, wantFlex)
 	}
 }
 

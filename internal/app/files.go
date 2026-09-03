@@ -101,8 +101,8 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 // WITHIN the panel (its border, and its filter line when one is live), and the LineEdit
 // anchor sits one row above the row it covers, since it draws its own top border there.
 // The panel owns that offset rather than this file assuming it: the filter line makes it
-// vary, and it used to cancel against the border exactly. x=0 and width=sidebarWidth
-// land the box's borders exactly on the panel's own.
+// vary, and it used to cancel against the border exactly. x=0 and the live sidebar
+// width land the box's borders exactly on the panel's own.
 func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
 	pane := s.docsPane()
@@ -110,7 +110,7 @@ func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	if !ok {
 		row = 1 // the selected row is on-page by construction; never die on it
 	}
-	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row-1, sidebarWidth, onDone, nil)
+	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row-1, s.sidebarPaneWidth(), onDone, nil)
 	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
 	return edit
 }

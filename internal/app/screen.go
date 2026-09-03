@@ -100,6 +100,9 @@ type homeScreen struct {
 	fullPreview       *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
 	currentPath       string                      // the doc the editor pane is showing; "" = the scratch buffer
 	sidebar           bool
+	sidebarW          int           // adjusted sidebar width; zero uses sidebarWidth
+	sidebarRows       []float64     // adjusted Docs/Open split, retained across layout rebuilds
+	editorFlex        float64       // editor's share when the preview flex column is present; zero uses half
 	flat              bool          // the docs slot shows the flat scan (true) or the folder explorer
 	minimal           bool          // ModeFile: the editor alone, all chrome masked, sidebar unreachable
 	indentGuides      bool          // config-selected leading-indent visualization for every buffer
@@ -646,16 +649,23 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	return core.Seq(core.Async(tea.Batch(cmd, focus, gutterCmd)), core.ResetToRoot())
 }
 
-// editorLeft is the terminal column the editor pane starts at: the sidebar's fixed width
-// when it is up, zero otherwise (buildModular puts the sidebar column first, at
-// sidebarWidth, and everything after it flexes). Caret-anchored panels use it as their
+// editorLeft is the terminal column the editor pane starts at: the sidebar's adjusted
+// width when it is up, zero otherwise (buildModular puts the sidebar column first and
+// everything after it flexes). Caret-anchored panels use it as their
 // left bound — a tooltip is about the caret, so it belongs over the text rather than
 // spilling across the file list.
 func (s *homeScreen) editorLeft() int {
 	if s.sidebar {
-		return sidebarWidth
+		return s.sidebarPaneWidth()
 	}
 	return 0
+}
+
+func (s *homeScreen) sidebarPaneWidth() int {
+	if s.sidebarW > 0 {
+		return s.sidebarW
+	}
+	return sidebarWidth
 }
 
 // editorSlot is the editor pane's flat slot index in the current layout.
@@ -769,7 +779,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 			{Panel: s.docsPane(), Weight: 1},
 			{Panel: s.openPanel, Weight: 1},
 		})
-		widths = append(widths, sidebarWidth)
+		widths = append(widths, s.sidebarPaneWidth())
 	}
 	// ExpandH on the editor: its body is only as wide as its longest line unless the
 	// scrollbar forces the padding, so a short doc would leave the column ragged
@@ -783,5 +793,65 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	if s.sidebar {
 		opts.ColWidths = widths // all-flex needs no entry at all
 	}
+	opts.Resize = &components.ResizeOpts{
+		State:    s.resizeState(),
+		OnChange: s.saveResize,
+	}
 	return components.NewModularScreen(cols, opts)
+}
+
+// resizeState maps the persistent gote pane identities onto ModularScreen's
+// positional state. The sidebar and preview columns can disappear on a rebuild,
+// while the editor always remains between them.
+func (s *homeScreen) resizeState() components.ResizeState {
+	cols := 1
+	if s.sidebar {
+		cols++
+	}
+	preview := s.previewTarget() != nil
+	if preview {
+		cols++
+	}
+	state := components.ResizeState{
+		Cols: make([]int, cols),
+		Flex: make([]float64, cols),
+		Rows: make([][]float64, cols),
+	}
+	editorCol := 0
+	if s.sidebar {
+		state.Cols[0] = s.sidebarPaneWidth()
+		if len(s.sidebarRows) == 2 {
+			state.Rows[0] = append([]float64(nil), s.sidebarRows...)
+		}
+		editorCol = 1
+	}
+	if preview {
+		share := s.editorFlex
+		if share <= 0 || share >= 1 {
+			share = 0.5
+		}
+		state.Flex[editorCol] = share
+		state.Flex[editorCol+1] = 1 - share
+	} else {
+		state.Flex[editorCol] = 1
+	}
+	return state
+}
+
+// saveResize translates the current positional snapshot back to gote's stable
+// pane identities so ctrl+b, ctrl+p and alt+p rebuilds retain the adjustments.
+func (s *homeScreen) saveResize(state components.ResizeState) {
+	editorCol := 0
+	if s.sidebar {
+		if len(state.Cols) > 0 && state.Cols[0] > 0 {
+			s.sidebarW = state.Cols[0]
+		}
+		if len(state.Rows) > 0 && len(state.Rows[0]) == 2 {
+			s.sidebarRows = append(s.sidebarRows[:0], state.Rows[0]...)
+		}
+		editorCol = 1
+	}
+	if s.previewTarget() != nil && editorCol < len(state.Flex) && state.Flex[editorCol] > 0 {
+		s.editorFlex = state.Flex[editorCol]
+	}
 }
