@@ -35,6 +35,39 @@ func (s *homeScreen) editorOpts() components.EditorOpts {
 // Each Pick pops the menu itself (the component's convention). No Hints: the menu
 // dispatches no accelerators, so a key-shaped hint would be a promise it doesn't keep.
 func (s *homeScreen) editorContextItems(sh *core.Shared) []components.MenuItem {
+	return append(s.editorViewItems(sh), s.editorLanguageItems(sh)...)
+}
+
+// editorLanguageItems are the pointer-driven half of the language-server features. A
+// right press has already moved the caret to the clicked cell
+// (EditorScreen.pressContext), so every row here acts on what was clicked — which is how
+// gote answers "hover the mouse" without the framework streaming a motion event per cell
+// crossed, and how the two gestures stay reachable in a terminal that eats modified
+// clicks before gote sees them.
+//
+// They are OMITTED rather than muted when no server can answer. Five permanently grey
+// rows on every markdown file would nearly double a menu that is meant to be scanned in
+// one glance, and unlike the preview rows — which go live the moment the document
+// changes — these say nothing useful about a document with no language server at all.
+func (s *homeScreen) editorLanguageItems(sh *core.Shared) []components.MenuItem {
+	if !s.lspFeatureReady(sh) {
+		return nil
+	}
+	request := func(label string, kind lspRequestKind) components.MenuItem {
+		return components.MenuItem{Label: label, Pick: func(sh *core.Shared) core.Action {
+			return core.Seq(core.Pop(), s.requestAt(sh, kind))
+		}}
+	}
+	return []components.MenuItem{
+		request("Hover info", lspReqHover),
+		request("Go to definition", lspReqDefinition),
+		request("Find references", lspReqReferences),
+		request("Outline", lspReqSymbols),
+		request("Format document", lspReqFormat),
+	}
+}
+
+func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 	return []components.MenuItem{
 		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.cyclePreview())
@@ -86,6 +119,7 @@ func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	s.currentPath = path
 	if c.lsp != nil {
 		c.lsp.DidSave(path)
+		s.formatOnSave(sh)
 	}
 	// Re-read the baseline rather than keep the one in hand: a save-as makes this a
 	// different file to git (very likely one HEAD has never seen), and even a plain save

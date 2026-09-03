@@ -32,7 +32,19 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 			},
 		},
 		components.Item{
-			Name: "Restart language servers", Desc: "reconnect active GDScript and Python workspaces",
+			Name: "◈ Outline", Desc: "jump to a symbol in the current document (alt+o)",
+			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqSymbols) },
+		},
+		components.Item{
+			Name: "Find references", Desc: "every use of the symbol at the cursor (alt+n)",
+			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqReferences) },
+		},
+		components.Item{
+			Name: "Format document", Desc: "organize imports and reformat the buffer (alt+m)",
+			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqFormat) },
+		},
+		components.Item{
+			Name: "Restart language servers", Desc: "reconnect every active language workspace",
 			Pick: s.restartLanguageServers,
 		},
 	)

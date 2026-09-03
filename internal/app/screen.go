@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"go.lsp.dev/protocol"
 )
 
 // sidebarWidth is the fixed cell width of the docs/open column; the editor flexes.
@@ -54,6 +55,17 @@ var (
 	// only while that panel is focused and not running a /-filter. alt+r, not alt+d/f: the
 	// editor moves by words on those.
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
+	// The language-server keys. All carry a modifier, so they pass the router's capture
+	// gate and fire while the editor is typing — which is the only place they mean
+	// anything. alt+g/h/o/n/m are the free alt letters left after the editor's word and
+	// clipboard chords (alt+b/c/d/f/i/v/x), core's alt+wasd arrows and alt+u, and gote's
+	// own alt+p/r/t/z. ctrl+o is vim's jump-back and is unclaimed in all three layers.
+	definitionKey = key.NewBinding(key.WithKeys("alt+g"), key.WithHelp("alt+g", "go to definition"))
+	jumpBackKey   = key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back"))
+	hoverKey      = key.NewBinding(key.WithKeys("alt+h"), key.WithHelp("alt+h", "hover info"))
+	symbolsKey    = key.NewBinding(key.WithKeys("alt+o"), key.WithHelp("alt+o", "outline"))
+	referencesKey = key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "find references"))
+	formatKey     = key.NewBinding(key.WithKeys("alt+m"), key.WithHelp("alt+m", "format document"))
 )
 
 // The preview modes ctrl+p cycles through. The render shows up as a pane beside the
@@ -104,7 +116,13 @@ type homeScreen struct {
 	previewAt         int           // the editor scroll offset the pane was last synced to; -1 re-syncs
 	lspWaiting        bool          // one blocking manager subscription is already in Bubble Tea
 	completion        completionUI  // parent-owned, input-transparent LSP completion popup
-	sh                *core.Shared  // stashed by Init/SetSize for rebuilds and the crumb
+	hover             hoverUI       // the passive alt+h / context-menu tooltip
+	signature         signatureUI   // the passive parameter hint, above the caret
+	lspRequestID      uint64        // the on-demand request whose answer this screen is waiting for
+	jumps             []jumpSite    // ctrl+o's back-stack of caret locations (navigate.go)
+	pendingJump       *jumpSite     // a jump waiting on its destination buffer's file read
+	pendingRange      *protocol.Range
+	sh                *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
 	w, h              int
 }
 
@@ -228,6 +246,10 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 		act, _ := s.handleCompletionTick(sh, tick)
 		return s, s.finishHomeUpdate(sh, act)
 	}
+	msg, wantsDefinition := s.retargetClick(sh, msg)
+	// Ahead of the completion popup's own handling, not after it: the tooltip claims no
+	// input, so whatever consumes this message must not also decide whether it survives.
+	s.dismissHoverOn(msg)
 	beforeCompletion := s.completionSnapshot()
 	if s.completion.popup != nil {
 		if act, handled := s.completion.popup.Update(sh, msg); handled {
@@ -283,17 +305,99 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			s.editor.ToggleLineNums()
 			return s, core.Action{}
 		}
+		if act, handled := s.languageServerKey(sh, k); handled {
+			return s, s.finishHomeUpdate(sh, act)
+		}
 	}
 	_, act := s.modular.Update(sh, msg)
 	if act.Msg != nil {
 		s.closeCompletion()
 	} else {
-		act.Cmd = tea.Batch(act.Cmd, s.updateCompletionAfterParent(sh, msg, beforeCompletion))
+		act.Cmd = tea.Batch(act.Cmd,
+			s.updateCompletionAfterParent(sh, msg, beforeCompletion),
+			s.updateSignatureAfterParent(sh, msg, beforeCompletion))
+	}
+	if wantsDefinition && s.editorPanel.Focused() {
+		// The click has already moved the caret through the editor's ordinary press
+		// handling, and ModularScreen focuses whatever slot a press landed in — so a
+		// focused editor pane IS the test that this click hit the text, without gote
+		// needing slot rectangles or the editor's unexported cell-to-position math.
+		act = core.Seq(act, s.requestAt(sh, lspReqDefinition))
 	}
 	return s, s.finishHomeUpdate(sh, act)
 }
 
+// languageServerKey handles gote's caret-driven LSP chords. They are matched here, above
+// the panes, for the reason every other screen key is: the editor consumes what reaches
+// it, and these have to work while it is being typed in.
+func (s *homeScreen) languageServerKey(sh *core.Shared, k string) (core.Action, bool) {
+	switch {
+	case core.MatchKey(k, definitionKey):
+		s.closeCompletion()
+		return s.requestAt(sh, lspReqDefinition), true
+	case core.MatchKey(k, hoverKey):
+		s.closeCompletion()
+		return s.requestAt(sh, lspReqHover), true
+	case core.MatchKey(k, symbolsKey):
+		s.closeCompletion()
+		return s.requestAt(sh, lspReqSymbols), true
+	case core.MatchKey(k, referencesKey):
+		s.closeCompletion()
+		return s.requestAt(sh, lspReqReferences), true
+	case core.MatchKey(k, formatKey):
+		s.closeCompletion()
+		return s.requestAt(sh, lspReqFormat), true
+	case core.MatchKey(k, jumpBackKey):
+		s.closeCompletion()
+		return s.jumpBack(sh), true
+	}
+	return core.Action{}, false
+}
+
+// retargetClick applies gote's two modifier-click gestures before anything else sees the
+// message. Both are pure message rewriting on the way down, which is what keeps them out
+// of bubblestack entirely.
+//
+// The context gesture becomes a real right press, so the editor's own context menu opens
+// exactly as it does for a physical right click — the point being terminals that keep
+// the right button for their own menu and never hand it over.
+//
+// The definition gesture is left ALONE on the way down: the editor already treats a
+// modified left press as an ordinary caret click (only shift means anything to it), so
+// letting it through both moves the caret and focuses the pane. The caller acts on the
+// caret afterwards.
+func (s *homeScreen) retargetClick(sh *core.Shared, msg tea.Msg) (tea.Msg, bool) {
+	click, ok := msg.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft || sh == nil {
+		return msg, false
+	}
+	cfg := Of(sh).Config
+	switch {
+	case clickModifierMatches(cfg.ClickContext, click.Mod):
+		return tea.MouseClickMsg{X: click.X, Y: click.Y, Button: tea.MouseRight}, false
+	case clickModifierMatches(cfg.ClickDefinition, click.Mod):
+		return msg, true
+	}
+	return msg, false
+}
+
+// clickModifierMatches reads one of the configured click modifiers. An empty or
+// unrecognized value is "none" — a typo in the config should disable a gesture, not
+// bind it to something the user did not ask for.
+func clickModifierMatches(setting string, mod tea.KeyMod) bool {
+	switch setting {
+	case clickAlt:
+		return mod.Contains(tea.ModAlt)
+	case clickCtrl:
+		return mod.Contains(tea.ModCtrl)
+	case clickShift:
+		return mod.Contains(tea.ModShift)
+	}
+	return false
+}
+
 func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Action {
+	s.applyPendingJump()
 	s.refreshPreview()
 	s.syncPreviewScroll()
 	// Batched into the cmd lane rather than folded in with core.Seq: Seq builds an
@@ -317,7 +421,9 @@ func (s *homeScreen) View(sh *core.Shared) string {
 	if s.minimal {
 		body = statusOver(sh, body, s.h)
 	}
-	return s.viewCompletion(sh, body)
+	body = s.viewCompletion(sh, body)
+	body = s.viewSignature(sh, body)
+	return s.viewHover(sh, body)
 }
 
 func (s *homeScreen) HelpView(sh *core.Shared) string {
@@ -446,13 +552,17 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		if event.completion != nil {
 			s.applyCompletionResult(event.completion)
 		}
+		act := core.Action{}
+		if event.request != nil {
+			act = s.applyRequestResult(sh, event.request)
+		}
 		s.refreshDiagnosticSigns()
 		s.lspWaiting = true
 		wait := core.Async(Of(sh).lsp.WaitCmd())
 		if event.status != "" {
-			return core.Seq(core.SetStatusAndLog(event.status), wait)
+			return core.Seq(act, core.SetStatusAndLog(event.status), wait)
 		}
-		return wait
+		return core.Seq(act, wait)
 	}
 	if _, ok := payload.(ReseedMsg); ok {
 		c := Of(sh)

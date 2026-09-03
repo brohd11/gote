@@ -23,6 +23,28 @@ func (s *homeScreen) helpScreen() *components.DocScreen {
 	})
 }
 
+// clickHelp names the two modifier-click gestures. They are described rather than listed
+// as bindings because they are configured (click_definition / click_context) and because
+// a terminal may claim either one before gote sees it — so the line says what gote is
+// listening for, not what will certainly happen.
+func clickHelp(sh *core.Shared) string {
+	if sh == nil {
+		return ""
+	}
+	cfg := Of(sh).Config
+	var parts []string
+	if cfg.ClickDefinition != "" && cfg.ClickDefinition != clickNone {
+		parts = append(parts, cfg.ClickDefinition+"+click go to definition")
+	}
+	if cfg.ClickContext != "" && cfg.ClickContext != clickNone {
+		parts = append(parts, cfg.ClickContext+"+click editor menu (stands in for right-click)")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "mouse: " + strings.Join(parts, " · ") + "\n"
+}
+
 // helpText renders the overlay's body. This is the COMPLETE reference, not the overflow
 // from a bar that lists the common keys: the bar carries only "? more", so anything not
 // written here is written nowhere. The editor section comes from the live editor's own
@@ -62,13 +84,20 @@ func (s *homeScreen) helpText() string {
 	writeSection("general", []key.Binding{
 		quitKey,
 		sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey,
-		wrapKey, lineNumsKey, completionKey, helpKey,
+		wrapKey, lineNumsKey, helpKey,
 	})
 	// These act on the selected row, so they are the docs list's keys rather than the
 	// screen's — and, off the bar, this is the only place they are written down.
+	// The language-server section. These fire from the editor (they all carry a
+	// modifier, so they reach this screen ahead of the pane) and do nothing anywhere
+	// else, which is why they are their own group rather than more "general" rows.
+	writeSection("language server", []key.Binding{
+		completionKey, definitionKey, jumpBackKey, hoverKey, symbolsKey, referencesKey, formatKey,
+	})
 	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
 	writeSection("editor", s.editor.HelpBindings())
+	b.WriteString(clickHelp(s.sh) + "\n")
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()
 }

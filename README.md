@@ -6,10 +6,11 @@ simple TUI text editor built with Go and Bubbletea.
  - simple text editing
  - minimal markdown previewer
  - syntax highlighting for select extensions
- - diagnostics and completion through language servers for nine languages
+ - language servers for nine languages: diagnostics, completion, go to definition,
+   hover, outline, find references, format + organize imports, signature help
  - brace-aware indent on Enter for the C family, Go, Rust, JS/TS and friends
  - ctrl+/ toggles comments, over a selection or a single line
- - mouse support for scrolling, selection, right click
+ - mouse support for scrolling, selection, right click, alt+click to go to definition
  - vaults store a collection of files for a focused view
 
 **Note:** `ctrl+/` is bound as `ctrl+_`, because that is the key code the chord actually
@@ -93,7 +94,43 @@ with no project root above it means the directory it sits in; narrow that with a
 
 Diagnostics appear in their own gutter column and in Actions → Diagnostics. The Actions
 and editor context menus independently toggle the diagnostics and git gutters and can
-restart failed server connections. Set `auto-lsp: false`, disable an individual entry,
+restart failed server connections.
+
+The rest of the language-server features are caret-driven, and every one of them is on a
+modified key so it fires while you are typing in the editor:
+
+| Key | |
+| --- | --- |
+| `alt+g` | go to definition — jumps, or lists them when there is more than one |
+| `ctrl+o` | jump back, through as many jumps as you made |
+| `alt+h` | hover info for the symbol at the cursor |
+| `alt+o` | outline: every symbol in the document, filterable, opens where you are |
+| `alt+n` | find references |
+| `alt+m` | format the document, organizing imports first |
+| `ctrl+space` | completion |
+
+Signature help needs no key: it appears above the cursor when you open an argument list
+and follows the parameter you are on. Each feature is offered only where the server said
+it can answer, so a server implementing less simply shows less.
+
+Two mouse gestures cover the same ground for the pointer: **alt+click** goes to a
+definition, and **ctrl+click** opens the editor menu — a stand-in for right-click in
+terminals that keep the right button for their own context menu. Both live on
+`click_definition` and `click_context` in the config (`alt`, `ctrl`, `shift` or `none`),
+because terminals disagree about which modified clicks they hand over at all: macOS
+Terminal claims ctrl+click for its own menu, iTerm2 turns it into a right click before
+gote sees it, and shift is reserved almost everywhere for the terminal's own selection.
+The editor menu carries the same features as rows, which is the fallback when a terminal
+swallows both.
+
+There is no pointer-hover tooltip. Reporting mouse motion with no button held would put
+an event through the update loop for every cell the pointer crosses; `alt+h` and the
+menu's Hover info row — which acts on the cell you right-clicked — cover it without that.
+
+Set `format_on_save: true` to format on every `ctrl+s`. The reformat lands just after the
+write rather than blocking it, so the buffer is left dirty and the next save settles it.
+
+Set `auto-lsp: false`, disable an individual entry,
 or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
 Server-specific `initialization_options` can also be overridden; Python's built-in
 options enable pylsp's parameter snippets for callable completions.

@@ -35,6 +35,16 @@ type recordingLSPServer struct {
 	completionEnabled bool
 	completionResult  protocol.CompletionResult
 	initializeParams  *protocol.InitializeParams
+	// The on-demand lane's canned answers. Each is nil until a test arms it, and the
+	// matching capability is advertised only when armed — which is what lets a test
+	// assert that an unadvertised feature is never even requested.
+	definitionResult protocol.DefinitionResult
+	hoverResult      *protocol.Hover
+	referencesResult []protocol.Location
+	symbolsResult    protocol.DocumentSymbolResult
+	formattingResult []protocol.TextEdit
+	codeActionResult []protocol.CommandOrCodeAction
+	signatureResult  *protocol.SignatureHelp
 }
 
 func newRecordingLSPServer() *recordingLSPServer {
@@ -51,7 +61,81 @@ func (s *recordingLSPServer) Initialize(_ context.Context, params *protocol.Init
 	if enabled {
 		result.Capabilities.CompletionProvider = &protocol.CompletionOptions{TriggerCharacters: []string{"."}}
 	}
+	s.mu.Lock()
+	if s.definitionResult != nil {
+		result.Capabilities.DefinitionProvider = protocol.Boolean(true)
+	}
+	if s.hoverResult != nil {
+		result.Capabilities.HoverProvider = protocol.Boolean(true)
+	}
+	if s.referencesResult != nil {
+		result.Capabilities.ReferencesProvider = protocol.Boolean(true)
+	}
+	if s.symbolsResult != nil {
+		result.Capabilities.DocumentSymbolProvider = protocol.Boolean(true)
+	}
+	if s.formattingResult != nil || s.codeActionResult != nil {
+		result.Capabilities.DocumentFormattingProvider = protocol.Boolean(true)
+		result.Capabilities.CodeActionProvider = protocol.Boolean(true)
+	}
+	if s.signatureResult != nil {
+		result.Capabilities.SignatureHelpProvider = &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}}
+	}
+	s.mu.Unlock()
 	return result, nil
+}
+
+func (s *recordingLSPServer) Definition(_ context.Context, params *protocol.DefinitionParams) (protocol.DefinitionResult, error) {
+	s.calls <- recordedLSPCall{method: "definition", position: params.Position}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.definitionResult, nil
+}
+
+func (s *recordingLSPServer) Hover(_ context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	s.calls <- recordedLSPCall{method: "hover", position: params.Position}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hoverResult, nil
+}
+
+func (s *recordingLSPServer) References(_ context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	s.calls <- recordedLSPCall{method: "references", position: params.Position}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.referencesResult, nil
+}
+
+func (s *recordingLSPServer) DocumentSymbol(_ context.Context, _ *protocol.DocumentSymbolParams) (protocol.DocumentSymbolResult, error) {
+	s.calls <- recordedLSPCall{method: "symbols"}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.symbolsResult, nil
+}
+
+func (s *recordingLSPServer) Formatting(_ context.Context, _ *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	s.calls <- recordedLSPCall{method: "formatting"}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.formattingResult, nil
+}
+
+func (s *recordingLSPServer) CodeAction(_ context.Context, params *protocol.CodeActionParams) ([]protocol.CommandOrCodeAction, error) {
+	call := recordedLSPCall{method: "codeaction"}
+	if len(params.Context.Only) > 0 {
+		call.text = string(params.Context.Only[0])
+	}
+	s.calls <- call
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.codeActionResult, nil
+}
+
+func (s *recordingLSPServer) SignatureHelp(_ context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+	s.calls <- recordedLSPCall{method: "signature", position: params.Position}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.signatureResult, nil
 }
 
 func (s *recordingLSPServer) Initialized(context.Context, *protocol.InitializedParams) error {
@@ -194,6 +278,239 @@ func waitCompletionResult(t *testing.T, manager *lspManager) *lspCompletionResul
 		case <-deadline:
 			t.Fatal("timed out waiting for LSP completion")
 		}
+	}
+}
+
+// waitLSPCallSet waits until every named method has been seen, and returns the last call
+// recorded for each. Unlike waitLSPCall it does not discard what it is not looking for:
+// a notification and a request written back to back can be dispatched concurrently on
+// the server side, so their recorded order is not the order they were sent in.
+func waitLSPCallSet(t *testing.T, calls <-chan recordedLSPCall, methods ...string) map[string]recordedLSPCall {
+	t.Helper()
+	seen := make(map[string]recordedLSPCall, len(methods))
+	wanted := make(map[string]bool, len(methods))
+	for _, method := range methods {
+		wanted[method] = true
+	}
+	deadline := time.After(3 * time.Second)
+	for len(seen) < len(wanted) {
+		select {
+		case call := <-calls:
+			if wanted[call.method] {
+				seen[call.method] = call
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for LSP %v; saw %v", methods, seen)
+		}
+	}
+	return seen
+}
+
+// waitRequestResult drains manager events until the on-demand lane answers.
+func waitRequestResult(t *testing.T, manager *lspManager) *lspRequestResult {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case event := <-manager.events:
+			if event.request != nil {
+				return event.request
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for an LSP request result")
+		}
+	}
+}
+
+// newRequestLaneCtx wires a live TCP server to one open Python buffer and waits until
+// its capabilities have been cached, which is the state every on-demand request needs.
+func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*Ctx, string, *components.EditorScreen) {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, "main.py")
+	address := startRecordingTCPServer(t, server)
+	cfg := DefaultConfig()
+	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
+	c := New("test", cfg, Options{})
+	t.Cleanup(c.close)
+	c.lsp.changeDebounce = 30 * time.Millisecond
+	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed.SetText(text)
+	c.lsp.Reconcile(c)
+	waitLSPCall(t, server.calls, "initialize")
+	waitLSPCall(t, server.calls, "open")
+	deadline := time.Now().Add(3 * time.Second)
+	for !c.lsp.Supports(path, lspReqHover) && !c.lsp.Supports(path, lspReqDefinition) &&
+		!c.lsp.Supports(path, lspReqSymbols) && !c.lsp.Supports(path, lspReqFormat) &&
+		!c.lsp.Supports(path, lspReqReferences) && !c.lsp.Supports(path, lspReqSignature) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the server's capabilities to be cached")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return c, path, ed
+}
+
+// TestLSPRequestLaneUnadvertisedCapabilityIsNeverRequested: Supports gates the lane, so
+// a server that advertised nothing is never asked. Firing at it would answer
+// MethodNotFound, which failSession would surface as a dead server.
+func TestLSPRequestLaneUnadvertisedCapabilityIsNeverRequested(t *testing.T) {
+	server := newRecordingLSPServer()
+	server.hoverResult = &protocol.Hover{Contents: protocol.String("hi")}
+	c, path, ed := newRequestLaneCtx(t, server, "value = 1\n")
+
+	if c.lsp.Supports(path, lspReqDefinition) {
+		t.Fatal("a server advertising no definition provider must not report support")
+	}
+	if id := c.lsp.Request(lspReqDefinition, path, ed.EditSeq(), protocol.Position{}); id != 0 {
+		t.Fatalf("an unsupported request returned id %d, want a refusal", id)
+	}
+	assertNoLSPCall(t, server.calls, "definition", 100*time.Millisecond)
+
+	if !c.lsp.Supports(path, lspReqHover) {
+		t.Fatal("an advertised hover provider should report support")
+	}
+	if id := c.lsp.Request(lspReqHover, path, ed.EditSeq(), protocol.Position{}); id == 0 {
+		t.Fatal("a supported request was refused")
+	}
+	waitLSPCall(t, server.calls, "hover")
+}
+
+// TestLSPRequestLaneCarriesUTF16Position: the position a request names is the caret's
+// column in UTF-16 code units, which is what the client negotiated at initialize.
+func TestLSPRequestLaneCarriesUTF16Position(t *testing.T) {
+	server := newRecordingLSPServer()
+	server.hoverResult = &protocol.Hover{Contents: protocol.String("doc")}
+	c, path, ed := newRequestLaneCtx(t, server, "𝄞x = 1\n")
+
+	// One astral rune (two UTF-16 units) then "x": rune column 2 is UTF-16 column 3.
+	position, ok := editorPositionToLSP(ed, components.EditorPosition{Line: 0, Column: 2})
+	if !ok {
+		t.Fatal("the caret position did not convert")
+	}
+	c.lsp.Request(lspReqHover, path, ed.EditSeq(), position)
+	call := waitLSPCall(t, server.calls, "hover")
+	if call.position.Character != 3 {
+		t.Fatalf("hover asked at character %d, want 3 UTF-16 units", call.position.Character)
+	}
+	if got := waitRequestResult(t, c.lsp); got.hover != "doc" {
+		t.Fatalf("projected hover = %q", got.hover)
+	}
+}
+
+// TestLSPRequestLaneFlushesLatestDocument: startRequest writes the pending didChange on
+// the actor goroutine before the RPC, so the server sees the text whose caret position
+// the request names — the same guarantee startCompletion gives.
+func TestLSPRequestLaneFlushesLatestDocument(t *testing.T) {
+	server := newRecordingLSPServer()
+	server.symbolsResult = protocol.DocumentSymbolSlice{{Name: "f", Kind: protocol.SymbolKindFunction}}
+	c, path, ed := newRequestLaneCtx(t, server, "one = 1\n")
+
+	ed.SetText("one = 1\ntwo = 2\n")
+	c.lsp.Reconcile(c)
+	c.lsp.Request(lspReqSymbols, path, ed.EditSeq(), protocol.Position{})
+	seen := waitLSPCallSet(t, server.calls, "change", "symbols")
+	if got := seen["change"].text; got != "one = 1\ntwo = 2\n" {
+		t.Fatalf("the flush sent %q, want the latest buffer", got)
+	}
+	if got := waitRequestResult(t, c.lsp); len(got.symbols) != 1 || got.symbols[0].Name != "f" {
+		t.Fatalf("projected symbols = %#v", got.symbols)
+	}
+}
+
+// TestLSPRequestLaneDropsSupersededResults: only the newest request emits. A stale
+// answer must not reopen a popup the user has already moved past.
+func TestLSPRequestLaneDropsSupersededResults(t *testing.T) {
+	server := newRecordingLSPServer()
+	server.hoverResult = &protocol.Hover{Contents: protocol.String("doc")}
+	c, path, ed := newRequestLaneCtx(t, server, "value = 1\n")
+
+	first := c.lsp.Request(lspReqHover, path, ed.EditSeq(), protocol.Position{})
+	second := c.lsp.Request(lspReqHover, path, ed.EditSeq(), protocol.Position{Character: 1})
+	if first == 0 || second == 0 || first == second {
+		t.Fatalf("request ids = %d, %d", first, second)
+	}
+	got := waitRequestResult(t, c.lsp)
+	if got.id != second {
+		t.Fatalf("result carried id %d, want the newest request %d", got.id, second)
+	}
+	assertNoRequestResult(t, c.lsp, 100*time.Millisecond)
+}
+
+func assertNoRequestResult(t *testing.T, manager *lspManager, duration time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-manager.events:
+			if event.request != nil {
+				t.Fatalf("received an unexpected extra request result (id %d)", event.request.id)
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+// TestLSPFormatAsksForOrganizeImportsThenFormatting: gopls only offers import fixes
+// through the code-action path, so a format that skipped it would silently do half the
+// job on every Go file.
+func TestLSPFormatAsksForOrganizeImportsThenFormatting(t *testing.T) {
+	server := newRecordingLSPServer()
+	importEdit := protocol.TextEdit{
+		Range:   protocol.Range{Start: protocol.Position{Line: 0}, End: protocol.Position{Line: 0}},
+		NewText: "import os\n",
+	}
+	server.codeActionResult = []protocol.CommandOrCodeAction{&protocol.CodeAction{
+		Title: "Organize Imports",
+		Edit:  &protocol.WorkspaceEdit{Changes: map[uri.URI][]protocol.TextEdit{}},
+	}}
+	server.formattingResult = []protocol.TextEdit{{
+		Range:   protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 3}},
+		NewText: "ok",
+	}}
+	c, path, ed := newRequestLaneCtx(t, server, "one = 1\nbad\n")
+	// The action's edit has to name this file to be applied, and the path is only
+	// known once the temp dir exists.
+	server.mu.Lock()
+	server.codeActionResult[0].(*protocol.CodeAction).Edit.Changes[uri.File(path)] = []protocol.TextEdit{importEdit}
+	server.mu.Unlock()
+
+	c.lsp.Request(lspReqFormat, path, ed.EditSeq(), protocol.Position{})
+	action := waitLSPCall(t, server.calls, "codeaction")
+	if action.text != string(protocol.CodeActionKindSourceOrganizeImports) {
+		t.Fatalf("code action asked for kind %q, want source.organizeImports", action.text)
+	}
+	waitLSPCall(t, server.calls, "formatting")
+	got := waitRequestResult(t, c.lsp)
+	if len(got.edits) != 2 {
+		t.Fatalf("format returned %d edits, want the import fix and the formatting", len(got.edits))
+	}
+	if got.edits[0].NewText != "import os\n" || got.edits[1].NewText != "ok" {
+		t.Fatalf("format edits = %#v, want imports first", got.edits)
+	}
+}
+
+// TestLSPFormatDropsCrossFileActions: an organize-imports action that reaches into
+// another file is dropped whole rather than applied in part — a format key must never
+// half-edit a file the user is not looking at.
+func TestLSPFormatDropsCrossFileActions(t *testing.T) {
+	server := newRecordingLSPServer()
+	server.formattingResult = []protocol.TextEdit{}
+	server.codeActionResult = []protocol.CommandOrCodeAction{&protocol.CodeAction{
+		Title: "Organize Imports",
+		Edit: &protocol.WorkspaceEdit{Changes: map[uri.URI][]protocol.TextEdit{
+			uri.File(filepath.Join(t.TempDir(), "elsewhere.py")): {{NewText: "nope"}},
+		}},
+	}}
+	c, path, ed := newRequestLaneCtx(t, server, "one = 1\n")
+
+	c.lsp.Request(lspReqFormat, path, ed.EditSeq(), protocol.Position{})
+	waitLSPCall(t, server.calls, "codeaction")
+	waitLSPCall(t, server.calls, "formatting")
+	if got := waitRequestResult(t, c.lsp); len(got.edits) != 0 {
+		t.Fatalf("a cross-file action contributed %d edits, want none", len(got.edits))
 	}
 }
 

@@ -37,9 +37,31 @@ type Config struct {
 	// use which server. A missing entry receives its built-in transport; Disabled is the
 	// explicit way to suppress one without copying the rest of its defaults.
 	LanguageServers map[string]LanguageServerConfig `yaml:"language_servers"`
-	Default         string                          `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
-	Vaults          map[string]VaultConfig          `yaml:"vaults"`
+	// ClickDefinition and ClickContext name the modifier each gesture rides on, because
+	// terminals disagree about which ones they hand over: Terminal.app claims ctrl+click
+	// for its own contextual menu, iTerm2 turns it into a right click before the app sees
+	// it, and shift is reserved almost everywhere for the terminal's own text selection.
+	// A chord that works on one machine can be dead or redundant on the next, so both are
+	// settings rather than constants. "none" turns a gesture off; see clickModifier.
+	ClickDefinition string `yaml:"click_definition"` // alt (default), ctrl, shift, none
+	ClickContext    string `yaml:"click_context"`    // ctrl (default), alt, shift, none
+	// FormatOnSave asks the language server to format (and organize imports) on every
+	// ctrl+s. The reformat lands just AFTER the write rather than blocking it — see
+	// homeScreen.formatOnSave — so the buffer is left dirty and the next save settles
+	// it. Off by default: a save should not rewrite a buffer until asked.
+	FormatOnSave bool                   `yaml:"format_on_save"`
+	Default      string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
+	Vaults       map[string]VaultConfig `yaml:"vaults"`
 }
+
+// The values ClickDefinition and ClickContext take. Anything else reads as clickNone
+// rather than failing the load, the same tolerance GitGutter's values get.
+const (
+	clickNone  = "none"
+	clickAlt   = "alt"
+	clickCtrl  = "ctrl"
+	clickShift = "shift"
+)
 
 // LanguageServerConfig selects exactly one transport. Address is a TCP endpoint for a
 // server managed elsewhere; Command is an executable followed by its arguments for a
@@ -89,6 +111,8 @@ func DefaultConfig() Config {
 		AutoLSP:         true,
 		GitGutter:       gutterAuto,
 		LanguageServers: defaultLanguageServers(),
+		ClickDefinition: clickAlt,
+		ClickContext:    clickCtrl,
 		Default:         defaultDocsRef,
 		Vaults:          map[string]VaultConfig{},
 	}

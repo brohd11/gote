@@ -87,6 +87,7 @@ type lspCompletionResult struct {
 type lspEvent struct {
 	status     string
 	completion *lspCompletionResult
+	request    *lspRequestResult
 }
 
 // lspManager is an actor around all server and document lifecycle work. The UI writes
@@ -105,8 +106,14 @@ type lspManager struct {
 	completion         *lspCompletionRequest
 	nextComplete       uint64
 	completionTriggers map[string]map[string]bool
-	restart            bool
-	closed             bool
+	// The on-demand lane (lsp_request.go): its own slot and counter, so a queued
+	// hover never cancels a completion the same keystroke asked for.
+	request           *lspRequest
+	nextRequest       uint64
+	signatureTriggers map[string]map[string]bool
+	capabilities      map[string]*protocol.ServerCapabilities
+	restart           bool
+	closed            bool
 
 	wake    chan struct{}
 	stop    chan struct{}
@@ -130,7 +137,9 @@ type lspSession struct {
 	sent                map[string]int32
 	retryAt             time.Time
 	failure             string
-	completion          *protocol.CompletionOptions
+	// caps is the whole initialize answer, not just the completion options: every
+	// on-demand request is gated on what this server said it can do.
+	caps *protocol.ServerCapabilities
 }
 
 func newLSPManager(cfg Config, version string) *lspManager {
@@ -138,7 +147,9 @@ func newLSPManager(cfg Config, version string) *lspManager {
 		cfg: cfg, version: version, changeDebounce: lspChangeDebounce,
 		desired: map[string]lspDocument{}, saves: map[string]bool{},
 		diagnostics: map[string][]lspDiagnostic{}, completionTriggers: map[string]map[string]bool{},
-		wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+		signatureTriggers: map[string]map[string]bool{},
+		capabilities:      map[string]*protocol.ServerCapabilities{},
+		wake:              make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		events: make(chan lspEvent, 64), dead: make(chan deadSession, 8),
 	}
 }
@@ -197,6 +208,9 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 			delete(m.diagnostics, path)
 			if m.completion != nil && m.completion.path == path {
 				m.completion = nil
+			}
+			if m.request != nil && m.request.path == path {
+				m.request = nil
 			}
 		}
 	}
@@ -282,6 +296,8 @@ func (m *lspManager) Restart() {
 		m.restart = true
 		m.completion = nil
 		m.nextComplete++
+		m.request = nil
+		m.nextRequest++
 	}
 	m.mu.Unlock()
 	m.signal()
@@ -330,6 +346,7 @@ func (m *lspManager) loop() {
 	var changeTimer *time.Timer
 	var changeTimerC <-chan time.Time
 	var cancelCompletion context.CancelFunc
+	var cancelRequest context.CancelFunc
 	stopChangeTimer := func() {
 		if changeTimer == nil {
 			return
@@ -361,6 +378,12 @@ func (m *lspManager) loop() {
 				}
 				cancelCompletion = m.startCompletion(sessions, pending, *request)
 			}
+			if request := m.takeRequest(); request != nil {
+				if cancelRequest != nil {
+					cancelRequest()
+				}
+				cancelRequest = m.startRequest(sessions, pending, *request)
+			}
 			switch {
 			case len(pending) == 0:
 				stopChangeTimer()
@@ -385,6 +408,9 @@ func (m *lspManager) loop() {
 			stopChangeTimer()
 			if cancelCompletion != nil {
 				cancelCompletion()
+			}
+			if cancelRequest != nil {
+				cancelRequest()
 			}
 			for _, session := range sessions {
 				m.closeSession(session)
@@ -556,7 +582,7 @@ func (m *lspManager) startCompletion(sessions map[string]*lspSession,
 		return nil
 	}
 	session := sessions[doc.key()]
-	if session == nil || session.server == nil || session.completion == nil {
+	if session == nil || session.server == nil || session.caps == nil || session.caps.CompletionProvider == nil {
 		m.emitCompletion(request, nil, false, nil)
 		return nil
 	}
@@ -582,7 +608,7 @@ func (m *lspManager) startCompletion(sessions map[string]*lspSession,
 	kind := protocol.CompletionTriggerKindInvoked
 	var trigger *string
 	if !request.manual && request.triggerCharacter != "" {
-		for _, candidate := range session.completion.TriggerCharacters {
+		for _, candidate := range session.caps.CompletionProvider.TriggerCharacters {
 			if candidate == request.triggerCharacter {
 				kind = protocol.CompletionTriggerKindTriggerCharacter
 				value := request.triggerCharacter
@@ -767,6 +793,33 @@ func (m *lspManager) startSession(session *lspSession) error {
 					ContextSupport: &yes,
 					CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &yes},
 				},
+				// Nothing below is optional politeness: a server that is not told the
+				// client supports a feature is entitled not to advertise it back, and
+				// Supports() gates every on-demand request on that advertisement.
+				Hover: &protocol.HoverClientCapabilities{
+					ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
+				},
+				Definition: &protocol.DefinitionClientCapabilities{LinkSupport: &yes},
+				References: &protocol.ReferenceClientCapabilities{},
+				DocumentSymbol: &protocol.DocumentSymbolClientCapabilities{
+					HierarchicalDocumentSymbolSupport: &yes,
+				},
+				Formatting: &protocol.DocumentFormattingClientCapabilities{},
+				CodeAction: &protocol.CodeActionClientCapabilities{
+					CodeActionLiteralSupport: protocol.ClientCodeActionLiteralOptions{
+						CodeActionKind: protocol.ClientCodeActionKindOptions{
+							ValueSet: []protocol.CodeActionKind{protocol.CodeActionKindSourceOrganizeImports},
+						},
+					},
+				},
+				SignatureHelp: &protocol.SignatureHelpClientCapabilities{
+					SignatureInformation: &protocol.ClientSignatureInformationOptions{
+						DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
+						ParameterInformation: &protocol.ClientSignatureParameterInformationOptions{
+							LabelOffsetSupport: &yes,
+						},
+					},
+				},
 			},
 			General: &protocol.GeneralClientCapabilities{
 				PositionEncodings: []protocol.PositionEncodingKind{protocol.PositionEncodingKindUTF16},
@@ -783,16 +836,18 @@ func (m *lspManager) startSession(session *lspSession) error {
 	}
 	session.server, session.conn = server, conn
 	if initialized != nil {
-		session.completion = initialized.Capabilities.CompletionProvider
+		session.caps = &initialized.Capabilities
 	}
 	m.mu.Lock()
-	delete(m.completionTriggers, session.key)
-	if session.completion != nil {
-		triggers := make(map[string]bool, len(session.completion.TriggerCharacters))
-		for _, trigger := range session.completion.TriggerCharacters {
-			triggers[trigger] = true
+	m.forgetCapabilitiesLocked(session.key)
+	if session.caps != nil {
+		m.capabilities[session.key] = session.caps
+		if completion := session.caps.CompletionProvider; completion != nil {
+			m.completionTriggers[session.key] = triggerSet(completion.TriggerCharacters)
 		}
-		m.completionTriggers[session.key] = triggers
+		if signature := session.caps.SignatureHelpProvider; signature != nil {
+			m.signatureTriggers[session.key] = triggerSet(signature.TriggerCharacters)
+		}
 	}
 	m.mu.Unlock()
 	session.failure, session.retryAt = "", time.Time{}
@@ -807,13 +862,31 @@ func (m *lspManager) startSession(session *lspSession) error {
 	return nil
 }
 
+// triggerSet indexes an advertised trigger-character list for lookup by typed text.
+func triggerSet(characters []string) map[string]bool {
+	triggers := make(map[string]bool, len(characters))
+	for _, trigger := range characters {
+		triggers[trigger] = true
+	}
+	return triggers
+}
+
+// forgetCapabilitiesLocked drops everything cached from one session's initialize answer.
+// Held under mu by every caller; a session without capabilities answers "unsupported" to
+// every on-demand request, which is the right state for one that is down.
+func (m *lspManager) forgetCapabilitiesLocked(key string) {
+	delete(m.completionTriggers, key)
+	delete(m.signatureTriggers, key)
+	delete(m.capabilities, key)
+}
+
 func (m *lspManager) failSession(session *lspSession, err error) {
 	if session.conn != nil {
 		_ = session.conn.Close()
 	}
-	session.server, session.conn, session.completion = nil, nil, nil
+	session.server, session.conn, session.caps = nil, nil, nil
 	m.mu.Lock()
-	delete(m.completionTriggers, session.key)
+	m.forgetCapabilitiesLocked(session.key)
 	m.mu.Unlock()
 	session.sent = map[string]int32{}
 	session.retryAt = time.Now().Add(lspRetryDelay)
@@ -834,9 +907,9 @@ func (m *lspManager) closeSession(session *lspSession) {
 	_ = session.server.Exit(ctx)
 	cancel()
 	_ = session.conn.Close()
-	session.server, session.conn, session.completion = nil, nil, nil
+	session.server, session.conn, session.caps = nil, nil, nil
 	m.mu.Lock()
-	delete(m.completionTriggers, session.key)
+	m.forgetCapabilitiesLocked(session.key)
 	m.mu.Unlock()
 }
 

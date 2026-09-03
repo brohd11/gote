@@ -3,7 +3,6 @@ package app
 import (
 	"time"
 	"unicode"
-	"unicode/utf16"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
@@ -328,41 +327,4 @@ func completionQuery(editor *components.EditorScreen, start, end components.Edit
 		}
 	}
 	return string(runes[start.Column:end.Column]), true
-}
-
-func editorPositionToLSP(editor *components.EditorScreen, position components.EditorPosition) (protocol.Position, bool) {
-	line, ok := editor.LineText(position.Line)
-	if !ok {
-		return protocol.Position{}, false
-	}
-	runes := []rune(line)
-	if position.Column < 0 || position.Column > len(runes) {
-		return protocol.Position{}, false
-	}
-	return protocol.Position{Line: uint32(position.Line), Character: uint32(len(utf16.Encode(runes[:position.Column])))}, true
-}
-
-func lspPositionToEditor(editor *components.EditorScreen, position protocol.Position) (components.EditorPosition, bool) {
-	line, ok := editor.LineText(int(position.Line))
-	if !ok {
-		return components.EditorPosition{}, false
-	}
-	target, units := int(position.Character), 0
-	for i, r := range []rune(line) {
-		if units == target {
-			return components.EditorPosition{Line: int(position.Line), Column: i}, true
-		}
-		width := 1
-		if utf16.RuneLen(r) == 2 {
-			width = 2
-		}
-		if units+width > target {
-			return components.EditorPosition{}, false
-		}
-		units += width
-	}
-	if units == target {
-		return components.EditorPosition{Line: int(position.Line), Column: len([]rune(line))}, true
-	}
-	return components.EditorPosition{}, false
 }
