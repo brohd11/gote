@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -91,6 +92,7 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			cfg.IndentSpaces = 2
 		case ".py":
 			cfg.IndentSpaces = 4
+			cfg.OnEnter = colonBlockEnter
 		case ".sh", ".bash", ".zsh":
 			cfg.AutoClosingPairs = shellPairs
 			cfg.SurroundingPairs = shellPairs
@@ -110,7 +112,7 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			id = "gdscript"
 			cfg.AutoClosingPairs = gdscriptPairs
 			cfg.SurroundingPairs = gdscriptPairs
-			cfg.OnEnter = gdscriptEnter
+			cfg.OnEnter = colonBlockEnter
 			// Chroma has both current "gdscript" and legacy "gdscript3"
 			// lexers claiming *.gd. Pick the named current lexer deliberately so
 			// source buffers and ```gdscript preview fences share one tokenizer.
@@ -314,40 +316,274 @@ func afterLeadingIndent(ctx components.EditorEnterContext) bool {
 	return strings.HasPrefix(ctx.Before, ctx.LeadingIndent)
 }
 
-// markdownEnter preserves the editor's existing deliberately small behavior: only a
-// leading dash-space list marker continues, including its exact indentation.
+// markdownItem is a list or blockquote line taken apart. next builds the marker the
+// FOLLOWING item gets, which is the only thing an ordered list does differently.
+type markdownItem struct {
+	indent string // the line's leading whitespace
+	marker string // "-", "+", "*", "1.", "2)", or ">"
+	gap    string // the spaces between marker and content
+	task   bool   // the content opens with a "[ ]" or "[x]" checkbox
+	text   string // the item's own words, the checkbox excluded
+}
+
+// lead assembles the item's opening for a given marker: the marker, the gap that followed
+// it, and an unchecked box when this is a task item — a finished item does not continue
+// as another finished one.
+func (it markdownItem) lead(marker string) string {
+	out := marker + it.gap
+	if it.task {
+		out += "[ ] "
+	}
+	return out
+}
+
+// next is the opening the FOLLOWING item gets. Advancing the number is the only thing an
+// ordered list does differently.
+func (it markdownItem) next() string {
+	if n, delim, ok := splitOrderedMarker(it.marker); ok {
+		return it.lead(strconv.Itoa(n+1) + delim)
+	}
+	return it.lead(it.marker)
+}
+
+// markdownEnter continues a list or blockquote onto the next line, and ends one when the
+// item being left is empty: a nested empty item steps out a level, an empty item already
+// at the outer level clears its line. Two presses to leave a nested list, which is what
+// makes nesting comfortable and what stops a list continuing forever.
+//
+// The markers are exactly the set the highlighter's listMarkerEnd paints — the two should
+// not disagree about what a list is.
 func markdownEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
 		return components.EditorEnterAction{}, false
 	}
-	rest := strings.TrimPrefix(ctx.Before, ctx.LeadingIndent)
-	if !strings.HasPrefix(rest, "- ") {
+	item, ok := parseMarkdownItem(ctx.Before, ctx.LeadingIndent)
+	if !ok {
 		return components.EditorEnterAction{}, false
 	}
-	return components.EditorEnterAction{Prefix: ctx.LeadingIndent + "- "}, true
+	if item.text == "" && strings.TrimSpace(ctx.After) == "" {
+		if out := dropIndentUnit(item.indent, ctx.IndentUnit); out != item.indent {
+			// The marker is carried out verbatim rather than advanced: this is the same
+			// item moved a level left, and its number in the list it lands in cannot be
+			// read off one line. Renderers renumber an ordered list from its first item
+			// anyway, so the digits here are for the writer, not the output.
+			return components.EditorEnterAction{Rewrite: true, Line: out + item.lead(item.marker)}, true
+		}
+		return components.EditorEnterAction{Rewrite: true, Line: ""}, true
+	}
+	return components.EditorEnterAction{Prefix: item.indent + item.next()}, true
 }
 
-// yamlEnter carries existing indentation only. Inferring a new YAML nesting level is a
-// separate language feature; this migration preserves the behavior users have today.
+func parseMarkdownItem(before, indent string) (markdownItem, bool) {
+	rest := strings.TrimPrefix(before, indent)
+	marker := markdownMarker(rest)
+	if marker == "" {
+		return markdownItem{}, false
+	}
+	it := markdownItem{indent: indent, marker: marker}
+	rest = rest[len(marker):]
+	for len(rest) > 0 && rest[0] == ' ' {
+		it.gap += " "
+		rest = rest[1:]
+	}
+	// A bullet or number needs a space to be a marker at all; "-foo" is a word. A
+	// blockquote does not: ">quoted" is as valid as "> quoted".
+	if it.gap == "" && marker != ">" && rest != "" {
+		return markdownItem{}, false
+	}
+	if marker != ">" {
+		if box := markdownTaskBox(rest); box > 0 {
+			it.task, rest = true, strings.TrimLeft(rest[box:], " ")
+		}
+	}
+	it.text = strings.TrimSpace(rest)
+	return it, true
+}
+
+// markdownMarker returns the marker at the head of rest: one bullet character, a run of
+// digits closed by "." or ")", or a ">" blockquote. Anything else answers "". This is
+// listMarkerEnd's rule (highlight_markdown.go), expressed over a line rather than an
+// offset into the whole document.
+func markdownMarker(rest string) string {
+	if rest == "" {
+		return ""
+	}
+	switch rest[0] {
+	case '-', '+', '*', '>':
+		return rest[:1]
+	}
+	i := 0
+	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+		i++
+	}
+	if i > 0 && i < len(rest) && (rest[i] == '.' || rest[i] == ')') {
+		return rest[:i+1]
+	}
+	return ""
+}
+
+// splitOrderedMarker takes "12." apart into its number and its delimiter. A bullet or
+// blockquote answers false and is repeated verbatim.
+func splitOrderedMarker(marker string) (int, string, bool) {
+	if len(marker) < 2 {
+		return 0, "", false
+	}
+	n, err := strconv.Atoi(marker[:len(marker)-1])
+	if err != nil {
+		return 0, "", false
+	}
+	return n, marker[len(marker)-1:], true
+}
+
+// markdownTaskBox is the width of a leading "[ ]"/"[x]" checkbox, or 0 for an ordinary
+// item. The box has to be followed by a space or end the line — "[x]y" is text.
+func markdownTaskBox(rest string) int {
+	if len(rest) < 3 || rest[0] != '[' || rest[2] != ']' {
+		return 0
+	}
+	switch rest[1] {
+	case ' ', 'x', 'X':
+	default:
+		return 0
+	}
+	if len(rest) > 3 && rest[3] != ' ' {
+		return 0
+	}
+	return 3
+}
+
+// yamlEnter carries the block's indentation, opens a level after a mapping key or a block
+// scalar, and continues a sequence's marker.
+//
+// The subtlety is the dash. A sequence entry's CONTENT column, not its marker's, is what a
+// key nested under it hangs off — so `- name:` at column zero opens at column four, not
+// two. Everything below the marker therefore measures from base rather than from the raw
+// leading indent.
 func yamlEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
-	if ctx.LeadingIndent == "" || !afterLeadingIndent(ctx) {
+	if !afterLeadingIndent(ctx) {
 		return components.EditorEnterAction{}, false
+	}
+	rest := strings.TrimPrefix(ctx.Before, ctx.LeadingIndent)
+	base, marker := ctx.LeadingIndent, ""
+	if width := yamlMarkerWidth(rest); width > 0 {
+		marker, rest = rest[:width], rest[width:]
+		base += strings.Repeat(" ", width)
+	}
+	content := strings.TrimSpace(rest)
+	switch {
+	case yamlOpensBlock(content):
+		return components.EditorEnterAction{Prefix: base + ctx.IndentUnit}, true
+	case marker != "" && content != "":
+		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + marker}, true
+	}
+	return components.EditorEnterAction{Prefix: base}, true
+}
+
+// yamlMarkerWidth is the width of a leading sequence marker — the dash and the spaces
+// separating it from the entry's content — or 0 when the line does not start one. A dash
+// with nothing after it is still a marker: an entry whose value is on the next line.
+func yamlMarkerWidth(rest string) int {
+	if !strings.HasPrefix(rest, "-") {
+		return 0
+	}
+	width := 1
+	for width < len(rest) && rest[width] == ' ' {
+		width++
+	}
+	if width == 1 && rest != "-" {
+		return 0 // "-name" is a scalar, not a sequence entry
+	}
+	return width
+}
+
+// yamlOpensBlock reports the line shapes a new nesting level hangs off: a mapping key with
+// no inline value, and a block scalar header — "|" or ">" with any chomping or indentation
+// indicator after it.
+func yamlOpensBlock(content string) bool {
+	if strings.HasSuffix(content, ":") {
+		return true
+	}
+	i := strings.LastIndex(content, ": ")
+	if i < 0 {
+		return false
+	}
+	value := strings.TrimSpace(content[i+2:])
+	return value != "" && (value[0] == '|' || value[0] == '>')
+}
+
+// blockBrackets are the pairs that open a block when Enter lands between them. Quotes are
+// excluded on purpose: a string literal has no inner level to open. Adjacency alone is the
+// test, the same rule the editor's own deleteEmptyAutoPair uses — pair provenance is not
+// tracked anywhere, so a hand-typed empty pair behaves like an auto-closed one.
+var blockBrackets = []struct{ open, close string }{{"(", ")"}, {"[", "]"}, {"{", "}"}}
+
+// insideBracket reports whether the caret sits directly between a bracket pair — the
+// `{|}` an auto-closing pair leaves behind.
+func insideBracket(before, after string) bool {
+	for _, pair := range blockBrackets {
+		if strings.HasSuffix(before, pair.open) && strings.HasPrefix(after, pair.close) {
+			return true
+		}
+	}
+	return false
+}
+
+// endsWithOpener reports a bracket left open at the end of the line — the case where the
+// closer is somewhere below rather than under the caret, so there is a level to indent
+// into but nothing to push down.
+func endsWithOpener(line string) bool {
+	for _, pair := range blockBrackets {
+		if strings.HasSuffix(line, pair.open) {
+			return true
+		}
+	}
+	return false
+}
+
+// bracketBlock is the action for a caret between a bracket pair: the closer moves down to
+// its own line at the current indentation and the caret lands on an indented line between
+// the two.
+func bracketBlock(ctx components.EditorEnterContext) components.EditorEnterAction {
+	return components.EditorEnterAction{
+		Prefix: ctx.LeadingIndent + ctx.IndentUnit,
+		Block:  true,
+		Closer: ctx.LeadingIndent,
+	}
+}
+
+// blockEndStatements are the statements nothing can follow inside their own block, so the
+// line after one steps back out. Python and GDScript agree on every word here.
+var blockEndStatements = map[string]bool{
+	"pass": true, "break": true, "continue": true, "return": true, "raise": true,
+}
+
+// colonBlockEnter is the Enter both Python and GDScript want — their block grammars agree,
+// and the one place they differ (GDScript indents with a tab, Python with four spaces) is
+// a profile setting rather than a rule, so IndentUnit already carries it. alt+i still
+// overrides that unit for the current editor.
+func colonBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+	if !afterLeadingIndent(ctx) {
+		return components.EditorEnterAction{}, false
+	}
+	if insideBracket(ctx.Before, ctx.After) {
+		return bracketBlock(ctx), true
+	}
+	trimmed := strings.TrimSpace(ctx.Before)
+	switch {
+	case strings.HasSuffix(trimmed, ":"), strings.HasSuffix(trimmed, "\\"), endsWithOpener(trimmed):
+		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
+	case blockEndStatements[firstWord(trimmed)]:
+		return components.EditorEnterAction{Prefix: dropIndentUnit(ctx.LeadingIndent, ctx.IndentUnit)}, true
 	}
 	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
 }
 
-// gdscriptEnter carries the current block indentation and adds exactly one live indent
-// unit after a colon. GDScript's profile defaults that unit to a literal tab, while
-// alt+i remains able to override it for the current editor.
-func gdscriptEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
-	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+// firstWord is the line's leading whitespace-delimited token, or "" for a blank line.
+func firstWord(line string) string {
+	if fields := strings.Fields(line); len(fields) > 0 {
+		return fields[0]
 	}
-	prefix := ctx.LeadingIndent
-	if strings.HasSuffix(strings.TrimSpace(ctx.Before), ":") {
-		prefix += ctx.IndentUnit
-	}
-	return components.EditorEnterAction{Prefix: prefix}, true
+	return ""
 }
 
 // dropIndentUnit removes one trailing indent level, taking whatever is actually there: a

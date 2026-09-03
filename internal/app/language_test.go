@@ -317,3 +317,159 @@ func TestShebangSniffIsMemoized(t *testing.T) {
 		t.Fatalf("resolve after a save = %#v, want the re-sniffed literal answer", profile)
 	}
 }
+
+func TestPythonEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"block opener", "def f():", "def f():\n    "},
+		{"nested block opener", "    if x:", "    if x:\n        "},
+		{"dedent after return", "        return 1", "        return 1\n    "},
+		{"dedent after pass", "    pass", "    pass\n"},
+		{"dedent at outer level", "pass", "pass\n"},
+		{"unclosed opener", "data = [", "data = [\n    "},
+		{"continuation", "x = 1 + \\", "x = 1 + \\\n    "},
+		{"carry indentation", "    x = 1", "    x = 1\n    "},
+		{"plain line", "import os", "import os\n"},
+		{"return in a string is not a statement", `    print("return")`, "    print(\"return\")\n    "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("main.py", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("Python Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A caret between a bracket pair opens a block: the closer takes its own line at the
+// current indentation and the caret waits on an indented line between the two.
+func TestBracketBlockEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, content, want string
+	}{
+		{"python braces", "main.py", "data = {}", "data = {\n    \n}"},
+		{"python nested brackets", "main.py", "    xs = []", "    xs = [\n        \n    ]"},
+		{"python parens", "main.py", "f()", "f(\n    \n)"},
+		{"gdscript uses its tab unit", "player.gd", "var d = {}", "var d = {\n\t\n}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage(tc.path, tc.content)
+			pressEditor(ed, "end", "left", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("bracket Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// Three splices, still one gesture.
+	ed := editorForLanguage("main.py", "data = {}")
+	pressEditor(ed, "end", "left", "enter", "ctrl+z")
+	if got := ed.Text(); got != "data = {}" {
+		t.Fatalf("undo bracket Enter = %q, want the original line", got)
+	}
+
+	// A quote pair has no inner level, so it stays an ordinary split.
+	ed = editorForLanguage("main.py", `s = ""`)
+	pressEditor(ed, "end", "left", "enter")
+	if got, want := ed.Text(), "s = \"\n\""; got != want {
+		t.Fatalf("quote Enter = %q, want a plain split %q", got, want)
+	}
+}
+
+func TestYAMLEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"top level key", "key:", "key:\n  "},
+		{"nested key", "  key:", "  key:\n    "},
+		{"key under a sequence entry", "- name:", "- name:\n    "},
+		{"block scalar", "script: |", "script: |\n  "},
+		{"folded scalar with chomping", "text: >-", "text: >-\n  "},
+		{"sequence entry", "- one", "- one\n- "},
+		{"nested sequence entry", "  - one", "  - one\n  - "},
+		{"inline value carries", "key: value", "key: value\n"},
+		{"nested inline value carries", "  key: value", "  key: value\n  "},
+		{"scalar starting with a dash", "-name", "-name\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("config.yaml", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("YAML Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMarkdownEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"dash bullet", "- item", "- item\n- "},
+		{"star bullet", "* item", "* item\n* "},
+		{"plus bullet", "+ item", "+ item\n+ "},
+		{"ordered increments", "1. first", "1. first\n2. "},
+		{"ordered wraps a paren delimiter", "9) ninth", "9) ninth\n10) "},
+		{"nested keeps its indent", "  - item", "  - item\n  - "},
+		{"task item", "- [ ] todo", "- [ ] todo\n- [ ] "},
+		{"finished task continues unchecked", "- [x] done", "- [x] done\n- [ ] "},
+		{"blockquote", "> quoted", "> quoted\n> "},
+		{"blockquote without a space", ">quoted", ">quoted\n>"},
+		{"heading is not a list", "# Title", "# Title\n"},
+		{"prose is not a list", "just words", "just words\n"},
+		{"a dash needs its space", "-notalist", "-notalist\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("notes.md", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("Markdown Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An empty item ends the list instead of adding another one: nested items step out a
+// level per press, and an item at the outer level clears its line.
+func TestMarkdownEnterEndsAList(t *testing.T) {
+	ed := editorForLanguage("notes.md", "- a\n  - b\n  - ")
+	pressEditor(ed, "down", "down", "end", "enter")
+	if got, want := ed.Text(), "- a\n  - b\n- "; got != want {
+		t.Fatalf("first Enter = %q, want the item outdented to %q", got, want)
+	}
+	pressEditor(ed, "enter")
+	if got, want := ed.Text(), "- a\n  - b\n"; got != want {
+		t.Fatalf("second Enter = %q, want the marker gone: %q", got, want)
+	}
+	pressEditor(ed, "ctrl+z")
+	if got, want := ed.Text(), "- a\n  - b\n- "; got != want {
+		t.Fatalf("undo the list exit = %q, want %q", got, want)
+	}
+
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"top level bullet", "- ", ""},
+		{"ordered", "1. ", ""},
+		{"task", "- [ ] ", ""},
+		{"blockquote", "> ", ""},
+		{"nested ordered outdents", "  1. ", "1. "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("notes.md", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("Enter on an empty item = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// An empty marker with text still to its right is a split, not an exit.
+	ed = editorForLanguage("notes.md", "- foo")
+	pressEditor(ed, "end", "left", "enter")
+	if got, want := ed.Text(), "- fo\n- o"; got != want {
+		t.Fatalf("mid-item Enter = %q, want %q", got, want)
+	}
+}
