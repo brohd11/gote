@@ -14,7 +14,12 @@ import (
 
 func completionHome(t *testing.T) (*homeScreen, *core.Shared) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "main.py")
+	return completionHomeFor(t, "main.py")
+}
+
+func completionHomeFor(t *testing.T, name string) (*homeScreen, *core.Shared) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +109,7 @@ func TestCompletionPopupFuzzyFiltersAndRanks(t *testing.T) {
 
 func TestCompletionDoesNotInstallPopupWithoutFuzzyMatches(t *testing.T) {
 	s, sh := completionHome(t)
-	s.Update(sh, keyMsg("# nope"))
+	s.Update(sh, keyMsg("x = nope"))
 	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
 	lspPosition, ok := editorPositionToLSP(s.editor, position)
 	if !ok {
@@ -122,14 +127,14 @@ func TestCompletionDoesNotInstallPopupWithoutFuzzyMatches(t *testing.T) {
 	}
 
 	s.Update(sh, keyMsg("enter"))
-	if got := s.editor.Text(); got != "# nope\n" {
+	if got := s.editor.Text(); got != "x = nope\n" {
 		t.Fatalf("Enter after unmatched completion = %q, want newline", got)
 	}
 }
 
 func TestCompletionClosesWhenTypingRemovesLastMatch(t *testing.T) {
 	s, sh := completionHome(t)
-	s.Update(sh, keyMsg("# pr"))
+	s.Update(sh, keyMsg("x = pr"))
 	showCompletion(t, s,
 		lspCompletionItem{Label: "print", FilterText: "print", InsertText: "print"},
 	)
@@ -144,7 +149,7 @@ func TestCompletionClosesWhenTypingRemovesLastMatch(t *testing.T) {
 	}
 
 	s.Update(sh, keyMsg("enter"))
-	if got := s.editor.Text(); got != "# prz\n" {
+	if got := s.editor.Text(); got != "x = prz\n" {
 		t.Fatalf("Enter after locally emptied completion = %q, want newline", got)
 	}
 }
@@ -280,5 +285,51 @@ func TestCompletionInstallsSnippetTabStops(t *testing.T) {
 	}
 	if got := s.editor.CursorPosition(); got != (components.EditorPosition{Column: 10}) {
 		t.Fatalf("snippet final caret = %+v", got)
+	}
+}
+
+// Completion must fire inside comments. Comment-driven meta-programming is a real use —
+// the user's GDScript tag system depends on it — and Godot's own CodeEdit behaves the same
+// way. A server that answers a comment position with nothing is the server making that
+// call; the editor staying quiet would take the choice away from it. Nothing in the
+// request path inspects syntax, and this pins that: suppressing completion in comments is
+// exactly the kind of "optimization" someone would reach for later.
+func TestCompletionFiresInsideComments(t *testing.T) {
+	for _, name := range []string{"tags.gd", "main.py", "main.go"} {
+		t.Run(name, func(t *testing.T) {
+			s, sh := completionHomeFor(t, name)
+			// requestCompletion reconciles before it asks, so the manager needs a real
+			// config to recognize the document at all. GDScript additionally refuses a
+			// workspace with no project.godot above it — which is the shape the tag system
+			// actually runs in, so give it one.
+			if name == "tags.gd" {
+				marker := filepath.Join(filepath.Dir(s.currentPath), "project.godot")
+				if err := os.WriteFile(marker, nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			Of(sh).lsp = &lspManager{cfg: DefaultConfig()}
+
+			comment := "# @export_tag Player"
+			if name == "main.go" {
+				comment = "// @export_tag Player"
+			}
+			s.Update(sh, keyMsg(comment))
+
+			// Typing an identifier rune inside the comment still schedules a request.
+			_, act := s.Update(sh, keyMsg("s"))
+			if act.Cmd == nil {
+				t.Fatal("typing inside a comment should still schedule a completion request")
+			}
+
+			// And the explicit gesture reaches the manager from inside a comment.
+			s.requestCompletion(sh, "", true)
+			if s.completion.requestID == 0 {
+				t.Fatal("ctrl+space inside a comment issued no request")
+			}
+			if got := Of(sh).lsp.completion; got == nil || !got.manual {
+				t.Fatalf("queued request = %#v, want a manual one", got)
+			}
+		})
 	}
 }

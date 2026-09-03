@@ -107,6 +107,34 @@ var forcedLexers = map[string]string{
 	".glsl": "glsl",     // the GLSL lexer claims only *.vert, *.frag and *.geo
 }
 
+// lineComments name each file type's line-comment delimiter, and blockComments cover the
+// few that have no line form at all. They span every entry in chromaExts rather than only
+// the brace languages: the comment toggle is worth having in TOML or vimscript even though
+// neither gets an Enter handler, and the two concerns are independent.
+//
+// Absent on purpose: .json has no comment in the format at all, and a diff's or CSV's "#"
+// is content rather than syntax. Those types get no gesture, which is the right answer.
+var lineComments = map[string]string{
+	".go": "//", ".c": "//", ".h": "//", ".cc": "//", ".cpp": "//", ".hpp": "//", ".hh": "//",
+	".cs": "//", ".java": "//", ".rs": "//", ".kt": "//", ".swift": "//", ".dart": "//",
+	".php": "//", ".js": "//", ".jsx": "//", ".ts": "//", ".tsx": "//",
+	".scss": "//", ".proto": "//", ".glsl": "//", ".gradle": "//",
+
+	".py": "#", ".rb": "#", ".sh": "#", ".bash": "#", ".zsh": "#", ".fish": "#",
+	".yaml": "#", ".yml": "#", ".toml": "#", ".ini": "#", ".r": "#", ".pl": "#",
+	".tf": "#", ".mk": "#", ".gd": "#",
+
+	".lua": "--", ".sql": "--",
+
+	".vim": "\"",
+}
+
+var blockComments = map[string][2]string{
+	".css":  {"/*", "*/"},
+	".html": {"<!--", "-->"},
+	".xml":  {"<!--", "-->"},
+}
+
 func buildLanguageProfiles() map[string]*languageProfile {
 	profiles := make(map[string]*languageProfile, len(chromaExts)+2)
 	for _, ext := range chromaExts {
@@ -128,6 +156,8 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			AutoClosingPairs: codePairs,
 			SurroundingPairs: codePairs,
 		}
+		cfg.LineComment = lineComments[ext]
+		cfg.BlockComment = blockComments[ext]
 		if spaces, ok := braceIndent[ext]; ok {
 			cfg.IndentSpaces = spaces
 			cfg.OnEnter = braceBlockEnter
@@ -224,6 +254,9 @@ func buildLanguageProfiles() map[string]*languageProfile {
 			SurroundingPairs: markdownSurroundPairs,
 			IndentSpaces:     2,
 			OnEnter:          markdownEnter,
+			// Markdown's only comment is HTML's, and it has no line form — which also keeps
+			// Enter out of the way of the list continuation markdownEnter owns.
+			BlockComment: [2]string{"<!--", "-->"},
 		},
 	}
 	profiles[".md"] = markdown

@@ -557,6 +557,101 @@ func TestJSLanguageIDs(t *testing.T) {
 	}
 }
 
+// Every profile that should carry a comment delimiter does, and nothing claims a bogus one.
+func TestCommentDelimiters(t *testing.T) {
+	for _, tc := range []struct{ path, line string }{
+		{"main.go", "//"}, {"os.cpp", "//"}, {"os.h", "//"}, {"Gen.cs", "//"},
+		{"App.java", "//"}, {"main.rs", "//"}, {"app.ts", "//"}, {"app.jsx", "//"},
+		{"sky.glsl", "//"}, {"app.scss", "//"},
+		{"main.py", "#"}, {"deploy.sh", "#"}, {"config.yaml", "#"}, {"conf.toml", "#"},
+		{"player.gd", "#"}, {"main.tf", "#"},
+		{"init.lua", "--"}, {"q.sql", "--"},
+		{"vimrc.vim", "\""},
+	} {
+		profile := languageForPath(tc.path)
+		if profile == nil || profile.editor.LineComment != tc.line {
+			t.Errorf("%s LineComment = %#v, want %q", tc.path, profile, tc.line)
+		}
+	}
+
+	// No line form, so the toggle falls back to wrapping.
+	for _, tc := range []struct {
+		path  string
+		block [2]string
+	}{
+		{"app.css", [2]string{"/*", "*/"}},
+		{"page.html", [2]string{"<!--", "-->"}},
+		{"notes.md", [2]string{"<!--", "-->"}},
+	} {
+		profile := languageForPath(tc.path)
+		if profile == nil || profile.editor.BlockComment != tc.block {
+			t.Errorf("%s BlockComment = %#v, want %v", tc.path, profile, tc.block)
+		}
+		if profile != nil && profile.editor.LineComment != "" {
+			t.Errorf("%s should have no line comment, got %q", tc.path, profile.editor.LineComment)
+		}
+	}
+
+	// JSON has no comment in the format at all; a diff's "#" is content.
+	for _, path := range []string{"pkg.json", "rows.csv", "fix.patch", "fix.diff"} {
+		profile := languageForPath(path)
+		if profile == nil {
+			continue
+		}
+		if profile.editor.LineComment != "" || profile.editor.BlockComment != [2]string{} {
+			t.Errorf("%s should declare no comment, got %q / %v",
+				path, profile.editor.LineComment, profile.editor.BlockComment)
+		}
+	}
+}
+
+// End-to-end through the real key path: both bindings, a multi-line span, and one undo.
+func TestCommentToggleInEditor(t *testing.T) {
+	ed := editorForLanguage("main.go", "\tif err != nil {\n\t\treturn err\n\t}")
+	pressEditor(ed, "shift+down", "shift+down", "shift+end", "ctrl+_")
+	want := "\t// if err != nil {\n\t// \treturn err\n\t// }"
+	if got := ed.Text(); got != want {
+		t.Fatalf("ctrl+/ over a selection = %q, want %q", got, want)
+	}
+	pressEditor(ed, "ctrl+z")
+	if got, want := ed.Text(), "\tif err != nil {\n\t\treturn err\n\t}"; got != want {
+		t.Fatalf("undo = %q, want %q", got, want)
+	}
+
+	// alt+/ is the same gesture for terminals that swallow ctrl+/.
+	ed = editorForLanguage("main.py", "value = 1")
+	pressEditor(ed, "alt+/")
+	if got, want := ed.Text(), "# value = 1"; got != want {
+		t.Fatalf("alt+/ = %q, want %q", got, want)
+	}
+	pressEditor(ed, "alt+/")
+	if got, want := ed.Text(), "value = 1"; got != want {
+		t.Fatalf("alt+/ again = %q, want %q", got, want)
+	}
+}
+
+// Comment continuation reaches every language that declares a delimiter, and the languages
+// whose Enter handlers already own the line are unaffected.
+func TestCommentEnterAcrossLanguages(t *testing.T) {
+	for _, tc := range []struct{ path, content, want string }{
+		{"main.go", "// takes a path", "// takes a path\n// "},
+		{"os.cpp", "\t// note", "\t// note\n\t// "},
+		{"main.py", "# note", "# note\n# "},
+		{"init.lua", "-- note", "-- note\n-- "},
+		{"deploy.sh", "#!/bin/bash", "#!/bin/bash\n"},
+		// A comment outranks the language's block structure: no indent after this colon.
+		{"main.py", "# if x:", "# if x:\n# "},
+		// Markdown has no line comment, so its list continuation is untouched.
+		{"notes.md", "- item", "- item\n- "},
+	} {
+		ed := editorForLanguage(tc.path, tc.content)
+		pressEditor(ed, "end", "enter")
+		if got := ed.Text(); got != tc.want {
+			t.Errorf("%s Enter = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
 func TestYAMLEnter(t *testing.T) {
 	for _, tc := range []struct {
 		name, content, want string

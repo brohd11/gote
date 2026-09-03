@@ -8,8 +8,13 @@ simple TUI text editor built with Go and Bubbletea.
  - syntax highlighting for select extensions
  - diagnostics and completion through language servers for nine languages
  - brace-aware indent on Enter for the C family, Go, Rust, JS/TS and friends
+ - ctrl+/ toggles comments, over a selection or a single line
  - mouse support for scrolling, selection, right click
  - vaults store a collection of files for a focused view
+
+**Note:** `ctrl+/` is bound as `ctrl+_`, because that is the key code the chord actually
+produces — terminals put byte `0x1f` on the wire for it. Should your terminal swallow it
+entirely, `alt+/` does the same thing.
 
 **Note:** on MacOS, option is treated as alt, but the key does not reach the terminal input by default.
 `Terminal -> Settings -> Profiles -> Keyboard -> Use Option as Meta Key`
