@@ -78,6 +78,11 @@ func (s *homeScreen) editorContextItems(sh *core.Shared) []components.MenuItem {
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
 	c.RekeyDoc(s.currentPath, path, s.editor)
+	// Both paths, because a save is the only thing that can change a file's first line
+	// under gote: the old name may have just lost a shebang, the new one may have gained
+	// one, and a save-as onto an existing path inherits whatever was cached for it.
+	forgetSniffedLanguage(s.currentPath)
+	forgetSniffedLanguage(path)
 	s.currentPath = path
 	if c.lsp != nil {
 		c.lsp.DidSave(path)

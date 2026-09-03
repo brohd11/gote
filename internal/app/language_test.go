@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/brohd11/bubblestack/components"
@@ -144,5 +146,174 @@ func TestMigratedMarkdownAndYAMLEnter(t *testing.T) {
 		if got := ed.Text(); got != tc.want {
 			t.Errorf("%s Enter = %q, want %q", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestShellPairProfiles(t *testing.T) {
+	shell := languageForPath("deploy.sh").editor
+	if !hasPair(shell.AutoClosingPairs, '\'', '\'') || !hasPair(shell.AutoClosingPairs, '"', '"') {
+		t.Fatal("shell should pair both quotes: '...' is a literal string, not an apostrophe")
+	}
+	if hasPair(shell.AutoClosingPairs, '`', '`') {
+		t.Fatal("shell should leave backticks literal; $( ) is the pair that matters")
+	}
+	if shell.IndentSpaces != 2 {
+		t.Fatalf("shell IndentSpaces = %d, want 2", shell.IndentSpaces)
+	}
+	if fish := languageForPath("config.fish").editor; fish.IndentSpaces != 4 {
+		t.Fatalf("fish IndentSpaces = %d, want 4", fish.IndentSpaces)
+	}
+}
+
+func TestShellLSPProfiles(t *testing.T) {
+	for _, path := range []string{"deploy.sh", "lib.bash"} {
+		profile := languageForPath(path)
+		if profile == nil || profile.lsp == nil || profile.lsp.server != "bash" {
+			t.Fatalf("%s lsp = %#v, want the bash server", path, profile)
+		}
+		if profile.id != "shellscript" {
+			t.Fatalf("%s language id = %q, want shellscript", path, profile.id)
+		}
+		if profile.lsp.requireRootHit {
+			t.Fatalf("%s should still open a session from its own directory", path)
+		}
+	}
+	for _, path := range []string{"prompt.zsh", "config.fish"} {
+		if profile := languageForPath(path); profile == nil || profile.lsp != nil {
+			t.Fatalf("%s lsp = %#v, want editing behavior with no server", path, profile)
+		}
+	}
+}
+
+func TestShellEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"then", "if [ -f x ]; then", "if [ -f x ]; then\n  "},
+		{"elif", "elif [ -f y ]; then", "elif [ -f y ]; then\n  "},
+		{"else", "else", "else\n  "},
+		{"do", "for f in *; do", "for f in *; do\n  "},
+		{"case", `case "$1" in`, "case \"$1\" in\n  "},
+		{"case pattern", "  --check)", "  --check)\n    "},
+		{"branch end", "    ;;", "    ;;\n  "},
+		{"one line branch", "  --check) ;;", "  --check) ;;\n  "},
+		{"function brace", "run() {", "run() {\n  "},
+		{"subshell", "  (", "  (\n    "},
+		{"continuation", "  grep foo \\", "  grep foo \\\n    "},
+		{"carry indentation", "  echo hi", "  echo hi\n  "},
+		{"closer", "  fi", "  fi\n  "},
+		{"for without do", "for f in *", "for f in *\n"},
+		{"substitution", `  out="$(date)"`, "  out=\"$(date)\"\n  "},
+		{"plain line", "set -e", "set -e\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("deploy.sh", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("shell Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFishEnter(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"if", "if test -f x", "if test -f x\n    "},
+		{"function", "function greet", "function greet\n    "},
+		{"end carries", "    end", "    end\n    "},
+		{"plain line", "set -x foo bar", "set -x foo bar\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editorForLanguage("config.fish", tc.content)
+			pressEditor(ed, "end", "enter")
+			if got := ed.Text(); got != tc.want {
+				t.Fatalf("fish Enter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShellFilenameProfiles(t *testing.T) {
+	for path, want := range map[string]string{
+		"/home/me/.bashrc":       "shellscript",
+		"/home/me/.bash_profile": "shellscript",
+		"/home/me/.profile":      "shellscript",
+		"/home/me/.zshrc":        "zsh",
+		"/home/me/.zshenv":       "zsh",
+	} {
+		profile := languageForPath(path)
+		if profile == nil || profile.id != want {
+			t.Errorf("%s profile = %#v, want id %q", path, profile, want)
+		}
+		if profile != nil && profile.editor.OnEnter == nil {
+			t.Errorf("%s should carry the shell Enter handler", path)
+		}
+	}
+	if _, ok := sniffedLanguages.Load(filepath.Clean("/home/me/.bashrc")); ok {
+		t.Fatal("a filename hit should never reach the disk sniff")
+	}
+}
+
+func TestShebangLanguage(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"env bash", "#!/usr/bin/env bash\nset -e\n", "shellscript"},
+		{"env dash S", "#!/usr/bin/env -S bash -e\n", "shellscript"},
+		{"absolute sh", "#!/bin/sh\n", "shellscript"},
+		{"zsh", "#!/bin/zsh -f\n", "zsh"},
+		{"fish", "#!/usr/bin/env fish\n", "fish"},
+		{"python", "#!/usr/bin/env python3\n", "python"},
+		{"no shebang", "just some notes\n", ""},
+		{"bare hash", "# a comment\n", ""},
+		{"unknown interpreter", "#!/usr/bin/env tclsh\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.name)
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			sniffedLanguages.Delete(filepath.Clean(path))
+			profile := languageForPath(path)
+			if tc.want == "" {
+				if profile != nil {
+					t.Fatalf("%q resolved to %#v, want literal editing", tc.content, profile)
+				}
+				return
+			}
+			if profile == nil || profile.id != tc.want {
+				t.Fatalf("%q resolved to %#v, want id %q", tc.content, profile, tc.want)
+			}
+		})
+	}
+
+	missing := filepath.Join(dir, "never-written")
+	if profile := languageForPath(missing); profile != nil {
+		t.Fatalf("unreadable path resolved to %#v, want literal editing", profile)
+	}
+}
+
+func TestShebangSniffIsMemoized(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deploy")
+	if err := os.WriteFile(path, []byte("#!/bin/bash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if profile := languageForPath(path); profile == nil || profile.id != "shellscript" {
+		t.Fatalf("first resolve = %#v, want the shell profile", profile)
+	}
+	// Reconcile resolves every open buffer on every keystroke, so the answer has to come
+	// from the memo rather than the disk — rewriting the file must not change it.
+	if err := os.WriteFile(path, []byte("plain text now\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if profile := languageForPath(path); profile == nil || profile.id != "shellscript" {
+		t.Fatalf("memoized resolve = %#v, want the cached shell profile", profile)
+	}
+	forgetSniffedLanguage(path)
+	if profile := languageForPath(path); profile != nil {
+		t.Fatalf("resolve after a save = %#v, want the re-sniffed literal answer", profile)
 	}
 }

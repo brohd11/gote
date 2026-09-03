@@ -6,7 +6,7 @@ simple TUI text editor built with Go and Bubbletea.
  - simple text editing
  - minimal markdown previewer
  - syntax highlighting for select extensions
- - GDScript and Python diagnostics through language servers
+ - Shell, GDScript and Python diagnostics through language servers
  - mouse support for scrolling, selection, right click
  - vaults store a collection of files for a focused view
 
@@ -49,8 +49,17 @@ default is `false`.
 
 Language-server support starts lazily when a supported file is opened. Python uses
 [`pylsp`](https://github.com/python-lsp/python-lsp-server) over stdio; install it separately
-with `pip install python-lsp-server`. GDScript connects to the Godot editor's language
-server at `127.0.0.1:6005`, so the matching Godot project must already be running.
+with `pip install python-lsp-server`. Shell scripts (`.sh`, `.bash`, and anything a `#!`
+line names as a POSIX shell) use
+[`bash-language-server`](https://github.com/bash-lsp/bash-language-server), also over stdio;
+install it with `npm i -g bash-language-server`. GDScript connects to the Godot editor's
+language server at `127.0.0.1:6005`, so the matching Godot project must already be running.
+
+`.zsh` and `.fish` files get the shell editing behavior — quote and bracket pairing, and
+indent on Enter — but no language server: `bash-language-server` reports zsh-only and fish
+syntax as errors. It also analyzes the whole workspace in the background, which for a file
+with no project root above it means the directory it sits in; narrow that with a
+`globPattern` under its `initialization_options` if you open shell files from a large tree.
 
 Diagnostics appear in their own gutter column and in Actions → Diagnostics. The Actions
 and editor context menus independently toggle the diagnostics and git gutters and can
