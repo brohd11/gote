@@ -126,6 +126,9 @@ func TestCaretPanelPicksTheSideThatFits(t *testing.T) {
 
 func TestSignaturePanelIsBoxedAndOpaque(t *testing.T) {
 	s, _ := newHome(t)
+	// The hint anchors to the call it describes, so it needs one to anchor to.
+	s.editor.SetText("Reveal(")
+	s.editor.Reveal(components.EditorPosition{Column: 7})
 	s.applySignature(&lspRequestResult{
 		kind: lspReqSignature, path: s.currentPath,
 		signature: &lspSignature{

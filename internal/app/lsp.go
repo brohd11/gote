@@ -75,11 +75,16 @@ type lspCompletionRequest struct {
 }
 
 type lspCompletionResult struct {
-	id         uint64
-	path       string
-	editSeq    int
-	position   protocol.Position
-	items      []lspCompletionItem
+	id       uint64
+	path     string
+	editSeq  int
+	position protocol.Position
+	items    []lspCompletionItem
+	// incomplete is the server's isIncomplete: "ask me again as the user types" rather
+	// than "I truncated this". Nothing reads it, deliberately. gopls sets it on every
+	// answer — a three-item member list as readily as a scope-wide one — and the popup
+	// already schedules a fresh request on each identifier keystroke, so acting on the
+	// flag would ask for exactly what the debounce asks for anyway.
 	incomplete bool
 	err        error
 }

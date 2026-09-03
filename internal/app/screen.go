@@ -414,6 +414,10 @@ func clickModifierMatches(setting string, mod tea.KeyMod) bool {
 
 func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Action {
 	s.applyPendingJump()
+	// After the jump, so a caret that has just landed somewhere else is judged on where it
+	// landed. Here rather than in the typing hook because this is the exit every path that
+	// can move the caret shares — including the two that return before the hook runs.
+	s.dismissSignatureIfLeft()
 	s.refreshPreview()
 	s.syncPreviewScroll()
 	// Batched into the cmd lane rather than folded in with core.Seq: Seq builds an

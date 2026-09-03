@@ -154,7 +154,7 @@ language_servers:
 		!reflect.DeepEqual(cfg.LanguageServers["python"].Command, []string{"pylsp"}) ||
 		!reflect.DeepEqual(cfg.LanguageServers["bash"].Command, []string{"bash-language-server", "start"}) ||
 		!reflect.DeepEqual(cfg.LanguageServers["go"].Command, []string{"gopls"}) ||
-		cfg.LanguageServers["go"].InitializationOptions["usePlaceholders"] != true ||
+		cfg.LanguageServers["go"].InitializationOptions["completeFunctionCalls"] != false ||
 		!reflect.DeepEqual(cfg.LanguageServers["clangd"].Command, []string{"clangd"}) ||
 		!reflect.DeepEqual(cfg.LanguageServers["csharp"].Command, []string{"csharp-ls"}) ||
 		!reflect.DeepEqual(cfg.LanguageServers["rust"].Command, []string{"rust-analyzer"}) ||

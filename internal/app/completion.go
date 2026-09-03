@@ -25,7 +25,7 @@ type completionUI struct {
 	generation uint64
 	requestID  uint64
 	path       string
-	resultPos  protocol.Position // seeded LSP request position
+	resultPos  protocol.Position // the LSP request position: the identifier start
 	resultEnd  protocol.Position // real caret when that result was installed
 	start      components.EditorPosition
 }
@@ -81,7 +81,7 @@ func (s *homeScreen) requestCompletion(sh *core.Shared, trigger string, manual b
 	}
 	c := Of(sh)
 	c.lsp.Reconcile(c)
-	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
+	position := completionIdentifierStart(s.editor, s.editor.CursorPosition())
 	protocolPosition, ok := editorPositionToLSP(s.editor, position)
 	if !ok {
 		s.closeCompletion()
@@ -173,8 +173,7 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 	}
 	position := s.editor.CursorPosition()
 	start := completionIdentifierStart(s.editor, position)
-	seed := completionSeedPosition(s.editor, position)
-	protocolSeed, ok := editorPositionToLSP(s.editor, seed)
+	protocolSeed, ok := editorPositionToLSP(s.editor, start)
 	protocolEnd, endOK := editorPositionToLSP(s.editor, position)
 	if !ok || !endOK || protocolSeed != result.position || result.err != nil || len(result.items) == 0 {
 		s.closeCompletion()
@@ -244,9 +243,10 @@ func (s *homeScreen) acceptCompletion(item lspCompletionItem) {
 		}
 		end := components.EditorPosition{}
 		if item.Edit.Range.End == s.completion.resultPos || item.Edit.Range.End == s.completion.resultEnd {
-			// Extend an edit ending at either the request seed or the result's real
+			// Extend an edit ending at either the request position or the result's real
 			// caret through the current locally matched query. The first covers servers
-			// editing only the seed; the second keeps typing-after-result rebasing intact.
+			// editing only up to the asked position; the second keeps typing-after-result
+			// rebasing intact.
 			end = current
 		} else {
 			var endOK bool
@@ -288,6 +288,13 @@ func isCompletionIdentifierRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+// completionIdentifierStart is both the left edge of the local fuzzy query and the LSP
+// request position, so the server is always asked with an empty prefix: "bg" asks at the
+// start of the word and "value.bg" asks immediately after the dot. The server therefore
+// answers with everything in scope — or every member of the receiver — and completionQuery
+// carries the full typed word to the popup's own fuzzy match, which is the only thing that
+// narrows. Seeding the request one rune in (the old behavior) capped the candidate set at
+// names beginning with that rune, which fuzzy matching can never widen back out.
 func completionIdentifierStart(editor *components.EditorScreen, position components.EditorPosition) components.EditorPosition {
 	line, ok := editor.LineText(position.Line)
 	if !ok {
@@ -299,19 +306,6 @@ func completionIdentifierStart(editor *components.EditorScreen, position compone
 		column--
 	}
 	return components.EditorPosition{Line: position.Line, Column: column}
-}
-
-// completionSeedPosition is the deliberately broad LSP position: after the first
-// identifier rune, while completionQuery continues through the real caret. Thus both
-// "bg" and "value.bg" ask the server for its "b" candidates and let the popup fuzzy
-// match the full "bg" locally. With no identifier at the caret (including immediately
-// after a member-access trigger), the real caret remains the request position.
-func completionSeedPosition(editor *components.EditorScreen, position components.EditorPosition) components.EditorPosition {
-	start := completionIdentifierStart(editor, position)
-	if start.Line == position.Line && start.Column < position.Column {
-		return components.EditorPosition{Line: position.Line, Column: start.Column + 1}
-	}
-	return position
 }
 
 func completionQuery(editor *components.EditorScreen, start, end components.EditorPosition) (string, bool) {

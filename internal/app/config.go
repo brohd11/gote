@@ -128,8 +128,22 @@ func defaultLanguageServers() map[string]LanguageServerConfig {
 		"rust":       {Command: []string{"rust-analyzer"}},
 		"typescript": {Command: []string{"typescript-language-server", "--stdio"}},
 		"go": {
-			Command:               []string{"gopls"},
-			InitializationOptions: map[string]any{"usePlaceholders": true},
+			Command: []string{"gopls"},
+			// completeFunctionCalls off makes an accepted completion insert the name and
+			// nothing else. The parens are worth giving up because the parameter hint
+			// fires on a TYPED trigger character: when gopls supplies "()" itself, no "("
+			// keypress ever happens and the hint never appears for the call you just
+			// completed. Typing it yourself pairs the bracket and raises the hint, which
+			// is the whole point of having one.
+			//
+			// usePlaceholders is moot while calls are not completed at all, and is spelled
+			// out anyway so turning calls back on does not also bring back a completion
+			// that types "Sprintf(format string, a ...any)" into the buffer as literal
+			// text — abandoning that tab cycle leaves the signature in the code.
+			InitializationOptions: map[string]any{
+				"completeFunctionCalls": false,
+				"usePlaceholders":       false,
+			},
 		},
 		"python": {
 			Command: []string{"pylsp"},

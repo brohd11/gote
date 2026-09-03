@@ -39,7 +39,7 @@ func completionHomeFor(t *testing.T, name string) (*homeScreen, *core.Shared) {
 
 func showCompletion(t *testing.T, s *homeScreen, items ...lspCompletionItem) {
 	t.Helper()
-	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
+	position := completionIdentifierStart(s.editor, s.editor.CursorPosition())
 	lspPosition, ok := editorPositionToLSP(s.editor, position)
 	if !ok {
 		t.Fatal("could not convert cursor")
@@ -110,7 +110,7 @@ func TestCompletionPopupFuzzyFiltersAndRanks(t *testing.T) {
 func TestCompletionDoesNotInstallPopupWithoutFuzzyMatches(t *testing.T) {
 	s, sh := completionHome(t)
 	s.Update(sh, keyMsg("x = nope"))
-	position := completionSeedPosition(s.editor, s.editor.CursorPosition())
+	position := completionIdentifierStart(s.editor, s.editor.CursorPosition())
 	lspPosition, ok := editorPositionToLSP(s.editor, position)
 	if !ok {
 		t.Fatal("could not convert cursor")
@@ -154,33 +154,34 @@ func TestCompletionClosesWhenTypingRemovesLastMatch(t *testing.T) {
 	}
 }
 
-func TestCompletionSeedUsesFirstIdentifierRune(t *testing.T) {
+// The identifier start is the LSP request position, so the server is always asked with an
+// empty prefix and the whole typed word stays as the local fuzzy query.
+func TestCompletionRequestsAtIdentifierStart(t *testing.T) {
 	ed := components.NewEditorScreen(components.EditorOpts{})
 	tests := []struct {
 		name       string
 		text       string
 		caret      components.EditorPosition
 		wantStart  components.EditorPosition
-		wantSeed   components.EditorPosition
 		wantQuery  string
 		wantLSPCol uint32
 	}{
-		{"member", "ins.bg", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, components.EditorPosition{Column: 5}, "bg", 5},
-		{"ordinary", "bg", components.EditorPosition{Column: 2}, components.EditorPosition{}, components.EditorPosition{Column: 1}, "bg", 1},
-		{"empty member", "ins.", components.EditorPosition{Column: 4}, components.EditorPosition{Column: 4}, components.EditorPosition{Column: 4}, "", 4},
-		// The first rune is one editor column but two UTF-16 code units.
-		{"utf16", "obj.𐐀x", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, components.EditorPosition{Column: 5}, "𐐀x", 6},
+		{"member", "ins.bg", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, "bg", 4},
+		{"ordinary", "bg", components.EditorPosition{Column: 2}, components.EditorPosition{}, "bg", 0},
+		{"empty member", "ins.", components.EditorPosition{Column: 4}, components.EditorPosition{Column: 4}, "", 4},
+		// The member's first rune is one editor column but two UTF-16 code units; the
+		// request position sits before it, so the conversion must not drift either way.
+		{"utf16", "obj.𐐀x", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, "𐐀x", 4},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ed.SetText(tc.text)
 			start := completionIdentifierStart(ed, tc.caret)
-			seed := completionSeedPosition(ed, tc.caret)
 			query, ok := completionQuery(ed, start, tc.caret)
-			lspSeed, lspOK := editorPositionToLSP(ed, seed)
-			if !ok || !lspOK || start != tc.wantStart || seed != tc.wantSeed || query != tc.wantQuery || lspSeed.Character != tc.wantLSPCol {
-				t.Fatalf("start=%+v seed=%+v query=%q lsp=%+v; want start=%+v seed=%+v query=%q col=%d",
-					start, seed, query, lspSeed, tc.wantStart, tc.wantSeed, tc.wantQuery, tc.wantLSPCol)
+			lspStart, lspOK := editorPositionToLSP(ed, start)
+			if !ok || !lspOK || start != tc.wantStart || query != tc.wantQuery || lspStart.Character != tc.wantLSPCol {
+				t.Fatalf("start=%+v query=%q lsp=%+v; want start=%+v query=%q col=%d",
+					start, query, lspStart, tc.wantStart, tc.wantQuery, tc.wantLSPCol)
 			}
 		})
 	}
@@ -192,7 +193,7 @@ func TestCompletionSeededTextEditReplacesFullFuzzyQuery(t *testing.T) {
 	showCompletion(t, s, lspCompletionItem{
 		Label: "begins_with", FilterText: "begins_with", InsertText: "begins_with",
 		Edit: &lspCompletionEdit{
-			Range:   protocol.Range{Start: protocol.Position{Character: 4}, End: protocol.Position{Character: 5}},
+			Range:   protocol.Range{Start: protocol.Position{Character: 4}, End: protocol.Position{Character: 4}},
 			NewText: "begins_with",
 		},
 	})

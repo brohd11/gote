@@ -139,7 +139,10 @@ write rather than blocking it, so the buffer is left dirty and the next save set
 Set `auto-lsp: false`, disable an individual entry,
 or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
 Server-specific `initialization_options` can also be overridden; Python's built-in
-options enable pylsp's parameter snippets for callable completions.
+options enable pylsp's parameter snippets for callable completions, while Go's have gopls
+complete a function to its name alone. That is deliberate: the parameter hint fires on the
+`(` you type, so a completion that supplies the parentheses for you is a call you never
+get a hint for.
 
 ### Single Document
 
