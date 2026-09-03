@@ -646,6 +646,18 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	return core.Seq(core.Async(tea.Batch(cmd, focus, gutterCmd)), core.ResetToRoot())
 }
 
+// editorLeft is the terminal column the editor pane starts at: the sidebar's fixed width
+// when it is up, zero otherwise (buildModular puts the sidebar column first, at
+// sidebarWidth, and everything after it flexes). Caret-anchored panels use it as their
+// left bound — a tooltip is about the caret, so it belongs over the text rather than
+// spilling across the file list.
+func (s *homeScreen) editorLeft() int {
+	if s.sidebar {
+		return sidebarWidth
+	}
+	return 0
+}
+
 // editorSlot is the editor pane's flat slot index in the current layout.
 func (s *homeScreen) editorSlot() int {
 	if s.sidebar {

@@ -19,8 +19,13 @@ import (
 // hover traffic crosses Update at all (core/router_render.go).
 
 const (
-	hoverMaxWidth  = 62
+	hoverMaxWidth = 62
+	// Content rows, not rendered rows: PopupPanel's border adds two more.
 	hoverMaxHeight = 14
+	// The cells PopupPanel's border and padding take off the content width. It mirrors
+	// the package-private menuChromeW the panel adds back, so gote can budget the space
+	// a box will actually occupy before it wraps anything to fit.
+	panelChrome = 4
 )
 
 // hoverUI is the tooltip's whole state. Unlike the completion popup it holds no list and
@@ -30,6 +35,7 @@ const (
 type hoverUI struct {
 	popup *components.FloatingPopup
 	body  string
+	width int
 	path  string
 }
 
@@ -37,33 +43,105 @@ func (s *homeScreen) closeHover() {
 	s.hover = hoverUI{}
 }
 
-// dismissHoverOn retires the tooltip on the next thing the user does. A passive popup
-// that outlived its moment is the failure mode here, so the rule is deliberately blunt:
-// any key press, any click, any paste takes it down.
+// dismissHoverOn retires the tooltip on the next thing the user DOES. A press, a wheel
+// notch, a key or a paste is a new intent; a release or a drag-motion is the tail of a
+// gesture already under way — the rule the router (router_keys.go), ModularScreen and
+// MenuScreen each state for themselves.
+//
+// The distinction is load-bearing here, not stylistic. The context menu's Hover row fires
+// on the PRESS and pops the menu with it, so the matching RELEASE lands on this screen a
+// moment later — by which time the server has usually answered and the tooltip is up.
+// Treating that release as intent closed the tooltip the same click had just asked for,
+// which is why the row appeared to do nothing while alt+h worked.
+//
+// Motion is left out for the same reason and costs nothing today: cell-motion mode reports
+// motion only while a button is held, so a motion always belongs to a gesture whose press
+// has already been seen here.
 func (s *homeScreen) dismissHoverOn(msg tea.Msg) {
 	if s.hover.popup == nil {
 		return
 	}
 	switch msg.(type) {
-	case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg,
-		tea.MouseMotionMsg, tea.MouseReleaseMsg:
+	case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
 		s.closeHover()
 	}
 }
 
 func (s *homeScreen) applyHover(result *lspRequestResult) core.Action {
-	body := hoverBody(result.hover, min(max(s.w-6, 20), hoverMaxWidth))
+	width := s.panelWidth(hoverMaxWidth)
+	body := hoverBody(result.hover, width)
 	if body == "" {
 		s.closeHover()
 		return core.SetStatus("no hover info here")
 	}
 	s.hover = hoverUI{
-		popup: &components.FloatingPopup{Content: func() string { return s.hover.body }},
+		popup: &components.FloatingPopup{
+			Content: func() string { return components.PopupPanel(s.hover.body, s.hover.width) },
+		},
 		body:  body,
+		width: panelFit(body, width),
 		path:  result.path,
 	}
 	return core.Action{}
 }
+
+// panelWidth is the widest content a caret-anchored panel may wrap to: whatever is left
+// between the editor's own left edge and the right of the frame, once the box's chrome is
+// paid for, capped at max. Budgeting the chrome BEFORE wrapping is what keeps a panel
+// narrow enough to sit under the caret instead of being shoved somewhere it fits.
+func (s *homeScreen) panelWidth(max int) int {
+	available := s.w - s.editorLeft() - panelChrome - 1
+	if available < 20 {
+		available = 20
+	}
+	return min(max, available)
+}
+
+// panelFit is the width a panel is actually drawn at: its widest rendered row, never more
+// than the wrap budget. Without it every tooltip would be a full-width slab regardless of
+// what it says — the completion list sizes to its longest label for the same reason.
+func panelFit(body string, budget int) int {
+	width := 1
+	for _, line := range strings.Split(body, "\n") {
+		width = max(width, ansi.StringWidth(line))
+	}
+	return min(width, budget)
+}
+
+// caretPanel places a panel against the caret. It SHIFTS left to stay on screen rather
+// than right-aligning at the caret the way components.PlacePopupAt does: that helper
+// assumes a popup narrower than the caret's column, and a wider one flips to a negative x
+// which the compositor clamps to column 0 — the panel ends up pinned to the far left of
+// the screen, nowhere near the symbol it describes.
+//
+// leftBound keeps the box off the sidebar: a tooltip is about the caret, so it belongs
+// over the text rather than over the file list.
+func caretPanel(anchorX, anchorY, leftBound int, preferAbove bool) components.PopupPlacement {
+	return func(frameW, frameH, popupW, popupH int) (int, int) {
+		// Horizontal: start at the caret, slide left only as far as the right edge
+		// demands, and never left of the editor — unless honoring that would push the
+		// box off the right edge, in which case fitting on screen wins.
+		x := min(anchorX, frameW-popupW)
+		x = max(x, min(leftBound, max(frameW-popupW, 0)))
+		x = max(x, 0)
+
+		// Vertical: the preferred side, the other side, then wherever it fits.
+		first, second := anchorY+1, anchorY-popupH
+		if preferAbove {
+			first, second = second, first
+		}
+		y := first
+		if !fitsRow(y, popupH, frameH) {
+			y = second
+		}
+		if !fitsRow(y, popupH, frameH) {
+			y = 0
+		}
+		return x, y
+	}
+}
+
+func fitsRow(y, popupH, frameH int) bool { return y >= 0 && y+popupH <= frameH }
 
 // hoverBody turns a server's markdown into the few lines a tooltip can hold. It is not
 // run through components.RenderMarkdown: that renderer is for whole document pages and
@@ -111,9 +189,7 @@ func hoverBody(markdown string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// viewHover places the tooltip under the caret, flipping above it near the bottom edge —
-// the same anchor arithmetic the completion list uses, because they are answering the
-// same question about the same caret.
+// viewHover places the tooltip under the caret, flipping above it near the bottom edge.
 func (s *homeScreen) viewHover(sh *core.Shared, body string) string {
 	if s.hover.popup == nil || s.hover.path != s.currentPath {
 		return body
@@ -123,8 +199,6 @@ func (s *homeScreen) viewHover(sh *core.Shared, body string) string {
 		return body
 	}
 	y := absoluteY - sh.BodyY()
-	s.hover.popup.Placement = components.PlacePopupAt(components.PopupAnchor{
-		X: x, Y: y + 1, FlipX: x + 1, FlipY: y,
-	})
+	s.hover.popup.Placement = caretPanel(x, y, s.editorLeft(), false)
 	return s.hover.popup.ViewOver(body, s.w, s.h)
 }

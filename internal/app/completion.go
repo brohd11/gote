@@ -114,9 +114,14 @@ func (s *homeScreen) updateCompletionAfterParent(sh *core.Shared, msg tea.Msg, b
 			return nil
 		}
 		if s.completion.popup != nil {
+			// Presses, wheel notches and keys only — a release or a drag-motion ends a
+			// gesture rather than starting one (dismissHoverOn carries the full reasoning,
+			// and the bug that made it matter). No behavior changes here: this popup is
+			// never summoned by a mouse gesture, so the press has always dismissed it
+			// before its release could. The two lists are kept identical so the rule is
+			// one rule.
 			switch msg.(type) {
-			case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg,
-				tea.MouseMotionMsg, tea.MouseReleaseMsg:
+			case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
 				s.closeCompletion()
 			}
 		}

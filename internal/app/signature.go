@@ -24,6 +24,7 @@ import (
 type signatureUI struct {
 	popup *components.FloatingPopup
 	body  string
+	width int
 	path  string
 }
 
@@ -34,9 +35,14 @@ func (s *homeScreen) applySignature(result *lspRequestResult) core.Action {
 		s.closeSignature()
 		return core.Action{}
 	}
+	width := s.panelWidth(hoverMaxWidth)
+	body := renderSignature(*result.signature, width)
 	s.signature = signatureUI{
-		popup: &components.FloatingPopup{Content: func() string { return s.signature.body }},
-		body:  renderSignature(*result.signature, min(max(s.w-6, 20), hoverMaxWidth)),
+		popup: &components.FloatingPopup{
+			Content: func() string { return components.PopupPanel(s.signature.body, s.signature.width) },
+		},
+		body:  body,
+		width: panelFit(body, width),
 		path:  result.path,
 	}
 	return core.Action{}
@@ -100,8 +106,8 @@ func (s *homeScreen) updateSignatureAfterParent(sh *core.Shared, msg tea.Msg, be
 	return nil
 }
 
-// viewSignature places the hint one row ABOVE the caret, flipping below it at the top
-// edge — the mirror of the completion list's placement, which is what lets both be up.
+// viewSignature places the hint ABOVE the caret, dropping below it at the top edge — the
+// mirror of the completion list's placement, which is what lets both be up at once.
 func (s *homeScreen) viewSignature(sh *core.Shared, body string) string {
 	if s.signature.popup == nil || s.signature.path != s.currentPath {
 		return body
@@ -111,8 +117,6 @@ func (s *homeScreen) viewSignature(sh *core.Shared, body string) string {
 		return body
 	}
 	y := absoluteY - sh.BodyY()
-	s.signature.popup.Placement = components.PlacePopupAt(components.PopupAnchor{
-		X: x, Y: y, FlipX: x + 1, FlipY: y + 1,
-	})
+	s.signature.popup.Placement = caretPanel(x, y, s.editorLeft(), true)
 	return s.signature.popup.ViewOver(body, s.w, s.h)
 }
