@@ -2,12 +2,14 @@ package app
 
 import (
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	"github.com/brohd11/bubblestack/sysopen"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -92,6 +94,10 @@ func (s *homeScreen) previewScreen() *components.DocScreen {
 		// the reader is a view of the same document, so the two bars line up.
 		Title:  s.previewName() + " · preview",
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
+		// Bound here with the buffer accessor, and for the same reason: the reader is
+		// built over ONE document, so the directory its relative links resolve against is
+		// the one this document sits in.
+		Links: s.previewLinks(),
 		// No Help and no OnKey, which is what being a pane rather than a screen costs and
 		// saves: a ScreenPanel contributes no PanelHelp, so the way out is named by the
 		// host's bar instead (buildModular), and closing the reader is a change to the
@@ -166,6 +172,47 @@ func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, fresh bool) 
 	}
 }
 
+// previewLinks is what clicking a link in either preview does. Both previews share it:
+// they are two views of the same document, and a link means the same thing in each.
+//
+// A text file opens as a buffer — the editor is what gote HAS for text, so following a
+// link between notes is the same gesture as picking one from the sidebar, undo history
+// and all (openDoc). Anything else is handed to the OS: a URL to the browser, a file gote
+// can't display revealed in the file manager rather than launched, which is the
+// difference between being shown where a screenshot lives and having an image viewer
+// thrown over the terminal.
+//
+// A link to a file that isn't there does nothing. openDoc would happily open a buffer on
+// it and the first save would create it, so a typo'd link would quietly become a new
+// document.
+func (s *homeScreen) previewLinks() components.LinkHooks {
+	return components.LinkHooks{
+		Base: s.previewDir(),
+		URL:  func(_ *core.Shared, l components.Link) core.Action { return sysopen.URL(l.Target) },
+		File: func(_ *core.Shared, l components.Link) core.Action { return sysopen.Path(l.Path, true) },
+		Text: func(sh *core.Shared, l components.Link) core.Action {
+			if !l.Exists {
+				return core.Action{}
+			}
+			return s.openDoc(sh, l.Path)
+		},
+	}
+}
+
+// previewDir is what a relative link resolves against: the open document's own directory,
+// or the process's cwd for the unnamed scratch buffer, which has no directory of its own
+// until it is saved.
+func (s *homeScreen) previewDir() string {
+	if s.currentPath != "" {
+		return filepath.Dir(s.currentPath)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+}
+
 // previewName labels the preview with the saved filename or unsaved_N identity.
 func (s *homeScreen) previewName() string {
 	if s.currentPath == "" {
@@ -229,6 +276,9 @@ func (s *homeScreen) refreshPreview() {
 	s.previewSrc, s.previewW, s.previewMap = src, width, mapped
 	s.previewAt = -1 // the rows the last sync was computed against are gone
 	panel.SetLines(strings.Split(out, "\n"))
+	// Beside SetLines, never apart from it: the spans index THESE rows, and the next
+	// keystroke re-flows them.
+	panel.SetLinks(components.ScanLinks(out))
 }
 
 // syncPreviewScroll scrolls the live pane to follow the editor. The two views do not

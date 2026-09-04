@@ -196,6 +196,11 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// A bare "preview" on the edge, matching the two bordered list panels beside it —
 	// the pane's keys are in the help bar (PanelHelp) where the rest of the screen's are.
 	s.previewPanel.SetKeyHints(false)
+	// Wired once; the hooks are rebuilt per click because the directory a relative link
+	// resolves against moves with the open document.
+	s.previewPanel.OnLink = func(sh *core.Shared, l components.Link) core.Action {
+		return s.previewLinks().Do(sh, l)
+	}
 	s.modular = s.buildModular()
 	return s
 }
