@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -324,7 +324,7 @@ func waitRequestResult(t *testing.T, manager *lspManager) *lspRequestResult {
 
 // newRequestLaneCtx wires a live TCP server to one open Python buffer and waits until
 // its capabilities have been cached, which is the state every on-demand request needs.
-func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*Ctx, string, *components.EditorScreen) {
+func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*Ctx, string, *editor.Screen) {
 	t.Helper()
 	root := t.TempDir()
 	path := filepath.Join(root, "main.py")
@@ -334,7 +334,7 @@ func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*
 	c := New("test", cfg, Options{})
 	t.Cleanup(c.close)
 	c.lsp.changeDebounce = 30 * time.Millisecond
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText(text)
 	c.lsp.Reconcile(c)
 	waitLSPCall(t, server.calls, "initialize")
@@ -384,7 +384,7 @@ func TestLSPRequestLaneCarriesUTF16Position(t *testing.T) {
 	c, path, ed := newRequestLaneCtx(t, server, "𝄞x = 1\n")
 
 	// One astral rune (two UTF-16 units) then "x": rune column 2 is UTF-16 column 3.
-	position, ok := editorPositionToLSP(ed, components.EditorPosition{Line: 0, Column: 2})
+	position, ok := editorPositionToLSP(ed, editor.Position{Line: 0, Column: 2})
 	if !ok {
 		t.Fatal("the caret position did not convert")
 	}
@@ -524,7 +524,7 @@ func TestLSPTCPDocumentLifecycle(t *testing.T) {
 	c := New("test", cfg, Options{})
 	defer c.close()
 	c.lsp.changeDebounce = 30 * time.Millisecond
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText("print('one')\n")
 
 	if !c.lsp.Reconcile(c) {
@@ -593,7 +593,7 @@ func TestLSPDebouncesDocumentChanges(t *testing.T) {
 	c := New("test", cfg, Options{})
 	defer c.close()
 	c.lsp.changeDebounce = 80 * time.Millisecond
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText("first\n")
 	c.lsp.Reconcile(c)
 	waitLSPCall(t, server.calls, "open")
@@ -648,7 +648,7 @@ func TestLSPCompletionFlushesLatestDocumentAndProjectsItems(t *testing.T) {
 	c := New("test", cfg, Options{})
 	defer c.close()
 	c.lsp.changeDebounce = time.Second
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText("p")
 	c.lsp.Reconcile(c)
 	waitLSPCall(t, server.calls, "open")
@@ -687,7 +687,7 @@ func TestLSPCompletionFlushesLatestDocumentAndProjectsItems(t *testing.T) {
 		t.Fatalf("projected completion = %#v", result)
 	}
 	if item := result.items[1]; !item.Snippet || item.InsertText != "value" ||
-		!reflect.DeepEqual(item.Stops, []components.EditorCompletionStop{{Index: 1, Start: 0, End: 5}}) {
+		!reflect.DeepEqual(item.Stops, []editor.CompletionStop{{Index: 1, Start: 0, End: 5}}) {
 		t.Fatalf("projected snippet = %#v", item)
 	}
 
@@ -718,7 +718,7 @@ func TestLSPSaveFlushesPendingChange(t *testing.T) {
 	c := New("test", cfg, Options{})
 	defer c.close()
 	c.lsp.changeDebounce = time.Second
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText("before\n")
 	c.lsp.Reconcile(c)
 	waitLSPCall(t, server.calls, "open")
@@ -759,7 +759,7 @@ func TestLSPRestartOpensLatestPendingText(t *testing.T) {
 	c := New("test", cfg, Options{})
 	defer c.close()
 	c.lsp.changeDebounce = time.Second
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText("before\n")
 	c.lsp.Reconcile(c)
 	waitLSPCall(t, server.calls, "open")
@@ -822,7 +822,7 @@ func TestLSPStdioTransport(t *testing.T) {
 	}}
 	c := New("test", cfg, Options{})
 	defer c.close()
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 	ed.SetText("print('stdio')\n")
 	c.lsp.Reconcile(c)
 
@@ -951,7 +951,7 @@ func TestLSPInvalidTransportBackoffAndRestart(t *testing.T) {
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: "127.0.0.1:6005", Command: []string{"pylsp"}}
 	c := New("test", cfg, Options{})
 	defer c.close()
-	c.OpenDoc(path, components.EditorOpts{}).SetText("pass\n")
+	c.OpenDoc(path, editor.Opts{}).SetText("pass\n")
 	c.lsp.Reconcile(c)
 
 	waitFailure := func() {

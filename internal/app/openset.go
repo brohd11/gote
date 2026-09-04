@@ -3,7 +3,7 @@ package app
 import (
 	"path/filepath"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 )
 
 // openEntry is one retained editor buffer. id is its stable in-memory identity; path is
@@ -15,7 +15,7 @@ type openEntry struct {
 	name   string
 	path   string
 	root   string
-	editor *components.EditorScreen
+	editor *editor.Screen
 }
 
 // openSet owns every retained buffer, in opening order. Saved buffers use their path as
@@ -48,11 +48,11 @@ func (o *openSet) getPath(path string) (*openEntry, bool) {
 
 func (o *openSet) len() int { return len(o.order) }
 
-func (o *openSet) addFile(path, root string, ed *components.EditorScreen) {
+func (o *openSet) addFile(path, root string, ed *editor.Screen) {
 	o.add(openEntry{id: path, name: docName(path), path: path, root: root, editor: ed})
 }
 
-func (o *openSet) addUnsaved(id, name string, ed *components.EditorScreen) {
+func (o *openSet) addUnsaved(id, name string, ed *editor.Screen) {
 	o.add(openEntry{id: id, name: name, editor: ed})
 }
 
@@ -77,7 +77,7 @@ func (o *openSet) add(entry openEntry) {
 // rekey gives a buffer its saved-file identity. A tracked buffer keeps its own slot and
 // displaces any other buffer already holding newPath. An untracked startup buffer adopts
 // an existing target's slot, or appends when the target was not already open.
-func (o *openSet) rekey(oldID, newPath string, ed *components.EditorScreen) {
+func (o *openSet) rekey(oldID, newPath string, ed *editor.Screen) {
 	if newPath == "" || ed == nil {
 		return
 	}

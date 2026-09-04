@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 )
 
@@ -37,14 +37,14 @@ func (s *homeScreen) applyFormat(result *lspRequestResult) core.Action {
 // nothing: one range that will not convert means the server and the buffer disagree
 // about the document, and a partial format is worse than none. Sorting is left to
 // ApplyEdits, which has to order them to apply them safely anyway.
-func editorEditsFor(editor *components.EditorScreen, edits []lspTextEdit) ([]components.EditorEdit, bool) {
-	out := make([]components.EditorEdit, 0, len(edits))
+func editorEditsFor(ed *editor.Screen, edits []lspTextEdit) ([]editor.Edit, bool) {
+	out := make([]editor.Edit, 0, len(edits))
 	for _, edit := range edits {
-		r, ok := lspRangeToEditor(editor, edit.Range)
+		r, ok := lspRangeToEditor(ed, edit.Range)
 		if !ok {
 			return nil, false
 		}
-		out = append(out, components.EditorEdit{Range: r, Text: edit.NewText})
+		out = append(out, editor.Edit{Range: r, Text: edit.NewText})
 	}
 	// Stable document order, so a set that reaches ApplyEdits is already the sequence a
 	// reader would expect it to be in.

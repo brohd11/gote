@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -60,7 +60,7 @@ type lspCompletionEdit struct {
 type lspCompletionItem struct {
 	Label, Detail, FilterText, SortText, InsertText string
 	Edit                                            *lspCompletionEdit
-	Stops                                           []components.EditorCompletionStop
+	Stops                                           []editor.CompletionStop
 	Snippet                                         bool
 	Preselect                                       bool
 }
@@ -182,7 +182,7 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 	}
 	next := make(map[string]lspDocument)
 	hadDocuments := len(m.desired) > 0
-	c.EachDoc(func(path string, ed *components.EditorScreen) {
+	c.EachDoc(func(path string, ed *editor.Screen) {
 		profile := languageForPath(path)
 		if profile == nil || profile.lsp == nil || ed == nil {
 			return

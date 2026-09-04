@@ -4,14 +4,14 @@ import (
 	"strconv"
 	"unicode"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 )
 
 // parseLSPSnippet expands the practical completion subset Gote advertises: numbered
 // tab stops, placeholders, choices, escapes, and the final $0 stop. Variables,
 // transforms, nested placeholders, and linked/repeated stops are rejected so their
 // source syntax can never leak into the editor.
-func parseLSPSnippet(source string) (string, []components.EditorCompletionStop, bool) {
+func parseLSPSnippet(source string) (string, []editor.CompletionStop, bool) {
 	p := snippetParser{source: []rune(normalizeCompletionText(source)), seen: make(map[int]bool)}
 	if !p.parseText() {
 		return "", nil, false
@@ -23,7 +23,7 @@ type snippetParser struct {
 	source []rune
 	pos    int
 	output []rune
-	stops  []components.EditorCompletionStop
+	stops  []editor.CompletionStop
 	seen   map[int]bool
 }
 
@@ -191,7 +191,7 @@ func (p *snippetParser) addStop(index, start, end int) bool {
 		return false
 	}
 	p.seen[index] = true
-	p.stops = append(p.stops, components.EditorCompletionStop{Index: index, Start: start, End: end})
+	p.stops = append(p.stops, editor.CompletionStop{Index: index, Start: start, End: end})
 	return true
 }
 

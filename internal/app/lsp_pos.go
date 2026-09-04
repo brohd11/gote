@@ -3,7 +3,7 @@ package app
 import (
 	"unicode/utf16"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"go.lsp.dev/protocol"
 )
@@ -13,8 +13,8 @@ import (
 // feature that names a point in a document converts through here — which is why these
 // live in a file of their own rather than beside the first caller that needed them.
 
-func editorPositionToLSP(editor *components.EditorScreen, position components.EditorPosition) (protocol.Position, bool) {
-	line, ok := editor.LineText(position.Line)
+func editorPositionToLSP(ed *editor.Screen, position editor.Position) (protocol.Position, bool) {
+	line, ok := ed.LineText(position.Line)
 	if !ok {
 		return protocol.Position{}, false
 	}
@@ -25,42 +25,42 @@ func editorPositionToLSP(editor *components.EditorScreen, position components.Ed
 	return protocol.Position{Line: uint32(position.Line), Character: uint32(len(utf16.Encode(runes[:position.Column])))}, true
 }
 
-func lspPositionToEditor(editor *components.EditorScreen, position protocol.Position) (components.EditorPosition, bool) {
-	line, ok := editor.LineText(int(position.Line))
+func lspPositionToEditor(ed *editor.Screen, position protocol.Position) (editor.Position, bool) {
+	line, ok := ed.LineText(int(position.Line))
 	if !ok {
-		return components.EditorPosition{}, false
+		return editor.Position{}, false
 	}
 	target, units := int(position.Character), 0
 	for i, r := range []rune(line) {
 		if units == target {
-			return components.EditorPosition{Line: int(position.Line), Column: i}, true
+			return editor.Position{Line: int(position.Line), Column: i}, true
 		}
 		width := 1
 		if utf16.RuneLen(r) == 2 {
 			width = 2
 		}
 		if units+width > target {
-			return components.EditorPosition{}, false
+			return editor.Position{}, false
 		}
 		units += width
 	}
 	if units == target {
-		return components.EditorPosition{Line: int(position.Line), Column: len([]rune(line))}, true
+		return editor.Position{Line: int(position.Line), Column: len([]rune(line))}, true
 	}
-	return components.EditorPosition{}, false
+	return editor.Position{}, false
 }
 
 // lspRangeToEditor converts both ends of an LSP range against a live buffer.
-func lspRangeToEditor(editor *components.EditorScreen, r protocol.Range) (components.EditorRange, bool) {
-	start, ok := lspPositionToEditor(editor, r.Start)
+func lspRangeToEditor(ed *editor.Screen, r protocol.Range) (editor.Range, bool) {
+	start, ok := lspPositionToEditor(ed, r.Start)
 	if !ok {
-		return components.EditorRange{}, false
+		return editor.Range{}, false
 	}
-	end, ok := lspPositionToEditor(editor, r.End)
+	end, ok := lspPositionToEditor(ed, r.End)
 	if !ok {
-		return components.EditorRange{}, false
+		return editor.Range{}, false
 	}
-	return components.EditorRange{Start: start, End: end}, true
+	return editor.Range{Start: start, End: end}, true
 }
 
 // lspPositionToEditorClamped is the conversion a JUMP needs. A jump target names a point
@@ -68,16 +68,16 @@ func lspRangeToEditor(editor *components.EditorScreen, r protocol.Range) (compon
 // it, or (for a whole-symbol range) that legitimately points one past the last line. An
 // exact conversion failing there should still land the caret somewhere sensible rather
 // than refusing to navigate, so this clamps to the nearest real position instead.
-func lspPositionToEditorClamped(editor *components.EditorScreen, position protocol.Position) components.EditorPosition {
-	if exact, ok := lspPositionToEditor(editor, position); ok {
+func lspPositionToEditorClamped(ed *editor.Screen, position protocol.Position) editor.Position {
+	if exact, ok := lspPositionToEditor(ed, position); ok {
 		return exact
 	}
 	line := int(position.Line)
-	text, ok := editor.LineText(line)
+	text, ok := ed.LineText(line)
 	if !ok {
 		// Past the end of the buffer: the line itself is the best guess, and
 		// EditorScreen.Reveal rejects it if the buffer is still loading.
-		return components.EditorPosition{Line: line}
+		return editor.Position{Line: line}
 	}
-	return components.EditorPosition{Line: line, Column: len([]rune(text))}
+	return editor.Position{Line: line, Column: len([]rune(text))}
 }

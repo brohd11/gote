@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
-func editorForLanguage(path, content string) *components.EditorScreen {
-	ed := components.NewEditorScreen(components.EditorOpts{
+func editorForLanguage(path, content string) *editor.Screen {
+	ed := editor.New(editor.Opts{
 		Path:            path,
 		ResolveLanguage: editorLanguageForPath,
 	})
@@ -19,7 +19,7 @@ func editorForLanguage(path, content string) *components.EditorScreen {
 	return ed
 }
 
-func pressEditor(ed *components.EditorScreen, keys ...string) {
+func pressEditor(ed *editor.Screen, keys ...string) {
 	for _, key := range keys {
 		ed.Update(nil, keyMsg(key))
 	}
@@ -48,7 +48,7 @@ func TestLanguageForPath(t *testing.T) {
 	}
 }
 
-func hasPair(pairs []components.EditorPair, open, close rune) bool {
+func hasPair(pairs []editor.Pair, open, close rune) bool {
 	for _, pair := range pairs {
 		if pair.Open == open && pair.Close == close {
 			return true

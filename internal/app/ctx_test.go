@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 )
 
 // TestCloseDoc covers the open-set removal: the next doc is the one after the closed
@@ -15,7 +15,7 @@ func TestCloseDoc(t *testing.T) {
 	newCtx := func(paths ...string) *Ctx {
 		c := &Ctx{open: newOpenSet()}
 		for _, p := range paths {
-			c.OpenDoc(p, components.EditorOpts{})
+			c.OpenDoc(p, editor.Opts{})
 		}
 		return c
 	}
@@ -198,7 +198,7 @@ func TestAddAndSwitchVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := New("dev", DefaultConfig(), Options{})
-	old := c.OpenDoc(filepath.Join(home, "old.md"), components.EditorOpts{})
+	old := c.OpenDoc(filepath.Join(home, "old.md"), editor.Opts{})
 
 	if err := c.AddVault("notes", vault); err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ func TestRekeyDoc(t *testing.T) {
 	newCtx := func(paths ...string) *Ctx {
 		c := &Ctx{open: newOpenSet()}
 		for _, p := range paths {
-			c.OpenDoc(p, components.EditorOpts{})
+			c.OpenDoc(p, editor.Opts{})
 		}
 		return c
 	}
@@ -281,7 +281,7 @@ func TestRekeyDoc(t *testing.T) {
 
 	// The scratch buffer has no path at all until a save gives it one.
 	c = newCtx("a")
-	scratch := components.NewEditorScreen(components.EditorOpts{})
+	scratch := editor.New(editor.Opts{})
 	c.RekeyDoc("", "fresh.md", scratch)
 	eq(t, order(c), []string{"a", "fresh.md"})
 	if got, _ := c.Doc("fresh.md"); got != scratch {
@@ -316,7 +316,7 @@ func TestOpenDocsKeepOriginRoot(t *testing.T) {
 		Files:   []DocFile{{Name: "todo.md", Path: path, Root: root}},
 		open:    newOpenSet(),
 	}
-	ed := c.OpenDoc(path, components.EditorOpts{})
+	ed := c.OpenDoc(path, editor.Opts{})
 
 	c.Mode = ModeHome
 	docs := c.OpenDocs()
@@ -339,7 +339,7 @@ func TestOpenDocsKeepOriginRoot(t *testing.T) {
 func TestUnsavedBuffersHaveIdentityWithoutAFilePath(t *testing.T) {
 	c := &Ctx{open: newOpenSet()}
 	id, name := c.newUnsavedIdentity()
-	ed := components.NewEditorScreen(components.EditorOpts{Title: name})
+	ed := editor.New(editor.Opts{Title: name})
 	c.trackUnsaved(id, name, ed)
 
 	docs := c.OpenDocs()
@@ -347,7 +347,7 @@ func TestUnsavedBuffersHaveIdentityWithoutAFilePath(t *testing.T) {
 		t.Fatalf("pathless Open metadata = %+v", docs)
 	}
 	visited := false
-	c.EachDoc(func(string, *components.EditorScreen) { visited = true })
+	c.EachDoc(func(string, *editor.Screen) { visited = true })
 	if visited {
 		t.Fatal("file-backed consumers must not receive unsaved buffers")
 	}

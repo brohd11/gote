@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	"go.lsp.dev/protocol"
@@ -157,21 +157,21 @@ func TestCompletionClosesWhenTypingRemovesLastMatch(t *testing.T) {
 // The identifier start is the LSP request position, so the server is always asked with an
 // empty prefix and the whole typed word stays as the local fuzzy query.
 func TestCompletionRequestsAtIdentifierStart(t *testing.T) {
-	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed := editor.New(editor.Opts{})
 	tests := []struct {
 		name       string
 		text       string
-		caret      components.EditorPosition
-		wantStart  components.EditorPosition
+		caret      editor.Position
+		wantStart  editor.Position
 		wantQuery  string
 		wantLSPCol uint32
 	}{
-		{"member", "ins.bg", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, "bg", 4},
-		{"ordinary", "bg", components.EditorPosition{Column: 2}, components.EditorPosition{}, "bg", 0},
-		{"empty member", "ins.", components.EditorPosition{Column: 4}, components.EditorPosition{Column: 4}, "", 4},
+		{"member", "ins.bg", editor.Position{Column: 6}, editor.Position{Column: 4}, "bg", 4},
+		{"ordinary", "bg", editor.Position{Column: 2}, editor.Position{}, "bg", 0},
+		{"empty member", "ins.", editor.Position{Column: 4}, editor.Position{Column: 4}, "", 4},
 		// The member's first rune is one editor column but two UTF-16 code units; the
 		// request position sits before it, so the conversion must not drift either way.
-		{"utf16", "obj.𐐀x", components.EditorPosition{Column: 6}, components.EditorPosition{Column: 4}, "𐐀x", 4},
+		{"utf16", "obj.𐐀x", editor.Position{Column: 6}, editor.Position{Column: 4}, "𐐀x", 4},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,14 +237,14 @@ func TestCompletionEscapeOnlyClosesPopup(t *testing.T) {
 }
 
 func TestCompletionUTF16Positions(t *testing.T) {
-	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed := editor.New(editor.Opts{})
 	ed.SetText("a😀b")
-	position, ok := editorPositionToLSP(ed, components.EditorPosition{Line: 0, Column: 2})
+	position, ok := editorPositionToLSP(ed, editor.Position{Line: 0, Column: 2})
 	if !ok || position.Character != 3 {
 		t.Fatalf("rune column 2 -> UTF-16 = %+v,%v", position, ok)
 	}
 	back, ok := lspPositionToEditor(ed, protocol.Position{Line: 0, Character: 3})
-	if !ok || back != (components.EditorPosition{Line: 0, Column: 2}) {
+	if !ok || back != (editor.Position{Line: 0, Column: 2}) {
 		t.Fatalf("UTF-16 column 3 -> editor = %+v,%v", back, ok)
 	}
 	if _, ok := lspPositionToEditor(ed, protocol.Position{Line: 0, Character: 2}); ok {
@@ -262,7 +262,7 @@ func TestCompletionPairsPlainTrailingOpener(t *testing.T) {
 	if got := s.editor.Text(); got != "my_func()" {
 		t.Fatalf("paired completion = %q", got)
 	}
-	if got := s.editor.CursorPosition(); got != (components.EditorPosition{Column: 8}) {
+	if got := s.editor.CursorPosition(); got != (editor.Position{Column: 8}) {
 		t.Fatalf("paired completion caret = %+v", got)
 	}
 }
@@ -272,7 +272,7 @@ func TestCompletionInstallsSnippetTabStops(t *testing.T) {
 	s.Update(sh, keyMsg("ca"))
 	showCompletion(t, s, lspCompletionItem{
 		Label: "call", FilterText: "call", InsertText: "call(first, second)", Snippet: true,
-		Stops: []components.EditorCompletionStop{
+		Stops: []editor.CompletionStop{
 			{Index: 1, Start: 5, End: 10}, {Index: 2, Start: 12, End: 18}, {Index: 0, Start: 19, End: 19},
 		},
 	})
@@ -284,7 +284,7 @@ func TestCompletionInstallsSnippetTabStops(t *testing.T) {
 	if got := s.editor.Text(); got != "call(x, y)" {
 		t.Fatalf("snippet edits = %q", got)
 	}
-	if got := s.editor.CursorPosition(); got != (components.EditorPosition{Column: 10}) {
+	if got := s.editor.CursorPosition(); got != (editor.Position{Column: 10}) {
 		t.Fatalf("snippet final caret = %+v", got)
 	}
 }

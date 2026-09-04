@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/lipgloss/v2"
@@ -51,7 +52,7 @@ func (s *homeScreen) refreshDiagnosticSigns() {
 	s.editor.SetSignColumn(diagnosticSignColumn, diagnosticSigns(m.Diagnostics(s.currentPath)))
 }
 
-func diagnosticSigns(diagnostics []lspDiagnostic) map[int]components.Sign {
+func diagnosticSigns(diagnostics []lspDiagnostic) map[int]editor.Sign {
 	best := make(map[int]protocol.DiagnosticSeverity)
 	for _, diagnostic := range diagnostics {
 		severity := normalizedSeverity(diagnostic.Severity)
@@ -63,10 +64,10 @@ func diagnosticSigns(diagnostics []lspDiagnostic) map[int]components.Sign {
 	if len(best) == 0 {
 		return nil
 	}
-	signs := make(map[int]components.Sign, len(best))
+	signs := make(map[int]editor.Sign, len(best))
 	for line, severity := range best {
 		text, color := diagnosticMark(severity)
-		signs[line] = components.Sign{Text: text, Style: lipgloss.NewStyle().Foreground(color)}
+		signs[line] = editor.Sign{Text: text, Style: lipgloss.NewStyle().Foreground(color)}
 	}
 	return signs
 }

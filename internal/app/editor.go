@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,8 +16,8 @@ import (
 // three ways out and back: ctrl+x closes the buffer, esc hands the keys back, ctrl+s
 // writes it and stays. Path is filled in by whoever constructs the editor (Ctx.OpenDoc
 // for a doc, left empty for the scratch buffer).
-func (s *homeScreen) editorOpts() components.EditorOpts {
-	return components.EditorOpts{
+func (s *homeScreen) editorOpts() editor.Opts {
+	return editor.Opts{
 		OnExit:          s.editorExit,
 		OnRelease:       s.editorRelease,
 		OnSaved:         s.editorSaved,
@@ -36,7 +37,7 @@ func (s *homeScreen) installScratch(c *Ctx) {
 	opts := s.editorOpts()
 	opts.Title, opts.Crumb = name, name
 	s.currentID, s.currentPath, s.currentName = id, "", name
-	s.editor = components.NewEditorScreen(opts)
+	s.editor = editor.New(opts)
 }
 
 // newUnsavedBuffer implements ctrl+n in the multi-document workspace. The untouched

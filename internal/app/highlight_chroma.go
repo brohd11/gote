@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
@@ -17,7 +17,7 @@ import (
 //
 // Chroma is the right tokenizer for this because it is lossless — the Values of the
 // tokens it emits concatenate back to the exact input — which is precisely the contract
-// components.Span demands (the editor drops to a plain render for any line whose spans
+// editor.Span demands (the editor drops to a plain render for any line whose spans
 // don't reconstruct it). Nothing here goes near chroma's formatters: those exist to
 // write ANSI, and the editor needs styled *runs*, which it composites itself.
 
@@ -74,21 +74,21 @@ func styleFor(tt chroma.TokenType) lipgloss.Style {
 	return lipgloss.Style{}
 }
 
-// chromaHighlighter is the components.Highlighter chroma backs. Parse tokenizes the
+// chromaHighlighter is the editor.Highlighter chroma backs. Parse tokenizes the
 // whole document and bakes per-line spans; HighlightLine is then a lookup. The lexer is
 // fixed at construction (the language profile chooses it), so no per-parse detection.
 type chromaHighlighter struct {
 	lexer   chroma.Lexer
-	lines   [][]components.Span
+	lines   [][]editor.Span
 	restart []int // per row, a nearby root-like opener for provisional fragment parses
 }
 
-var _ components.Highlighter = (*chromaHighlighter)(nil)
-var _ components.HighlightRestartProvider = (*chromaHighlighter)(nil)
+var _ editor.Highlighter = (*chromaHighlighter)(nil)
+var _ editor.HighlightRestartProvider = (*chromaHighlighter)(nil)
 
-func chromaHighlighterFactory(lexer chroma.Lexer) func() components.Highlighter {
+func chromaHighlighterFactory(lexer chroma.Lexer) func() editor.Highlighter {
 	lexer = chroma.Coalesce(lexer)
-	return func() components.Highlighter { return &chromaHighlighter{lexer: lexer} }
+	return func() editor.Highlighter { return &chromaHighlighter{lexer: lexer} }
 }
 
 // Parse tokenizes doc and splits the token stream into per-line spans. Tokens cross line
@@ -110,7 +110,7 @@ func (h *chromaHighlighter) Parse(doc string) {
 	}
 	// One row per source line up front, so a token that touches no line (and a document
 	// whose stream ends early) still leaves the rows addressable.
-	h.lines = make([][]components.Span, strings.Count(doc, "\n")+1)
+	h.lines = make([][]editor.Span, strings.Count(doc, "\n")+1)
 	h.restart = make([]int, len(h.lines))
 	for row := range h.restart {
 		h.restart[row] = row
@@ -138,7 +138,7 @@ func (h *chromaHighlighter) Parse(doc string) {
 			if part == "" || row >= len(h.lines) {
 				continue
 			}
-			h.lines[row] = append(h.lines[row], components.Span{Text: part, Style: style})
+			h.lines[row] = append(h.lines[row], editor.Span{Text: part, Style: style})
 		}
 	}
 }
@@ -158,7 +158,7 @@ func chromaRestartFamily(tt chroma.TokenType) int {
 
 // HighlightLine returns the baked spans for row, or nil when the row is outside what was
 // parsed (the editor renders those plain).
-func (h *chromaHighlighter) HighlightLine(row int) []components.Span {
+func (h *chromaHighlighter) HighlightLine(row int) []editor.Span {
 	if row < 0 || row >= len(h.lines) {
 		return nil
 	}

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"charm.land/lipgloss/v2"
 )
@@ -14,7 +14,7 @@ type markdownWantSpan struct {
 	style lipgloss.Style
 }
 
-func markdownRow(doc string, row int) []components.Span {
+func markdownRow(doc string, row int) []editor.Span {
 	hl := newMarkdownHighlighter()
 	hl.Parse(doc)
 	return hl.HighlightLine(row)

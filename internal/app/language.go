@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"github.com/alecthomas/chroma/v2/lexers"
 )
@@ -17,7 +17,7 @@ import (
 // identifier a later client will need.
 type languageProfile struct {
 	id     string
-	editor components.EditorLanguageConfig
+	editor editor.LanguageConfig
 	lsp    *languageLSP
 }
 
@@ -36,7 +36,7 @@ type languageLSP struct {
 }
 
 var (
-	codePairs = []components.EditorPair{
+	codePairs = []editor.Pair{
 		{Open: '(', Close: ')'},
 		{Open: '[', Close: ']'},
 		{Open: '{', Close: '}'},
@@ -44,17 +44,17 @@ var (
 		{Open: '"', Close: '"'},
 		{Open: '`', Close: '`'},
 	}
-	markdownSurroundPairs = append(append([]components.EditorPair{}, codePairs...),
-		components.EditorPair{Open: '*', Close: '*'},
-		components.EditorPair{Open: '_', Close: '_'},
+	markdownSurroundPairs = append(append([]editor.Pair{}, codePairs...),
+		editor.Pair{Open: '*', Close: '*'},
+		editor.Pair{Open: '_', Close: '_'},
 	)
-	yamlPairs = []components.EditorPair{
+	yamlPairs = []editor.Pair{
 		{Open: '[', Close: ']'},
 		{Open: '{', Close: '}'},
 		{Open: '\'', Close: '\''},
 		{Open: '"', Close: '"'},
 	}
-	gdscriptPairs = []components.EditorPair{
+	gdscriptPairs = []editor.Pair{
 		{Open: '(', Close: ')'},
 		{Open: '[', Close: ']'},
 		{Open: '{', Close: '}'},
@@ -65,7 +65,7 @@ var (
 	// shell a '...' is a literal string, not an apostrophe in prose. Backticks are excluded
 	// the other way — legacy command substitution, where $( ) is what the parens already
 	// cover, so a lone backtick is more often quoted text than an opener.
-	shellPairs = []components.EditorPair{
+	shellPairs = []editor.Pair{
 		{Open: '(', Close: ')'},
 		{Open: '[', Close: ']'},
 		{Open: '{', Close: '}'},
@@ -151,7 +151,7 @@ func buildLanguageProfiles() map[string]*languageProfile {
 		if aliases := lexer.Config().Aliases; len(aliases) > 0 {
 			id = aliases[0]
 		}
-		cfg := components.EditorLanguageConfig{
+		cfg := editor.LanguageConfig{
 			NewHighlighter:   chromaHighlighterFactory(lexer),
 			AutoClosingPairs: codePairs,
 			SurroundingPairs: codePairs,
@@ -248,7 +248,7 @@ func buildLanguageProfiles() map[string]*languageProfile {
 
 	markdown := &languageProfile{
 		id: "markdown",
-		editor: components.EditorLanguageConfig{
+		editor: editor.LanguageConfig{
 			NewHighlighter:   newMarkdownHighlighter,
 			AutoClosingPairs: codePairs,
 			SurroundingPairs: markdownSurroundPairs,
@@ -437,7 +437,7 @@ func shebangExt(path string) string {
 	return extByInterpreter[strings.ToLower(filepath.Base(fields[0]))]
 }
 
-func editorLanguageForPath(path string) *components.EditorLanguageConfig {
+func editorLanguageForPath(path string) *editor.LanguageConfig {
 	profile := languageForPath(path)
 	if profile == nil {
 		return nil
@@ -445,7 +445,7 @@ func editorLanguageForPath(path string) *components.EditorLanguageConfig {
 	return &profile.editor
 }
 
-func afterLeadingIndent(ctx components.EditorEnterContext) bool {
+func afterLeadingIndent(ctx editor.EnterContext) bool {
 	return strings.HasPrefix(ctx.Before, ctx.LeadingIndent)
 }
 
@@ -486,13 +486,13 @@ func (it markdownItem) next() string {
 //
 // The markers are exactly the set the highlighter's listMarkerEnd paints — the two should
 // not disagree about what a list is.
-func markdownEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+func markdownEnter(ctx editor.EnterContext) (editor.EnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	item, ok := parseMarkdownItem(ctx.Before, ctx.LeadingIndent)
 	if !ok {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	if item.text == "" && strings.TrimSpace(ctx.After) == "" {
 		if out := dropIndentUnit(item.indent, ctx.IndentUnit); out != item.indent {
@@ -500,11 +500,11 @@ func markdownEnter(ctx components.EditorEnterContext) (components.EditorEnterAct
 			// item moved a level left, and its number in the list it lands in cannot be
 			// read off one line. Renderers renumber an ordered list from its first item
 			// anyway, so the digits here are for the writer, not the output.
-			return components.EditorEnterAction{Rewrite: true, Line: out + item.lead(item.marker)}, true
+			return editor.EnterAction{Rewrite: true, Line: out + item.lead(item.marker)}, true
 		}
-		return components.EditorEnterAction{Rewrite: true, Line: ""}, true
+		return editor.EnterAction{Rewrite: true, Line: ""}, true
 	}
-	return components.EditorEnterAction{Prefix: item.indent + item.next()}, true
+	return editor.EnterAction{Prefix: item.indent + item.next()}, true
 }
 
 func parseMarkdownItem(before, indent string) (markdownItem, bool) {
@@ -592,9 +592,9 @@ func markdownTaskBox(rest string) int {
 // key nested under it hangs off — so `- name:` at column zero opens at column four, not
 // two. Everything below the marker therefore measures from base rather than from the raw
 // leading indent.
-func yamlEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+func yamlEnter(ctx editor.EnterContext) (editor.EnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	rest := strings.TrimPrefix(ctx.Before, ctx.LeadingIndent)
 	base, marker := ctx.LeadingIndent, ""
@@ -605,11 +605,11 @@ func yamlEnter(ctx components.EditorEnterContext) (components.EditorEnterAction,
 	content := strings.TrimSpace(rest)
 	switch {
 	case yamlOpensBlock(content):
-		return components.EditorEnterAction{Prefix: base + ctx.IndentUnit}, true
+		return editor.EnterAction{Prefix: base + ctx.IndentUnit}, true
 	case marker != "" && content != "":
-		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + marker}, true
+		return editor.EnterAction{Prefix: ctx.LeadingIndent + marker}, true
 	}
-	return components.EditorEnterAction{Prefix: base}, true
+	return editor.EnterAction{Prefix: base}, true
 }
 
 // yamlMarkerWidth is the width of a leading sequence marker — the dash and the spaces
@@ -676,8 +676,8 @@ func endsWithOpener(line string) bool {
 // bracketBlock is the action for a caret between a bracket pair: the closer moves down to
 // its own line at the current indentation and the caret lands on an indented line between
 // the two.
-func bracketBlock(ctx components.EditorEnterContext) components.EditorEnterAction {
-	return components.EditorEnterAction{
+func bracketBlock(ctx editor.EnterContext) editor.EnterAction {
+	return editor.EnterAction{
 		Prefix: ctx.LeadingIndent + ctx.IndentUnit,
 		Block:  true,
 		Closer: ctx.LeadingIndent,
@@ -694,9 +694,9 @@ var blockEndStatements = map[string]bool{
 // and the one place they differ (GDScript indents with a tab, Python with four spaces) is
 // a profile setting rather than a rule, so IndentUnit already carries it. alt+i still
 // overrides that unit for the current editor.
-func colonBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+func colonBlockEnter(ctx editor.EnterContext) (editor.EnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	if insideBracket(ctx.Before, ctx.After) {
 		return bracketBlock(ctx), true
@@ -704,11 +704,11 @@ func colonBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterA
 	trimmed := strings.TrimSpace(ctx.Before)
 	switch {
 	case strings.HasSuffix(trimmed, ":"), strings.HasSuffix(trimmed, "\\"), endsWithOpener(trimmed):
-		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
+		return editor.EnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
 	case blockEndStatements[firstWord(trimmed)]:
-		return components.EditorEnterAction{Prefix: dropIndentUnit(ctx.LeadingIndent, ctx.IndentUnit)}, true
+		return editor.EnterAction{Prefix: dropIndentUnit(ctx.LeadingIndent, ctx.IndentUnit)}, true
 	}
-	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
+	return editor.EnterAction{Prefix: ctx.LeadingIndent}, true
 }
 
 // braceBlockEnter serves every brace-delimited language in braceIndent. It is
@@ -719,9 +719,9 @@ func colonBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterA
 //
 // The trailing colon covers switch cases, defaults and labels across the whole family, and
 // in JS/TS an object key whose value starts on the next line.
-func braceBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+func braceBlockEnter(ctx editor.EnterContext) (editor.EnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	if insideBracket(ctx.Before, ctx.After) {
 		return bracketBlock(ctx), true
@@ -730,9 +730,9 @@ func braceBlockEnter(ctx components.EditorEnterContext) (components.EditorEnterA
 	// A trailing colon in Go is a switch case, a default, or a label — each of which opens
 	// a body one level in.
 	if endsWithOpener(trimmed) || strings.HasSuffix(trimmed, ":") {
-		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
+		return editor.EnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
 	}
-	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
+	return editor.EnterAction{Prefix: ctx.LeadingIndent}, true
 }
 
 // firstWord is the line's leading whitespace-delimited token, or "" for a blank line.
@@ -768,18 +768,18 @@ var shellBranchEnd = map[string]bool{";;": true, ";&": true, ";;&": true}
 // — need no rule: they already sit at the level the next line wants, so carrying is right.
 // Dedenting one as you type it is the editor's alt+, and deliberately not this handler's
 // job, the same division gdscriptEnter draws.
-func shellEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+func shellEnter(ctx editor.EnterContext) (editor.EnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	trimmed := strings.TrimSpace(ctx.Before)
 	switch {
 	case shellBranchEnd[trimmed]:
-		return components.EditorEnterAction{Prefix: dropIndentUnit(ctx.LeadingIndent, ctx.IndentUnit)}, true
+		return editor.EnterAction{Prefix: dropIndentUnit(ctx.LeadingIndent, ctx.IndentUnit)}, true
 	case shellOpensBlock(trimmed):
-		return components.EditorEnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
+		return editor.EnterAction{Prefix: ctx.LeadingIndent + ctx.IndentUnit}, true
 	}
-	return components.EditorEnterAction{Prefix: ctx.LeadingIndent}, true
+	return editor.EnterAction{Prefix: ctx.LeadingIndent}, true
 }
 
 // shellOpensBlock tests the line's last word rather than parsing it. Nothing here strips
@@ -818,9 +818,9 @@ var fishBlockOpeners = map[string]bool{
 	"while": true, "function": true, "switch": true,
 }
 
-func fishEnter(ctx components.EditorEnterContext) (components.EditorEnterAction, bool) {
+func fishEnter(ctx editor.EnterContext) (editor.EnterAction, bool) {
 	if !afterLeadingIndent(ctx) {
-		return components.EditorEnterAction{}, false
+		return editor.EnterAction{}, false
 	}
 	trimmed := strings.TrimSpace(ctx.Before)
 	prefix := ctx.LeadingIndent
@@ -828,5 +828,5 @@ func fishEnter(ctx components.EditorEnterContext) (components.EditorEnterAction,
 	if strings.HasSuffix(trimmed, "\\") || (len(fields) > 0 && fishBlockOpeners[fields[0]]) {
 		prefix += ctx.IndentUnit
 	}
-	return components.EditorEnterAction{Prefix: prefix}, true
+	return editor.EnterAction{Prefix: prefix}, true
 }

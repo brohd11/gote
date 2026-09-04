@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"go.lsp.dev/protocol"
 )
@@ -32,7 +32,7 @@ func TestRenderDiagnosticsCurrentFirst(t *testing.T) {
 		filepath.Join(root, "c.py"),
 	}
 	for _, path := range paths {
-		c.OpenDoc(path, components.EditorOpts{})
+		c.OpenDoc(path, editor.Opts{})
 		c.lsp.diagnostics[path] = []lspDiagnostic{{
 			Line: 1, Character: 2, Severity: protocol.DiagnosticSeverityWarning,
 			Message: "a useful warning", Source: "fake", Code: "W1",

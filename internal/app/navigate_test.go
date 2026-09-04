@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,7 +15,7 @@ import (
 // seedDoc writes a file, opens it into the ctx with its text already loaded, and hands
 // back the editor. Opening this way skips EditorScreen's asynchronous file read, which
 // a direct-screen test never drives.
-func seedDoc(t *testing.T, s *homeScreen, sh *core.Shared, name, text string) (string, *components.EditorScreen) {
+func seedDoc(t *testing.T, s *homeScreen, sh *core.Shared, name, text string) (string, *editor.Screen) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
@@ -80,7 +80,7 @@ func TestJumpAcrossFilesAndBack(t *testing.T) {
 	to, _ := seedDoc(t, s, sh, "to.py", "alpha\nbeta\ngamma\ndelta\n")
 
 	s.openDoc(sh, from)
-	fromEditor.Reveal(components.EditorPosition{Line: 1, Column: 2})
+	fromEditor.Reveal(editor.Position{Line: 1, Column: 2})
 
 	s.jumpToLocation(sh, lspLocation{Path: to, Range: protocol.Range{
 		Start: protocol.Position{Line: 2, Character: 1},
@@ -93,9 +93,9 @@ func TestJumpAcrossFilesAndBack(t *testing.T) {
 		t.Fatalf("caret after the jump = %+v, want line 2", got)
 	}
 	// The target range is highlighted, which is how a jump says what it landed on.
-	if !s.editor.SelectRange(components.EditorRange{
-		Start: components.EditorPosition{Line: 2, Column: 1},
-		End:   components.EditorPosition{Line: 2, Column: 4},
+	if !s.editor.SelectRange(editor.Range{
+		Start: editor.Position{Line: 2, Column: 1},
+		End:   editor.Position{Line: 2, Column: 4},
 	}) {
 		t.Fatal("the target range should be selectable in the destination buffer")
 	}
@@ -106,7 +106,7 @@ func TestJumpAcrossFilesAndBack(t *testing.T) {
 	if s.currentPath != from {
 		t.Fatalf("ctrl+o left the pane on %q, want %q", s.currentPath, from)
 	}
-	if got := s.editor.CursorPosition(); got != (components.EditorPosition{Line: 1, Column: 2}) {
+	if got := s.editor.CursorPosition(); got != (editor.Position{Line: 1, Column: 2}) {
 		t.Fatalf("caret after going back = %+v, want where the jump started", got)
 	}
 	// The trail is walked out, not looped around.
@@ -125,7 +125,7 @@ func TestPendingJumpWaitsForTheBufferToLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.travel(sh, path, components.EditorPosition{Line: 3}, nil)
+	s.travel(sh, path, editor.Position{Line: 3}, nil)
 	if s.pendingJump == nil {
 		t.Fatal("a jump into an unloaded buffer should be parked, not dropped")
 	}
@@ -154,7 +154,7 @@ func TestPendingJumpGivesUpOnAStaleTarget(t *testing.T) {
 	if err := os.WriteFile(path, []byte("only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.travel(sh, path, components.EditorPosition{Line: 400}, nil)
+	s.travel(sh, path, editor.Position{Line: 400}, nil)
 	s.editor.SetSize(sh, 80, 20)
 	s.editor.SetText("only\n")
 	s.finishHomeUpdate(sh, core.Action{})

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,7 +29,7 @@ type signatureUI struct {
 	path  string
 	// anchor is the '(' that opened the call this hint describes. It is what makes
 	// dismissal a question about the caret rather than about the last keystroke.
-	anchor components.EditorPosition
+	anchor editor.Position
 }
 
 func (s *homeScreen) closeSignature() { s.signature = signatureUI{} }
@@ -65,14 +66,14 @@ const signatureScanLines = 50
 // An unmatched '[' or '{' answers no rather than continuing past it — the caret is inside
 // an index or a composite literal, not an argument list, and whatever call encloses THAT
 // is not the one being typed into.
-func signatureCallStart(editor *components.EditorScreen, position components.EditorPosition) (
-	components.EditorPosition, bool,
+func signatureCallStart(ed *editor.Screen, position editor.Position) (
+	editor.Position, bool,
 ) {
 	depth := 0
 	for line := position.Line; line >= 0 && position.Line-line < signatureScanLines; line-- {
-		text, ok := editor.LineText(line)
+		text, ok := ed.LineText(line)
 		if !ok {
-			return components.EditorPosition{}, false
+			return editor.Position{}, false
 		}
 		runes := []rune(text)
 		column := len(runes)
@@ -86,18 +87,18 @@ func signatureCallStart(editor *components.EditorScreen, position components.Edi
 				depth++
 			case '(':
 				if depth == 0 {
-					return components.EditorPosition{Line: line, Column: column}, true
+					return editor.Position{Line: line, Column: column}, true
 				}
 				depth--
 			case '[', '{':
 				if depth == 0 {
-					return components.EditorPosition{}, false
+					return editor.Position{}, false
 				}
 				depth--
 			}
 		}
 	}
-	return components.EditorPosition{}, false
+	return editor.Position{}, false
 }
 
 func (s *homeScreen) applySignature(result *lspRequestResult) core.Action {

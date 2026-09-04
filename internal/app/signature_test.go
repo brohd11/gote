@@ -4,40 +4,40 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 )
 
 func TestSignatureCallStartFindsEnclosingCall(t *testing.T) {
-	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed := editor.New(editor.Opts{})
 	tests := []struct {
 		name  string
 		text  string
-		caret components.EditorPosition
-		want  components.EditorPosition
+		caret editor.Position
+		want  editor.Position
 		ok    bool
 	}{
-		{"after the comma", "myfunc(c,)", components.EditorPosition{Column: 9},
-			components.EditorPosition{Column: 6}, true},
-		{"first argument", "myfunc(c)", components.EditorPosition{Column: 8},
-			components.EditorPosition{Column: 6}, true},
-		{"left of the opener", "myfunc(c,)", components.EditorPosition{Column: 3},
-			components.EditorPosition{}, false},
-		{"right of the closer", "myfunc(c,)", components.EditorPosition{Column: 10},
-			components.EditorPosition{}, false},
-		{"nested takes the inner call", "outer(inner())", components.EditorPosition{Column: 12},
-			components.EditorPosition{Column: 11}, true},
-		{"back out to the outer call", "outer(inner())", components.EditorPosition{Column: 13},
-			components.EditorPosition{Column: 5}, true},
+		{"after the comma", "myfunc(c,)", editor.Position{Column: 9},
+			editor.Position{Column: 6}, true},
+		{"first argument", "myfunc(c)", editor.Position{Column: 8},
+			editor.Position{Column: 6}, true},
+		{"left of the opener", "myfunc(c,)", editor.Position{Column: 3},
+			editor.Position{}, false},
+		{"right of the closer", "myfunc(c,)", editor.Position{Column: 10},
+			editor.Position{}, false},
+		{"nested takes the inner call", "outer(inner())", editor.Position{Column: 12},
+			editor.Position{Column: 11}, true},
+		{"back out to the outer call", "outer(inner())", editor.Position{Column: 13},
+			editor.Position{Column: 5}, true},
 		// A composite literal is not an argument list, and neither is whatever encloses it.
-		{"composite literal", "call([]int{})", components.EditorPosition{Column: 11},
-			components.EditorPosition{}, false},
-		{"index expression", "call(xs[])", components.EditorPosition{Column: 8},
-			components.EditorPosition{}, false},
-		{"no call at all", "x := 1", components.EditorPosition{Column: 6},
-			components.EditorPosition{}, false},
-		{"wrapped across lines", "myfunc(\n\tc,\n\t", components.EditorPosition{Line: 2, Column: 1},
-			components.EditorPosition{Column: 6}, true},
+		{"composite literal", "call([]int{})", editor.Position{Column: 11},
+			editor.Position{}, false},
+		{"index expression", "call(xs[])", editor.Position{Column: 8},
+			editor.Position{}, false},
+		{"no call at all", "x := 1", editor.Position{Column: 6},
+			editor.Position{}, false},
+		{"wrapped across lines", "myfunc(\n\tc,\n\t", editor.Position{Line: 2, Column: 1},
+			editor.Position{Column: 6}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,12 +53,12 @@ func TestSignatureCallStartFindsEnclosingCall(t *testing.T) {
 // The walk back is bounded, so a call opened further away than the budget is not found —
 // which retires a hint rather than scanning the buffer on every keystroke.
 func TestSignatureCallStartStopsAtItsBudget(t *testing.T) {
-	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed := editor.New(editor.Opts{})
 	ed.SetText("myfunc(" + strings.Repeat("\n", signatureScanLines))
-	if _, ok := signatureCallStart(ed, components.EditorPosition{Line: signatureScanLines - 1}); !ok {
+	if _, ok := signatureCallStart(ed, editor.Position{Line: signatureScanLines - 1}); !ok {
 		t.Fatal("a call inside the budget should still be found")
 	}
-	if _, ok := signatureCallStart(ed, components.EditorPosition{Line: signatureScanLines}); ok {
+	if _, ok := signatureCallStart(ed, editor.Position{Line: signatureScanLines}); ok {
 		t.Fatal("a call older than the budget should not be found")
 	}
 }
@@ -69,7 +69,7 @@ func signatureHome(t *testing.T) (*homeScreen, *core.Shared) {
 	t.Helper()
 	s, sh := completionHomeFor(t, "main.go")
 	s.editor.SetText("myfunc(c,)")
-	s.editor.Reveal(components.EditorPosition{Column: 9})
+	s.editor.Reveal(editor.Position{Column: 9})
 	s.applySignature(&lspRequestResult{
 		kind: lspReqSignature, path: s.currentPath,
 		signature: &lspSignature{Label: "myfunc(a int, b int)"},

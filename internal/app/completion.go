@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -27,13 +28,13 @@ type completionUI struct {
 	path       string
 	resultPos  protocol.Position // the LSP request position: the identifier start
 	resultEnd  protocol.Position // real caret when that result was installed
-	start      components.EditorPosition
+	start      editor.Position
 }
 
 type completionBefore struct {
-	editor   *components.EditorScreen
+	editor   *editor.Screen
 	path     string
-	position components.EditorPosition
+	position editor.Position
 	editSeq  int
 	focused  bool
 }
@@ -233,7 +234,7 @@ func (s *homeScreen) acceptCompletion(item lspCompletionItem) {
 	}
 	current := s.editor.CursorPosition()
 	text := item.InsertText
-	rangeToApply := components.EditorRange{Start: s.completion.start, End: current}
+	rangeToApply := editor.Range{Start: s.completion.start, End: current}
 	if item.Edit != nil {
 		text = item.Edit.NewText
 		start, ok := lspPositionToEditor(s.editor, item.Edit.Range.Start)
@@ -241,7 +242,7 @@ func (s *homeScreen) acceptCompletion(item lspCompletionItem) {
 			s.closeCompletion()
 			return
 		}
-		end := components.EditorPosition{}
+		end := editor.Position{}
 		if item.Edit.Range.End == s.completion.resultPos || item.Edit.Range.End == s.completion.resultEnd {
 			// Extend an edit ending at either the request position or the result's real
 			// caret through the current locally matched query. The first covers servers
@@ -256,9 +257,9 @@ func (s *homeScreen) acceptCompletion(item lspCompletionItem) {
 				return
 			}
 		}
-		rangeToApply = components.EditorRange{Start: start, End: end}
+		rangeToApply = editor.Range{Start: start, End: end}
 	}
-	if !s.editor.ApplyCompletion(components.EditorCompletionEdit{
+	if !s.editor.ApplyCompletion(editor.CompletionEdit{
 		Range: rangeToApply, Text: text, Stops: item.Stops, PairTrailingOpener: !item.Snippet,
 	}) {
 		s.closeCompletion()
@@ -295,8 +296,8 @@ func isCompletionIdentifierRune(r rune) bool {
 // carries the full typed word to the popup's own fuzzy match, which is the only thing that
 // narrows. Seeding the request one rune in (the old behavior) capped the candidate set at
 // names beginning with that rune, which fuzzy matching can never widen back out.
-func completionIdentifierStart(editor *components.EditorScreen, position components.EditorPosition) components.EditorPosition {
-	line, ok := editor.LineText(position.Line)
+func completionIdentifierStart(ed *editor.Screen, position editor.Position) editor.Position {
+	line, ok := ed.LineText(position.Line)
 	if !ok {
 		return position
 	}
@@ -305,14 +306,14 @@ func completionIdentifierStart(editor *components.EditorScreen, position compone
 	for column > 0 && isCompletionIdentifierRune(runes[column-1]) {
 		column--
 	}
-	return components.EditorPosition{Line: position.Line, Column: column}
+	return editor.Position{Line: position.Line, Column: column}
 }
 
-func completionQuery(editor *components.EditorScreen, start, end components.EditorPosition) (string, bool) {
+func completionQuery(ed *editor.Screen, start, end editor.Position) (string, bool) {
 	if start.Line != end.Line || end.Column < start.Column {
 		return "", false
 	}
-	line, ok := editor.LineText(start.Line)
+	line, ok := ed.LineText(start.Line)
 	if !ok {
 		return "", false
 	}

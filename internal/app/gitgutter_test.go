@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
@@ -18,7 +18,7 @@ import (
 
 // kind names a sign for a test's expectations, since two Signs differ only by a glyph
 // and a color and neither reads well in a failure message.
-func kind(s components.Sign) string {
+func kind(s editor.Sign) string {
 	fg := s.Style.GetForeground()
 	switch {
 	case s.Text == signDelTop:
@@ -37,7 +37,7 @@ func kind(s components.Sign) string {
 
 // summary renders a marker map as "line:kind" pairs in line order, so a mismatch reads
 // as the picture the gutter would draw.
-func summary(m map[int]components.Sign) string {
+func summary(m map[int]editor.Sign) string {
 	lines := make([]int, 0, len(m))
 	for n := range m {
 		lines = append(lines, n)
@@ -350,7 +350,7 @@ func TestHomeGutterDebouncesByEditSequence(t *testing.T) {
 func BenchmarkHomeGutterCachedRefresh(b *testing.B) {
 	line := strings.Repeat("0123456789", 8)
 	content := strings.Repeat(line+"\n", 20_000) + line
-	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed := editor.New(editor.Opts{})
 	ed.SetText(content)
 	s := &homeScreen{
 		currentPath: "large.go", editor: ed, gitGutter: true,
@@ -367,7 +367,7 @@ func BenchmarkHomeGutterCachedRefresh(b *testing.B) {
 	}
 }
 
-func signAt(t *testing.T, s *homeScreen, line int) components.Sign {
+func signAt(t *testing.T, s *homeScreen, line int) editor.Sign {
 	t.Helper()
 	sign, ok := s.editor.SignsForColumn(gitSignColumn)[line]
 	if !ok {

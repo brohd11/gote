@@ -3,14 +3,14 @@ package app
 import (
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 )
 
 // seeded builds an openSet holding a fresh editor per path, in the given order.
 func seeded(paths ...string) *openSet {
 	o := newOpenSet()
 	for _, p := range paths {
-		o.addFile(p, "/root", components.NewEditorScreen(components.EditorOpts{}))
+		o.addFile(p, "/root", editor.New(editor.Opts{}))
 	}
 	return &o
 }
@@ -67,7 +67,7 @@ func TestOpenSetRekeyKeepsSlot(t *testing.T) {
 // save gives it one — and the case where that save lands on a path already open.
 func TestOpenSetRekeyUntracked(t *testing.T) {
 	o := seeded("a")
-	scratch := components.NewEditorScreen(components.EditorOpts{})
+	scratch := editor.New(editor.Opts{})
 	o.rekey("", "fresh.md", scratch)
 	wantOrder(t, o, "a", "fresh.md")
 	wantConsistent(t, o)
@@ -75,7 +75,7 @@ func TestOpenSetRekeyUntracked(t *testing.T) {
 	// Saving the scratch buffer onto a path another buffer holds: one row, not two, and
 	// the row resolves to the buffer that was just written.
 	o = seeded("a", "b")
-	scratch = components.NewEditorScreen(components.EditorOpts{})
+	scratch = editor.New(editor.Opts{})
 	o.rekey("", "b", scratch)
 	wantOrder(t, o, "a", "b")
 	wantConsistent(t, o)
@@ -86,8 +86,8 @@ func TestOpenSetRekeyUntracked(t *testing.T) {
 
 func TestOpenSetRetainsAndRekeysUnsaved(t *testing.T) {
 	o := newOpenSet()
-	first := components.NewEditorScreen(components.EditorOpts{})
-	second := components.NewEditorScreen(components.EditorOpts{})
+	first := editor.New(editor.Opts{})
+	second := editor.New(editor.Opts{})
 	o.addUnsaved("u1", "unsaved_1", first)
 	o.addUnsaved("u2", "unsaved_2", second)
 
@@ -112,14 +112,14 @@ func TestOpenSetRetainsAndRekeysUnsaved(t *testing.T) {
 // containing directory.
 func TestOpenSetRekeyInheritsRoot(t *testing.T) {
 	o := newOpenSet()
-	ed := components.NewEditorScreen(components.EditorOpts{})
+	ed := editor.New(editor.Opts{})
 	o.addFile("/vault/notes/a.md", "/vault", ed)
 	o.rekey("/vault/notes/a.md", "/vault/notes/b.md", ed)
 	if got := o.byID["/vault/notes/b.md"].root; got != "/vault" {
 		t.Errorf("root after rename = %q, want the original /vault", got)
 	}
 
-	scratch := components.NewEditorScreen(components.EditorOpts{})
+	scratch := editor.New(editor.Opts{})
 	o.rekey("", "/elsewhere/new.md", scratch)
 	if got := o.byID["/elsewhere/new.md"].root; got != "/elsewhere" {
 		t.Errorf("root for a newly identified buffer = %q, want its directory", got)
@@ -171,7 +171,7 @@ func TestOpenSetResetClearsAll(t *testing.T) {
 		t.Fatalf("reset left state: order=%v byID=%v byPath=%v", o.order, o.byID, o.byPath)
 	}
 	// The zeroed set must still be usable — reset is not a teardown.
-	o.addFile("c", "/root", components.NewEditorScreen(components.EditorOpts{}))
+	o.addFile("c", "/root", editor.New(editor.Opts{}))
 	wantOrder(t, o, "c")
 	wantConsistent(t, o)
 }

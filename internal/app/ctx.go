@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 )
 
@@ -307,18 +307,18 @@ func (c *Ctx) SwitchVault(name string) error {
 // opts carries the host's hooks (Path is filled in here); they are wired only into
 // newly created editors, since an already-open doc keeps its existing editor — and its
 // buffer — untouched. See homeScreen.editorOpts for what gote passes.
-func (c *Ctx) OpenDoc(path string, opts components.EditorOpts) *components.EditorScreen {
+func (c *Ctx) OpenDoc(path string, opts editor.Opts) *editor.Screen {
 	if entry, ok := c.open.getPath(path); ok {
 		return entry.editor
 	}
 	opts.Path = path
-	ed := components.NewEditorScreen(opts)
+	ed := editor.New(opts)
 	c.open.addFile(path, c.rootForPath(path), ed)
 	return ed
 }
 
 // Doc returns the editor open for path, if there is one.
-func (c *Ctx) Doc(path string) (*components.EditorScreen, bool) {
+func (c *Ctx) Doc(path string) (*editor.Screen, bool) {
 	entry, ok := c.open.getPath(path)
 	if !ok {
 		return nil, false
@@ -327,7 +327,7 @@ func (c *Ctx) Doc(path string) (*components.EditorScreen, bool) {
 }
 
 // buffer returns the retained editor identified by id, whether saved or unsaved.
-func (c *Ctx) buffer(id string) (*components.EditorScreen, bool) {
+func (c *Ctx) buffer(id string) (*editor.Screen, bool) {
 	entry, ok := c.open.get(id)
 	if !ok {
 		return nil, false
@@ -358,7 +358,7 @@ func (c *Ctx) newUnsavedIdentity() (id, name string) {
 }
 
 // trackUnsaved promotes a pathless editor into the retained Open set.
-func (c *Ctx) trackUnsaved(id, name string, ed *components.EditorScreen) {
+func (c *Ctx) trackUnsaved(id, name string, ed *editor.Screen) {
 	if _, exists := c.open.get(id); exists {
 		return
 	}
@@ -367,7 +367,7 @@ func (c *Ctx) trackUnsaved(id, name string, ed *components.EditorScreen) {
 
 // EachDoc visits every saved open buffer in opening order. Pathless buffers are retained
 // by the context but deliberately excluded from file-backed consumers such as LSP.
-func (c *Ctx) EachDoc(fn func(path string, ed *components.EditorScreen)) {
+func (c *Ctx) EachDoc(fn func(path string, ed *editor.Screen)) {
 	c.open.each(func(entry *openEntry) {
 		if entry.path != "" {
 			fn(entry.path, entry.editor)
@@ -381,7 +381,7 @@ func (c *Ctx) EachDoc(fn func(path string, ed *components.EditorScreen)) {
 // not jump under the selection. An ordinary same-path save does nothing.
 // Saving over a path that some OTHER buffer already holds drops that buffer's entry:
 // the list is keyed by path and two rows for one file would both claim to be it.
-func (c *Ctx) RekeyDoc(oldID, newPath string, ed *components.EditorScreen) {
+func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 	if newPath == "" || ed == nil {
 		return
 	}

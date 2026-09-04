@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/bubbles/v2/key"
@@ -97,7 +98,7 @@ type homeScreen struct {
 	openPanel         *components.CompactListPanel
 	editorPanel       *components.ScreenPanel
 	previewPanel      *components.ScrollContainer // the live preview pane
-	editor            *components.EditorScreen    // the editor pane's live buffer (ScreenPanel exposes none)
+	editor            *editor.Screen              // the editor pane's live buffer (ScreenPanel exposes none)
 	fullPreview       *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
 	currentID         string                      // stable buffer identity; path for saved docs, opaque for unsaved
 	currentPath       string                      // filesystem path; empty while the current buffer is unsaved

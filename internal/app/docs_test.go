@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 )
 
 // mdOnly is the filter that reproduces gote's pre-text-discovery behavior, and what
@@ -198,7 +198,7 @@ func TestSeedModes(t *testing.T) {
 		t.Fatalf("scan seed = %v, want depth-1 results", got)
 	}
 
-	ed := c.OpenDoc(c.Files[0].Path, components.EditorOpts{})
+	ed := c.OpenDoc(c.Files[0].Path, editor.Opts{})
 	c.Seed()
 	if got, _ := c.Doc(c.Files[0].Path); got != ed {
 		t.Fatal("reseeding must not drop open buffers")

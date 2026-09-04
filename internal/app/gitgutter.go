@@ -5,7 +5,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
@@ -23,7 +23,7 @@ import (
 // (repo.HeadBlob) and diffed here against the live text, which is what makes the markers
 // move as you type and what keeps git out of the keystroke path entirely.
 //
-// bubblestack draws the column but knows nothing about git (components.Sign) — the same
+// bubblestack draws the column but knows nothing about git (editor.Sign) — the same
 // division EditorOpts.Highlighter draws. Everything below this line is gote's.
 
 // gutter is the diff state for the doc the editor pane is showing. One doc's worth: the
@@ -90,7 +90,7 @@ type gutterRefreshMsg struct {
 // The ASCII pipe is deliberately NOT one of the candidates: it leaves a gap between rows
 // (measured, not assumed), which is the one thing this column cannot have.
 //
-// Whatever replaces it must measure exactly one display cell: components.Sign says so,
+// Whatever replaces it must measure exactly one display cell: editor.Sign says so,
 // and the editor's whole left-gutter width is derived from that assumption.
 // const signBar = "▌" // U+258C left half block
 const signBar = "┃" // U+2502 box-drawing light vertical
@@ -103,23 +103,23 @@ const (
 	signDelBot = "▁" // U+2581 lower one-eighth block
 )
 
-func addedSign() components.Sign {
-	return components.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("2"))}
+func addedSign() editor.Sign {
+	return editor.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("2"))}
 }
 
-func modifiedSign() components.Sign {
-	return components.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("3"))}
+func modifiedSign() editor.Sign {
+	return editor.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("3"))}
 }
 
-func deletedSign(text string) components.Sign {
-	return components.Sign{Text: text, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("1"))}
+func deletedSign(text string) editor.Sign {
+	return editor.Sign{Text: text, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("1"))}
 }
 
 // newFileSign is the whole-file wash an untracked file gets: every line is new, which is
 // true but not worth a column of green shouting it. Muted says "git has never seen this"
 // without competing with the markers that report an actual change.
-func newFileSign() components.Sign {
-	return components.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(core.MutedColor)}
+func newFileSign() editor.Sign {
+	return editor.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(core.MutedColor)}
 }
 
 // gutterDefault decides whether the column starts on. The config has the final say; its
@@ -284,13 +284,13 @@ func (s *homeScreen) applyBaseline(m baselineMsg) {
 // markers is the whole marker computation, pure over two strings so the edge cases can
 // be tested without a repo. baseline is HEAD's copy, buf the live buffer, state what
 // HEAD had to offer.
-func markers(baseline, buf string, state repo.Baseline) map[int]components.Sign {
+func markers(baseline, buf string, state repo.Baseline) map[int]editor.Sign {
 	switch state {
 	case repo.BaselineOK:
 		return diffMarkers(baseline, buf)
 	case repo.BaselineAbsent:
 		// Nothing to compare against: the file is new, so every line of it is.
-		out := make(map[int]components.Sign, bufLines(buf))
+		out := make(map[int]editor.Sign, bufLines(buf))
 		for i := range bufLines(buf) {
 			out[i] = newFileSign()
 		}
@@ -319,7 +319,7 @@ func markers(baseline, buf string, state repo.Baseline) map[int]components.Sign 
 // both deletions and insertions is a line that was EDITED, not one removed and another
 // added, and marking it green would say a line is new when what you want to know is that
 // you changed it.
-func diffMarkers(baseline, buf string) map[int]components.Sign {
+func diffMarkers(baseline, buf string) map[int]editor.Sign {
 	if baseline == buf {
 		return nil
 	}
@@ -328,7 +328,7 @@ func diffMarkers(baseline, buf string) map[int]components.Sign {
 	newEnc, _ := in.encode(strings.Split(buf, "\n"))
 
 	last := bufLines(buf) - 1
-	out := make(map[int]components.Sign)
+	out := make(map[int]editor.Sign)
 	delta := 0 // how far the new side has drifted from the old, in lines
 	for _, e := range udiff.Strings(oldEnc, newEnc) {
 		from, ok1 := oldOff[e.Start]
@@ -401,7 +401,7 @@ func (in *interner) encode(lines []string) (string, map[int]int) {
 // mark places a sign, ignoring one that falls outside the buffer. Out-of-range keys are
 // harmless to the editor, but dropping them keeps the map an honest description of what
 // is drawn — which is what the tests read.
-func mark(out map[int]components.Sign, line int, sign components.Sign, last int) {
+func mark(out map[int]editor.Sign, line int, sign editor.Sign, last int) {
 	if line < 0 || line > last {
 		return
 	}

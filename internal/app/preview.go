@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -159,7 +160,7 @@ func (s *homeScreen) paneChild() tea.Cmd {
 //
 // Only for a buffer that is NEW to the open set: an already-open one may hold unsaved
 // edits, and seeding those away is the very loss this exists to prevent.
-func (s *homeScreen) seedForPreview(ed *components.EditorScreen, path string, fresh bool) {
+func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, fresh bool) {
 	if fresh && s.fullPreview != nil {
 		ed.SetText(fileText(path))
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/bubbles/v2/list"
@@ -27,7 +28,7 @@ const jumpLimit = 32
 // buffers without their cursors — so this is the whole of gote's location history.
 type jumpSite struct {
 	path string
-	pos  components.EditorPosition
+	pos  editor.Position
 }
 
 // lspFeatureReady reports whether a caret-driven request can be made at all: a manager
@@ -156,7 +157,7 @@ func (s *homeScreen) jumpBack(sh *core.Shared) core.Action {
 // converted at the projection: only the same-file case has a buffer in hand right now,
 // and the cross-file case converts later, in reveal, once the file has been read.
 func (s *homeScreen) travelTo(sh *core.Shared, path string, target protocol.Range) core.Action {
-	pos := components.EditorPosition{Line: int(target.Start.Line), Column: int(target.Start.Character)}
+	pos := editor.Position{Line: int(target.Start.Line), Column: int(target.Start.Character)}
 	if path == s.currentPath {
 		pos = lspPositionToEditorClamped(s.editor, target.Start)
 	}
@@ -169,7 +170,7 @@ func (s *homeScreen) travelTo(sh *core.Shared, path string, target protocol.Rang
 // finishHomeUpdate until the buffer has the line. This is the same "observe what the
 // update actually did" discipline updateCompletionAfterParent follows, and it is why a
 // jump into an unopened file lands on the right line rather than on line one.
-func (s *homeScreen) travel(sh *core.Shared, path string, pos components.EditorPosition,
+func (s *homeScreen) travel(sh *core.Shared, path string, pos editor.Position,
 	target *protocol.Range) core.Action {
 	if path == s.currentPath {
 		s.reveal(pos, target)
@@ -193,7 +194,7 @@ func (s *homeScreen) travel(sh *core.Shared, path string, pos components.EditorP
 // reveal moves the caret and, when the server gave a range worth showing, highlights it.
 // The highlight is how a jump says what it landed on: the caret alone leaves the user
 // hunting for which identifier on the line was meant.
-func (s *homeScreen) reveal(pos components.EditorPosition, target *protocol.Range) bool {
+func (s *homeScreen) reveal(pos editor.Position, target *protocol.Range) bool {
 	if target != nil {
 		if r, ok := lspRangeToEditor(s.editor, *target); ok && s.editor.SelectRange(r) {
 			return true

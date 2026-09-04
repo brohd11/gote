@@ -5,13 +5,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 // highlighterFor constructs the same adapter a Chroma-backed language profile does.
-func highlighterFor(t *testing.T, ext string) components.Highlighter {
+func highlighterFor(t *testing.T, ext string) editor.Highlighter {
 	t.Helper()
 	profile := languageForPath("f" + ext)
 	if profile == nil || profile.editor.NewHighlighter == nil {
@@ -21,7 +21,7 @@ func highlighterFor(t *testing.T, ext string) components.Highlighter {
 }
 
 // spanText is the concatenation the editor validates a line's spans against.
-func spanText(spans []components.Span) string {
+func spanText(spans []editor.Span) string {
 	var b strings.Builder
 	for _, sp := range spans {
 		b.WriteString(sp.Text)
@@ -177,7 +177,7 @@ func TestChromaFactoryParsesIndependentSnapshotsConcurrently(t *testing.T) {
 	wg.Wait()
 }
 
-var benchmarkHighlightSpans []components.Span
+var benchmarkHighlightSpans []editor.Span
 
 func BenchmarkChromaHighlighterLargeDocument(b *testing.B) {
 	profile := languageForPath("large.gd")

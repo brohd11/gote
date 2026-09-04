@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	tea "charm.land/bubbletea/v2"
@@ -128,7 +129,7 @@ func TestSignaturePanelIsBoxedAndOpaque(t *testing.T) {
 	s, _ := newHome(t)
 	// The hint anchors to the call it describes, so it needs one to anchor to.
 	s.editor.SetText("Reveal(")
-	s.editor.Reveal(components.EditorPosition{Column: 7})
+	s.editor.Reveal(editor.Position{Column: 7})
 	s.applySignature(&lspRequestResult{
 		kind: lspReqSignature, path: s.currentPath,
 		signature: &lspSignature{
@@ -183,7 +184,7 @@ func TestHoverRendersOverTheEditor(t *testing.T) {
 	s.modular.FocusSlot(s.editorSlot())
 	s.SetSize(sh, 100, 30)
 	_ = s.View(sh) // publish the pane origins CursorAnchor needs
-	ed.Reveal(components.EditorPosition{Line: 3, Column: 8})
+	ed.Reveal(editor.Position{Line: 3, Column: 8})
 
 	s.applyHover(&lspRequestResult{kind: lspReqHover, path: path, hover: "value is an int"})
 	out := stripANSI(s.View(sh))
@@ -253,7 +254,7 @@ func TestHoverSurvivesATrailingRelease(t *testing.T) {
 	s.openDoc(sh, path)
 	s.modular.FocusSlot(s.editorSlot())
 	_ = view(model)
-	ed.Reveal(components.EditorPosition{Line: 3, Column: 4})
+	ed.Reveal(editor.Position{Line: 3, Column: 4})
 	_ = view(model)
 
 	// The server's answer lands first — the race the trailing release used to win.
@@ -286,7 +287,7 @@ func TestContextMenuHoverRowKeepsItsTooltip(t *testing.T) {
 	s.openDoc(sh, path)
 	s.modular.FocusSlot(s.editorSlot())
 	_ = view(model)
-	ed.Reveal(components.EditorPosition{Line: 3, Column: 4})
+	ed.Reveal(editor.Position{Line: 3, Column: 4})
 	_ = view(model)
 
 	model, _ = model.Update(tea.MouseClickMsg{X: 45, Y: 8, Button: tea.MouseRight})

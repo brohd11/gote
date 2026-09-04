@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
-	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -64,22 +64,22 @@ type mdInterval struct {
 // always cover the full line (unstyled runs included), so the editor's concat
 // invariant holds by construction.
 type markdownHighlighter struct {
-	src       []byte              // the parsed document
-	lines     []string            // src split on '\n' (no newline runes)
-	lineStart []int               // byte offset of each line's first byte
-	intervals [][]mdInterval      // per line, in discovery order
-	spans     [][]components.Span // the baked answer; nil per unstyled line
-	restart   []int               // nearest block opener usable for a preview parse
+	src       []byte          // the parsed document
+	lines     []string        // src split on '\n' (no newline runes)
+	lineStart []int           // byte offset of each line's first byte
+	intervals [][]mdInterval  // per line, in discovery order
+	spans     [][]editor.Span // the baked answer; nil per unstyled line
+	restart   []int           // nearest block opener usable for a preview parse
 }
 
-var _ components.HighlightRestartProvider = (*markdownHighlighter)(nil)
+var _ editor.HighlightRestartProvider = (*markdownHighlighter)(nil)
 
 // newMarkdownHighlighter returns a Highlighter for CommonMark markdown, styled
 // with the md*Style defaults: headings bold, *em* italic, **strong** bold,
 // `code` and code blocks (fenced and indented) in the code color, blockquotes
 // gray, links and autolinks underlined blue, and list markers (the "-" or "1.",
 // never the item's text) in the list color.
-func newMarkdownHighlighter() components.Highlighter {
+func newMarkdownHighlighter() editor.Highlighter {
 	return &markdownHighlighter{}
 }
 
@@ -164,7 +164,7 @@ func (m *markdownHighlighter) Parse(doc string) {
 
 // HighlightLine returns the baked spans for row — covering the line in full —
 // or nil when the line carries no styling at all.
-func (m *markdownHighlighter) HighlightLine(row int) []components.Span {
+func (m *markdownHighlighter) HighlightLine(row int) []editor.Span {
 	if row < 0 || row >= len(m.spans) {
 		return nil
 	}
@@ -331,7 +331,7 @@ func (m *markdownHighlighter) lastRow(n ast.Node) int {
 // per-rune style-ID array (block priority first, inline painted over it),
 // grouped into runs — adjacent runs always differ, and unstyled lines stay nil.
 func (m *markdownHighlighter) bake() {
-	m.spans = make([][]components.Span, len(m.lines))
+	m.spans = make([][]editor.Span, len(m.lines))
 	for r, ivs := range m.intervals {
 		if len(ivs) == 0 {
 			continue
@@ -355,13 +355,13 @@ func (m *markdownHighlighter) bake() {
 			// line with no intervals at all.
 			continue
 		}
-		var spans []components.Span
+		var spans []editor.Span
 		for i := 0; i < len(runes); {
 			j := i + 1
 			for j < len(runes) && ids[j] == ids[i] {
 				j++
 			}
-			spans = append(spans, components.Span{Text: string(runes[i:j]), Style: mdStyles[ids[i]]})
+			spans = append(spans, editor.Span{Text: string(runes[i:j]), Style: mdStyles[ids[i]]})
 			i = j
 		}
 		m.spans[r] = spans
