@@ -44,6 +44,7 @@ func newScanHome(t *testing.T, root string) (*homeScreen, *core.Shared) {
 func newHomeCfg(t *testing.T, cfg Config, opts Options) (*homeScreen, *core.Shared) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	sh := core.NewShared(New("test", cfg, opts))
 	s := NewHomeScreen(sh).(*homeScreen)
 	s.Init(sh)

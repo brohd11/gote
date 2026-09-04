@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/brohd11/gote/internal/app"
 	"github.com/brohd11/goutil/envopt"
@@ -327,7 +326,7 @@ func exists(arg string) bool {
 // disk, one written with a trailing separator, or any argument at all under --scan
 // (which is how a directory that does not exist yet can still be named).
 func isDirArg(arg string, scan bool) bool {
-	if scan || strings.HasSuffix(arg, string(filepath.Separator)) {
+	if scan || len(arg) > 0 && os.IsPathSeparator(arg[len(arg)-1]) {
 		return true
 	}
 	info, err := os.Stat(arg)

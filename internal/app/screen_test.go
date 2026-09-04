@@ -45,6 +45,7 @@ func newHome(t *testing.T) (*homeScreen, *core.Shared) {
 func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	sh := core.NewShared(New("test", DefaultConfig(), opts))
 	s := NewHomeScreen(sh).(*homeScreen)
 	s.Init(sh)
@@ -58,6 +59,7 @@ func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 func newHomeRouter(t *testing.T, opts Options) (tea.Model, *homeScreen, *core.Shared) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	sh := core.NewShared(New("test", DefaultConfig(), opts))
 	r := core.NewRouter(sh, []core.TabEntry{
 		{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
@@ -249,6 +251,7 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 	prev := core.CurrentTheme()
 	t.Cleanup(func() { core.SetTheme(prev) })
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	sh := core.NewShared(New("test", DefaultConfig(), Options{}))
 	r := core.NewRouter(sh, []core.TabEntry{
@@ -1455,6 +1458,7 @@ func TestMinimalFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	const rows = 24
 	frame := func(opts Options) string {
@@ -1522,6 +1526,7 @@ func TestStatusCostsNoRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	const rows, cols = 24, 80
 	// render draws one frame through the REAL router, with status set before the resize

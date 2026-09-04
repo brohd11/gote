@@ -171,6 +171,7 @@ func TestHomeDocs(t *testing.T) {
 func TestSeedModes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	store := filepath.Join(home, ".gote", "docs")
 	if err := os.MkdirAll(store, 0o755); err != nil {
 		t.Fatal(err)

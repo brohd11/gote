@@ -11,6 +11,7 @@ import (
 // TestLoadConfigDefaults: a missing config.yml means the defaults, no error.
 func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +25,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 func TestLoadConfigFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	dir := filepath.Join(home, ".gote")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -76,6 +78,7 @@ func writeConfig(t *testing.T, raw string) Config {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	dir := filepath.Join(home, ".gote")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -95,6 +98,7 @@ func writeConfig(t *testing.T, raw string) Config {
 func TestEnsureConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	want := filepath.Join(home, ".gote", "config.yml")
 
 	path, err := EnsureConfig()
@@ -181,6 +185,7 @@ language_servers:
 func TestDefaultConfigRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	if _, err := EnsureConfig(); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +203,7 @@ func TestDefaultConfigRoundTrip(t *testing.T) {
 func TestDirLayout(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	dir, err := Dir()
 	if err != nil {
@@ -236,6 +242,7 @@ func TestDirLayout(t *testing.T) {
 func TestLoadConfigMalformed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	dir := filepath.Join(home, ".gote")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -255,6 +262,7 @@ func TestLoadConfigMalformed(t *testing.T) {
 func TestConfigVaultRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	vault := filepath.Join(home, "Notes")
 	if err := os.Mkdir(vault, 0o755); err != nil {
 		t.Fatal(err)
@@ -285,12 +293,15 @@ func TestConfigVaultRoundTrip(t *testing.T) {
 func TestNormalizeDirPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	notes := filepath.Join(home, "Notes")
 	if err := os.Mkdir(notes, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := normalizeDirPath("~/Notes"); err != nil || got != notes {
-		t.Fatalf("normalize ~/Notes = %q, %v; want %q", got, err, notes)
+	for _, input := range []string{"~/Notes", `~\Notes`} {
+		if got, err := normalizeDirPath(input); err != nil || got != notes {
+			t.Fatalf("normalize %s = %q, %v; want %q", input, got, err, notes)
+		}
 	}
 	file := filepath.Join(home, "note.md")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {

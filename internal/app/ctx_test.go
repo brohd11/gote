@@ -57,6 +57,7 @@ func TestCloseDoc(t *testing.T) {
 func TestConfiguredDefaultVaultAndCLIOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	vault := filepath.Join(home, "Notes")
 	if err := os.Mkdir(vault, 0o755); err != nil {
 		t.Fatal(err)
@@ -95,6 +96,7 @@ func TestConfiguredDefaultVaultAndCLIOverride(t *testing.T) {
 func TestConfiguredDefaultPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	notes := filepath.Join(home, "Notes")
 	if err := os.MkdirAll(filepath.Join(notes, "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -103,7 +105,7 @@ func TestConfiguredDefaultPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, ref := range []string{notes, "~/Notes"} {
+	for _, ref := range []string{notes, "~/Notes", `~\Notes`} {
 		cfg := DefaultConfig()
 		cfg.Default = ref
 		c := New("dev", cfg, Options{})
@@ -193,6 +195,7 @@ func TestExtFlagOverridesConfig(t *testing.T) {
 func TestAddAndSwitchVault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	vault := filepath.Join(home, "Notes")
 	if err := os.Mkdir(vault, 0o755); err != nil {
 		t.Fatal(err)

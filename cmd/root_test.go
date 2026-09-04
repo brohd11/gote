@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -262,6 +263,22 @@ func TestResolveOptions(t *testing.T) {
 					opts.Exts, opts.ExtsSet, tc.wantExts, tc.extsSet)
 			}
 		})
+	}
+}
+
+func TestIsDirArgAcceptsNativeTrailingSeparator(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing") + string(os.PathSeparator)
+	if !isDirArg(missing, false) {
+		t.Fatalf("%q should be recognized as a directory argument", missing)
+	}
+}
+
+func TestIsDirArgAcceptsForwardSlashOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows accepts both path separator spellings")
+	}
+	if !isDirArg(`C:/not-created-yet/`, false) {
+		t.Fatal("a forward-slash Windows path should be recognized as a directory argument")
 	}
 }
 

@@ -174,6 +174,11 @@ gote update
 ```
 More install details (location, flags, etc): [shared install reference](https://github.com/brohd11/goutil/blob/main/docs/install.md).
 
+On Windows, `gote config` uses `$env:EDITOR`, then `$env:VISUAL`, and falls back to
+Notepad when neither is set. Editors and language servers installed as `.cmd` wrappers
+(for example `code` or npm-installed servers) are supported. Existing CRLF files keep
+their CRLF line endings when saved; new and mixed-line-ending files use LF.
+
 **macOS note:** a binary downloaded **in a browser** gets quarantined by Gatekeeper. Clear it
 with `xattr -dr com.apple.quarantine path/to/binary`. This doesn't apply to the installer
 above; the attribute is set by browsers, not by `curl`.

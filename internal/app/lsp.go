@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brohd11/goutil/executil"
+
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
@@ -743,7 +745,10 @@ func (m *lspManager) startSession(session *lspSession) error {
 		}
 		transport = conn
 	} else {
-		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
+		cmd, err := executil.Command(cfg.Command...)
+		if err != nil {
+			return fmt.Errorf("start %s: %w", strings.Join(cfg.Command, " "), err)
+		}
 		cmd.Dir = session.root
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
