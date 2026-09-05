@@ -13,16 +13,22 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// The default markdown palette: package-level vars like editorCursorStyle, not
-// theme-driven — syntax colors join the theme palette the day one exists.
+// The markdown palette. Shared with the source-token palette in highlight_chroma.go —
+// both resolve from Config.SyntaxColors via palette.go — so a slot the two files both
+// have (strong text and a keyword, quoted text and a comment) is the one color in both.
+// Set per slot in ~/.gote/config.yml under syntax_colors; basic_colors reverts the lot to
+// the terminal's own eight.
+//
+// Bold, italic and underline are not configurable: they carry markdown's own structure,
+// which is the same document whatever the colors are.
 var (
-	mdHeadingStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
-	mdEmphasisStyle = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("2"))
-	mdStrongStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
-	mdCodeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	mdQuoteStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	mdLinkStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Underline(true)
-	mdListStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	mdHeadingStyle  lipgloss.Style
+	mdEmphasisStyle lipgloss.Style
+	mdStrongStyle   lipgloss.Style
+	mdCodeStyle     lipgloss.Style
+	mdQuoteStyle    lipgloss.Style
+	mdLinkStyle     lipgloss.Style
+	mdListStyle     lipgloss.Style
 )
 
 // mdStyle IDs index mdStyles; 0 is the unstyled run. Intervals carry the ID, so
@@ -39,15 +45,30 @@ const (
 	mdStyleList
 )
 
-var mdStyles = []lipgloss.Style{
-	{},
-	mdHeadingStyle,
-	mdEmphasisStyle,
-	mdStrongStyle,
-	mdCodeStyle,
-	mdQuoteStyle,
-	mdLinkStyle,
-	mdListStyle,
+var mdStyles []lipgloss.Style
+
+// applyMarkdownPalette rebuilds the styles above from p, and mdStyles with them: the
+// slice holds style values indexed by mdStyle ID, so reassigning the vars alone would
+// leave every interval still pointing at the palette this replaces.
+func applyMarkdownPalette(p syntaxPalette) {
+	mdHeadingStyle = lipgloss.NewStyle().Bold(true).Foreground(p.mdHeading)
+	mdEmphasisStyle = lipgloss.NewStyle().Italic(true).Foreground(p.mdEmphasis)
+	mdStrongStyle = lipgloss.NewStyle().Bold(true).Foreground(p.mdStrong)
+	mdCodeStyle = lipgloss.NewStyle().Foreground(p.mdCode)
+	mdQuoteStyle = lipgloss.NewStyle().Foreground(p.mdQuote)
+	mdLinkStyle = lipgloss.NewStyle().Foreground(p.mdLink).Underline(true)
+	mdListStyle = lipgloss.NewStyle().Foreground(p.mdList).Bold(true)
+
+	mdStyles = []lipgloss.Style{
+		{},
+		mdHeadingStyle,
+		mdEmphasisStyle,
+		mdStrongStyle,
+		mdCodeStyle,
+		mdQuoteStyle,
+		mdLinkStyle,
+		mdListStyle,
+	}
 }
 
 // mdInterval is a styled half-open rune-column range [lo, hi) on one line of

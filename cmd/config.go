@@ -8,8 +8,10 @@ import (
 var configCmd = configcmd.NewCommand(configcmd.Options{
 	Path: app.ConfigPath,
 	Dir:  app.Dir,
+	// SyncConfig rather than EnsureConfig: opening the config to edit it is the moment
+	// to top up any key added since the file was written.
 	Ensure: func() error {
-		_, err := app.EnsureConfig()
+		_, err := app.SyncConfig()
 		return err
 	},
 })

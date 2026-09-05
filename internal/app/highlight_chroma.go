@@ -22,44 +22,70 @@ import (
 // don't reconstruct it). Nothing here goes near chroma's formatters: those exist to
 // write ANSI, and the editor needs styled *runs*, which it composites itself.
 
-// The palette. Fixed ANSI like gote's markdown highlighter, deliberately: the
-// editor's syntax colors are not theme-derived, and the two files should not disagree
-// about that. The 8 basic slots keep it readable on whatever the terminal's own scheme
-// is, which a 256-color palette would not.
+// The palette. The colors are Config.SyntaxColors' — 256 by default, per-slot settable
+// in ~/.gote/config.yml, and revertible to the terminal's own eight with basic_colors —
+// so these are vars an apply function writes rather than constants. See palette.go for
+// how the defaults are chosen and why they are not theme-derived.
+//
+// Only the colors are configurable. Bold and italic stay here because they mark structure
+// rather than palette: a keyword is emphatic and a comment is an aside whatever color
+// either one is wearing.
 var (
-	chKeywordStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
-	chTypeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	chFuncStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
-	chStringStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	chNumberStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	chCommentStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
-	chOperatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	chInsertedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	chDeletedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	chErrorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	chKeywordStyle  lipgloss.Style
+	chTypeStyle     lipgloss.Style
+	chFuncStyle     lipgloss.Style
+	chStringStyle   lipgloss.Style
+	chNumberStyle   lipgloss.Style
+	chCommentStyle  lipgloss.Style
+	chOperatorStyle lipgloss.Style
+	chInsertedStyle lipgloss.Style
+	chDeletedStyle  lipgloss.Style
+	chErrorStyle    lipgloss.Style
 )
 
+// NameBuiltin is deliberately a function and not a type: it is what chroma tags Go's
+// append/make and GDScript's print, which are called, not declared. It wore the type
+// color once and made every builtin call look like a class name.
+//
 // chromaStyles maps token types to styles. Only coarse types are listed; styleFor walks
 // a token up to its sub-category and category, so every one of chroma's ~200 leaf types
 // resolves to one of these or to nothing (an unstyled run, which is correct for plain
 // text, punctuation and whitespace — coloring everything colors nothing).
-var chromaStyles = map[chroma.TokenType]lipgloss.Style{
-	chroma.Keyword:         chKeywordStyle,
-	chroma.KeywordType:     chTypeStyle,
-	chroma.NameBuiltin:     chTypeStyle,
-	chroma.NameClass:       chTypeStyle,
-	chroma.NameFunction:    chFuncStyle,
-	chroma.NameDecorator:   chFuncStyle,
-	chroma.NameTag:         chKeywordStyle,
-	chroma.NameAttribute:   chFuncStyle,
-	chroma.LiteralString:   chStringStyle,
-	chroma.LiteralNumber:   chNumberStyle,
-	chroma.Comment:         chCommentStyle,
-	chroma.CommentPreproc:  chKeywordStyle,
-	chroma.Operator:        chOperatorStyle,
-	chroma.GenericInserted: chInsertedStyle,
-	chroma.GenericDeleted:  chDeletedStyle,
-	chroma.Error:           chErrorStyle,
+var chromaStyles map[chroma.TokenType]lipgloss.Style
+
+// applyChromaPalette rebuilds the styles above from p, and chromaStyles with them: the
+// map holds style values, not pointers, so reassigning the vars alone would leave every
+// token still wearing the palette this replaced.
+func applyChromaPalette(p syntaxPalette) {
+	chKeywordStyle = lipgloss.NewStyle().Foreground(p.keyword).Bold(true)
+	chTypeStyle = lipgloss.NewStyle().Foreground(p.typ)
+	chFuncStyle = lipgloss.NewStyle().Foreground(p.fn)
+	chStringStyle = lipgloss.NewStyle().Foreground(p.str)
+	chNumberStyle = lipgloss.NewStyle().Foreground(p.num)
+	chCommentStyle = lipgloss.NewStyle().Foreground(p.comment).Italic(true)
+	chOperatorStyle = lipgloss.NewStyle().Foreground(p.operator)
+	chInsertedStyle = lipgloss.NewStyle().Foreground(p.inserted)
+	chDeletedStyle = lipgloss.NewStyle().Foreground(p.deleted)
+	chErrorStyle = lipgloss.NewStyle().Foreground(p.err).Bold(true)
+
+	chromaStyles = map[chroma.TokenType]lipgloss.Style{
+		chroma.Keyword:         chKeywordStyle,
+		chroma.KeywordType:     chTypeStyle,
+		chroma.NameClass:       chTypeStyle,
+		chroma.NameBuiltin:     chFuncStyle,
+		chroma.NameFunction:    chFuncStyle,
+		chroma.NameDecorator:   chFuncStyle,
+		chroma.NameTag:         chKeywordStyle,
+		chroma.NameAttribute:   chFuncStyle,
+		chroma.LiteralString:   chStringStyle,
+		chroma.LiteralNumber:   chNumberStyle,
+		chroma.Comment:         chCommentStyle,
+		chroma.CommentPreproc:  chKeywordStyle,
+		chroma.Operator:        chOperatorStyle,
+		chroma.GenericInserted: chInsertedStyle,
+		chroma.GenericDeleted:  chDeletedStyle,
+		chroma.Error:           chErrorStyle,
+	}
 }
 
 // styleFor resolves a token type to a style, falling back through chroma's own
@@ -153,6 +179,61 @@ func registerPatchedGDScript() {
 		root := make([]chroma.Rule, 0, len(rules["root"])+1)
 		root = append(root, rules["root"][:i]...)
 		root = append(root, chroma.Rule{Pattern: `(?<!\w)[A-Z]\w*[a-z]\w*`, Type: chroma.NameClass})
+		rules["root"] = append(root, rules["root"][i:]...)
+		break
+	}
+
+	lexers.Register(chroma.MustNewLexer(base.Config(), func() chroma.Rules { return rules }))
+}
+
+// registerPatchedGo gives Go's user-defined types a color. Chroma's Go lexer ends root
+// with a single `[^\W\d]\w*` → NameOther catch-all, so a type name, a variable, a struct
+// field and a package name all arrive as the same token — and NameOther has no style, so
+// every type in a Go buffer renders as plain text. There is no mapping that fixes this:
+// the type color only ever reaches KeywordType (int, string) and NameClass, which this
+// lexer never emits at all.
+//
+// So the same heuristic registerPatchedGDScript uses, and for the same reason — a lexer
+// that cannot tell a type from an identifier still leaves the CASE of the identifier to
+// read. The interior [a-z] separates PascalCase from CONSTANT_CASE: Config and DocFilter
+// match, EOF and MAX do not.
+//
+// Two things are deliberately backwards from the GDScript rule:
+//
+//   - It goes AFTER root's call rule rather than before it, so NewDocFilter(…) stays a
+//     function. GDScript wants the opposite because Vector2(1, 2) is a constructor.
+//   - The lookbehind excludes '.', where GDScript's allows it. In Go a qualified name is
+//     far more often a field or a method — cfg.ScanDepth, b.String — than a type, so
+//     this gives up coloring strings.Builder to avoid coloring every exported field
+//     access in the file.
+//
+// It is a heuristic and it over-reaches: an unqualified exported non-type reads as a
+// type, so struct field declarations, exported consts and exported error values are
+// colored too. That is inherent to guessing at what the lexer declined to say, and it is
+// the better failure — the alternative is what it replaces, which is coloring nothing.
+func registerPatchedGo() {
+	base, ok := lexers.Get("go").(*chroma.RegexLexer)
+	if !ok {
+		return // upstream changed shape; the stock lexer is still better than none
+	}
+	rules, err := base.Rules()
+	if err != nil {
+		return
+	}
+	// Clone before touching it: Rules hands back the registry lexer's own map.
+	rules = rules.Clone()
+
+	// Anchored on the catch-all itself rather than on an index, so the rule lands last
+	// even if upstream adds rules above it — and lands nowhere, leaving the stock lexer
+	// untouched, if upstream ever stops emitting it.
+	const catchAll = `[^\W\d]\w*`
+	for i, rule := range rules["root"] {
+		if rule.Pattern != catchAll {
+			continue
+		}
+		root := make([]chroma.Rule, 0, len(rules["root"])+1)
+		root = append(root, rules["root"][:i]...)
+		root = append(root, chroma.Rule{Pattern: `(?<![\w.])[A-Z]\w*[a-z]\w*`, Type: chroma.NameClass})
 		rules["root"] = append(root, rules["root"][i:]...)
 		break
 	}

@@ -95,6 +95,9 @@ type Options struct {
 // New builds the context from the loaded config and the CLI's launch options, and
 // performs the initial seed so the first screen has rows to show.
 func New(version string, cfg Config, opts Options) *Ctx {
+	// Before anything can parse a document: a Highlighter bakes these styles into its
+	// spans at Parse time and nothing re-parses to pick up a later palette.
+	applySyntaxPalette(cfg.SyntaxColors)
 	c := &Ctx{
 		Version: version,
 		Mode:    opts.Mode,

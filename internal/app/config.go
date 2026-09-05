@@ -49,7 +49,11 @@ type Config struct {
 	// ctrl+s. The reformat lands just AFTER the write rather than blocking it — see
 	// homeScreen.formatOnSave — so the buffer is left dirty and the next save settles
 	// it. Off by default: a save should not rewrite a buffer until asked.
-	FormatOnSave bool                   `yaml:"format_on_save"`
+	FormatOnSave bool `yaml:"format_on_save"`
+	// SyntaxColors is the editor's syntax palette. See palette.go for the defaults and
+	// what governs them; highlight_chroma.go and highlight_markdown.go are the two files
+	// that draw with them.
+	SyntaxColors SyntaxColors           `yaml:"syntax_colors"`
 	Default      string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
 	Vaults       map[string]VaultConfig `yaml:"vaults"`
 }
@@ -62,6 +66,43 @@ const (
 	clickCtrl  = "ctrl"
 	clickShift = "shift"
 )
+
+// SyntaxColors is one color per highlighted slot, as an ANSI-256 index ("133") or a hex
+// literal ("#af5faf"). It is in the config file rather than only in the code because
+// syntax colors are taste, and the defaults are absolute colors that no terminal scheme
+// adjusts for the user — so the file has to be where they can be adjusted by hand.
+//
+// The first ten slots color source tokens, the Md ones markdown structure; a slot may
+// repeat a color, as Inserted and String do. An empty or unparseable value falls back to
+// its default rather than failing the load (normalizeSyntaxColors), which is also why
+// every key is written out: an unwritten key is one nobody knows they can set.
+//
+// BasicColors overrides all of them with the eight-color ANSI palette gote used before
+// this key existed. Those colors are the terminal's own, so they follow whatever scheme
+// the user runs — the one thing a 256-color palette cannot do. The other keys are left
+// alone while it is set, so turning it off returns the palette the file names.
+type SyntaxColors struct {
+	BasicColors bool `yaml:"basic_colors"`
+
+	Keyword  string `yaml:"keyword"`
+	Type     string `yaml:"type"`
+	Func     string `yaml:"func"`
+	String   string `yaml:"string"`
+	Number   string `yaml:"number"`
+	Comment  string `yaml:"comment"`
+	Operator string `yaml:"operator"`
+	Inserted string `yaml:"inserted"`
+	Deleted  string `yaml:"deleted"`
+	Error    string `yaml:"error"`
+
+	MdHeading  string `yaml:"md_heading"`
+	MdEmphasis string `yaml:"md_emphasis"`
+	MdStrong   string `yaml:"md_strong"`
+	MdCode     string `yaml:"md_code"`
+	MdQuote    string `yaml:"md_quote"`
+	MdLink     string `yaml:"md_link"`
+	MdList     string `yaml:"md_list"`
+}
 
 // LanguageServerConfig selects exactly one transport. Address is a TCP endpoint for a
 // server managed elsewhere; Command is an executable followed by its arguments for a
@@ -113,6 +154,7 @@ func DefaultConfig() Config {
 		LanguageServers: defaultLanguageServers(),
 		ClickDefinition: clickAlt,
 		ClickContext:    clickCtrl,
+		SyntaxColors:    defaultSyntaxColors(),
 		Default:         defaultDocsRef,
 		Vaults:          map[string]VaultConfig{},
 	}
@@ -201,6 +243,28 @@ func EnsureConfig() (string, error) {
 	return path, nil
 }
 
+// SyncConfig materializes the config file and then rewrites it from itself, so a file
+// written before a key existed gains that key. EnsureConfig alone cannot do this: it
+// writes only when the file is MISSING, which leaves anyone who configured gote before a
+// release with no way to discover — or edit — what that release added.
+//
+// A malformed file is left exactly as it is. LoadConfig answers a parse error with the
+// defaults, and writing those back would destroy the config the user is on their way to
+// go fix; the path is still returned so `gote config` opens the broken file rather than
+// refusing. The cost of the rewrite is that hand-written YAML is reformatted, which is
+// why only `gote config` calls this and a launch does not.
+func SyncConfig() (string, error) {
+	path, err := EnsureConfig()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return path, nil
+	}
+	return path, SaveConfig(cfg)
+}
+
 // LoadConfig reads ~/.gote/config.yml. A missing file is not an error — it returns
 // the defaults; an unreadable or malformed file falls back to them per-key.
 func LoadConfig() (Config, error) {
@@ -241,6 +305,7 @@ func LoadConfig() (Config, error) {
 	if cfg.GitGutter != gutterOn && cfg.GitGutter != gutterOff {
 		cfg.GitGutter = gutterAuto
 	}
+	normalizeSyntaxColors(&cfg.SyntaxColors)
 	return cfg, nil
 }
 
