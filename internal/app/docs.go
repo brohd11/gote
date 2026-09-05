@@ -312,7 +312,13 @@ func newDocPath(base, name, ext string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("no name given")
 	}
-	if filepath.IsAbs(name) {
+	// filepath.IsAbs follows the host rules: on Windows it does not consider a
+	// leading slash (for example, "/etc/x") absolute, even though that spelling
+	// is rooted and must not be accepted as a doc-store-relative name. Refuse
+	// either separator and drive/UNC volumes explicitly so names stay confined
+	// to base on every platform.
+	if filepath.IsAbs(name) || filepath.VolumeName(name) != "" ||
+		strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
 		return "", fmt.Errorf("%q is absolute; give a name relative to the doc store", name)
 	}
 	// A home path is neither absolute nor an escape by the check below, so without this

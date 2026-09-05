@@ -966,9 +966,19 @@ func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.Publi
 	if params == nil || !params.URI.IsFile() {
 		return nil
 	}
-	path := filepath.Clean(params.URI.FsPath())
+	path := uriPath(params.URI)
 	c.manager.mu.Lock()
-	doc, open := c.manager.desired[path]
+	// Keep diagnostics under the spelling used by the open document. On Windows
+	// the URI path normally has a lowercased drive letter, so an exact map lookup
+	// would discard diagnostics for an otherwise identical path.
+	var doc lspDocument
+	open := false
+	for desiredPath, candidate := range c.manager.desired {
+		if sameFilePath(desiredPath, path) {
+			path, doc, open = desiredPath, candidate, true
+			break
+		}
+	}
 	if !open {
 		c.manager.mu.Unlock()
 		return nil

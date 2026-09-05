@@ -37,7 +37,7 @@ func TestProjectDefinitionCoversEveryUnionArm(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("%s: projected %d locations, want 1", name, len(got))
 		}
-		if got[0].Path != path {
+		if !sameFilePath(got[0].Path, path) {
 			t.Errorf("%s: path = %q, want %q", name, got[0].Path, path)
 		}
 		if got[0].Range.Start.Line != 3 {

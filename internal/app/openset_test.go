@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/brohd11/bubblestack/components/editor"
@@ -120,8 +121,9 @@ func TestOpenSetRekeyInheritsRoot(t *testing.T) {
 	}
 
 	scratch := editor.New(editor.Opts{})
-	o.rekey("", "/elsewhere/new.md", scratch)
-	if got := o.byID["/elsewhere/new.md"].root; got != "/elsewhere" {
+	path := filepath.Join(string(filepath.Separator), "elsewhere", "new.md")
+	o.rekey("", path, scratch)
+	if got := o.byID[path].root; got != filepath.Dir(path) {
 		t.Errorf("root for a newly identified buffer = %q, want its directory", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -359,7 +360,7 @@ func splitWorkspaceEdit(edit *protocol.WorkspaceEdit, path string) (local []lspT
 		return nil, false
 	}
 	for target, edits := range edit.Changes {
-		if uriPath(target) == path {
+		if sameFilePath(uriPath(target), path) {
 			local = append(local, projectTextEdits(edits)...)
 			continue
 		}
@@ -371,7 +372,7 @@ func splitWorkspaceEdit(edit *protocol.WorkspaceEdit, path string) (local []lspT
 			foreign = true // a create/rename/delete operation is out of scope here
 			continue
 		}
-		if uriPath(textEdit.TextDocument.URI) != path {
+		if !sameFilePath(uriPath(textEdit.TextDocument.URI), path) {
 			foreign = true
 			continue
 		}
@@ -438,6 +439,17 @@ func uriPath(u uri.URI) string {
 		return ""
 	}
 	return filepath.Clean(u.FsPath())
+}
+
+// sameFilePath compares paths at the LSP URI boundary. File URIs canonicalize
+// Windows drive letters (and UNC authorities) to lowercase, while paths received
+// from the OS may retain their original casing. They still identify the same file.
+func sameFilePath(left, right string) bool {
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 // projectSymbols flattens both documentSymbol shapes. The nested one is walked
