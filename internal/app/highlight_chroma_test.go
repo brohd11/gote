@@ -7,6 +7,7 @@ import (
 
 	"github.com/brohd11/bubblestack/components/editor"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
@@ -38,7 +39,7 @@ func spanText(spans []editor.Span) string {
 func TestChromaSpansReconstructLines(t *testing.T) {
 	docs := map[string]string{
 		".go":   "package main\n\n/* a block\n   comment */\nfunc main() {\n\tx := `raw\nstring`\n\tprintln(x) // trailing\n}",
-		".gd":   "extends Node\n\nfunc _ready():\n\tvar greeting = \"hello\"\n\tprint(greeting)\n",
+		".gd":   "extends \"res://my_file.gd\"\n\nfunc _ready():\n\tvar greeting = \"hello\"\n\tprint(greeting)\n\tvar p := PlayerState.new() # a \" in a comment\n",
 		".py":   "import os\n\ndef f(a, b=1):\n    \"\"\"doc\n    string\"\"\"\n    return a + b  # note\n",
 		".sh":   "#!/bin/sh\nset -eu\nfor f in *.txt; do\n\techo \"$f\"\ndone\n",
 		".json": "{\n  \"a\": [1, 2.5, null],\n  \"b\": {\"c\": \"d\"}\n}\n",
@@ -208,5 +209,134 @@ func BenchmarkChromaHighlighterViewport(b *testing.B) {
 		hl := profile.editor.NewHighlighter()
 		hl.Parse(doc)
 		benchmarkHighlightSpans = hl.HighlightLine(20)
+	}
+}
+
+// spanFor finds the span whose Text is exactly want. Under the unpatched Chroma lexer a
+// quoted extends path is shredded into an Error rune and a handful of names and
+// operators, so "the whole path came back as one span" is itself half the assertion.
+func spanFor(spans []editor.Span, want string) (editor.Span, bool) {
+	for _, sp := range spans {
+		if sp.Text == want {
+			return sp, true
+		}
+	}
+	return editor.Span{}, false
+}
+
+// TestGDScriptExtendsPathIsAString pins the fix registerPatchedGDScript makes. Chroma's
+// GDScript lexer dead-ends on the path form of extends: the opening quote becomes an
+// Error, the closing one opens a string, and every line after it — comments included —
+// is swallowed by it. The leak is what actually ruins the buffer, so it is asserted on a
+// later line as well as on line 0.
+func TestGDScriptExtendsPathIsAString(t *testing.T) {
+	hl := highlighterFor(t, ".gd")
+	hl.Parse("extends \"res://my_file.gd\"\n\nfunc _ready():\n\tprint(\"hi\") # a \" in a comment\n")
+
+	line0 := hl.HighlightLine(0)
+	path, ok := spanFor(line0, "\"res://my_file.gd\"")
+	if !ok {
+		t.Fatalf("extends path is not one span: %q", line0)
+	}
+	if got := path.Style.GetForeground(); got != chStringStyle.GetForeground() {
+		t.Errorf("extends path foreground = %v, want the string color %v", got, chStringStyle.GetForeground())
+	}
+	for _, sp := range line0 {
+		if sp.Style.GetForeground() == chErrorStyle.GetForeground() && sp.Style.GetBold() {
+			t.Errorf("extends line has an error span %q", sp.Text)
+		}
+	}
+
+	// The string must not have leaked: row 3's trailing "# a " in a comment" is a comment,
+	// and under the bug the whole row reads as one string span instead.
+	comment, ok := spanFor(hl.HighlightLine(3), "# a \" in a comment")
+	if !ok {
+		t.Fatalf("row 3 lost its comment span: %q", hl.HighlightLine(3))
+	}
+	if got := comment.Style.GetForeground(); got != chCommentStyle.GetForeground() {
+		t.Errorf("trailing comment foreground = %v, want the comment color %v", got, chCommentStyle.GetForeground())
+	}
+}
+
+// TestGDScriptExtendsIdentifierStillTyped is the other half: the patched rules are
+// prepended to the classname state, so the plain form must still reach the identifier
+// rule underneath them.
+func TestGDScriptExtendsIdentifierStillTyped(t *testing.T) {
+	hl := highlighterFor(t, ".gd")
+	hl.Parse("extends Node\n")
+	node, ok := spanFor(hl.HighlightLine(0), "Node")
+	if !ok {
+		t.Fatalf("extends Node lost its class span: %q", hl.HighlightLine(0))
+	}
+	if got := node.Style.GetForeground(); got != chTypeStyle.GetForeground() {
+		t.Errorf("extends Node foreground = %v, want the type color %v", got, chTypeStyle.GetForeground())
+	}
+}
+
+// TestGDScriptClassExtendsPath pins the other two keywords that reach the classname state.
+// Chroma routes class, class_name and extends through one root rule into one state, so the
+// quoted-path patch covers all three — this is what keeps that true rather than implied.
+func TestGDScriptClassExtendsPath(t *testing.T) {
+	hl := highlighterFor(t, ".gd")
+	hl.Parse("class_name Outer\nclass Inner extends \"res://inner.gd\":\n\tvar n := 1 # a \" in a comment\n")
+
+	line1 := hl.HighlightLine(1)
+	path, ok := spanFor(line1, "\"res://inner.gd\"")
+	if !ok {
+		t.Fatalf("inner class extends path is not one span: %q", line1)
+	}
+	if got := path.Style.GetForeground(); got != chStringStyle.GetForeground() {
+		t.Errorf("extends path foreground = %v, want the string color %v", got, chStringStyle.GetForeground())
+	}
+	for _, sp := range line1 {
+		if sp.Style.GetForeground() == chErrorStyle.GetForeground() && sp.Style.GetBold() {
+			t.Errorf("class/extends line has an error span %q", sp.Text)
+		}
+	}
+	comment, ok := spanFor(hl.HighlightLine(2), "# a \" in a comment")
+	if !ok {
+		t.Fatalf("row 2 lost its comment span: %q", hl.HighlightLine(2))
+	}
+	if got := comment.Style.GetForeground(); got != chCommentStyle.GetForeground() {
+		t.Errorf("trailing comment foreground = %v, want the comment color %v", got, chCommentStyle.GetForeground())
+	}
+}
+
+// TestGDScriptPascalCaseIsTyped covers the rule that gives a project's own classes the same
+// color as Godot's. The negative half matters as much as the positive: CONSTANT_CASE is
+// deliberately left alone, because the lexer cannot tell a bare enum member from a member
+// access and would render the same symbol two ways.
+func TestGDScriptPascalCaseIsTyped(t *testing.T) {
+	hl := highlighterFor(t, ".gd")
+	hl.Parse("extends Node\n\nconst MAX_SPEED = 400.0\nvar p: PlayerState\nvar g := Game.PlayerState\nvar q := PlayerState.new()\nvar speed := 0.0\n")
+
+	typed := map[int]string{
+		0: "Node",        // engine class, unchanged
+		3: "PlayerState", // user class in a type hint
+		4: "PlayerState", // after a dot: member access still colors
+		5: "PlayerState", // ahead of the call rule, so not a function
+	}
+	for row, name := range typed {
+		sp, ok := spanFor(hl.HighlightLine(row), name)
+		if !ok {
+			t.Errorf("row %d has no %q span: %q", row, name, hl.HighlightLine(row))
+			continue
+		}
+		if got := sp.Style.GetForeground(); got != chTypeStyle.GetForeground() {
+			t.Errorf("row %d %q foreground = %v, want the type color %v", row, name, got, chTypeStyle.GetForeground())
+		}
+	}
+
+	for row, name := range map[int]string{2: "MAX_SPEED", 6: "speed"} {
+		sp, ok := spanFor(hl.HighlightLine(row), name)
+		if !ok {
+			t.Errorf("row %d has no %q span: %q", row, name, hl.HighlightLine(row))
+			continue
+		}
+		// An unstyled span is the zero Style, whose foreground is lipgloss's own
+		// "no color" rather than a nil interface — compare against that, not nil.
+		if got, plain := sp.Style.GetForeground(), (lipgloss.Style{}).GetForeground(); got != plain {
+			t.Errorf("row %d %q foreground = %v, want it left unstyled (%v)", row, name, got, plain)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 // Syntax coloring for the source files gote gets pointed at in scan mode. It lives here
@@ -89,6 +90,74 @@ var _ editor.HighlightRestartProvider = (*chromaHighlighter)(nil)
 func chromaHighlighterFactory(lexer chroma.Lexer) func() editor.Highlighter {
 	lexer = chroma.Coalesce(lexer)
 	return func() editor.Highlighter { return &chromaHighlighter{lexer: lexer} }
+}
+
+// registerPatchedGDScript repairs a defect in Chroma's own GDScript lexer, in place, by
+// re-registering a patched copy under the same name. The lexer's `classname` state — the
+// one `extends` pushes — accepts a bare identifier and nothing else, so the path form
+//
+//	extends "res://my_file.gd"
+//
+// dead-ends on the opening quote: Chroma emits a one-rune Error for it and stays in the
+// state, `res` then satisfies the identifier rule and pops, and the CLOSING quote is what
+// finally opens a string — swallowing the rest of the document, comments included, until
+// some later quote happens to close it. Adding the quoted form to the state fixes it at
+// the source, so both the editor buffer and a fenced preview block inherit the fix from
+// the one registry lookup each already does.
+//
+// This is upstream's bug, not a policy of gote's: gdscript.xml has been untouched since
+// 2023 and the open Godot-4.7 PR does not go near this state. If a future Chroma
+// restructures `classname` the patch stops applying cleanly and the tests say so; the
+// right response then is to delete this function.
+func registerPatchedGDScript() {
+	base, ok := lexers.Get("gdscript").(*chroma.RegexLexer)
+	if !ok {
+		return // upstream changed shape; the stock lexer is still better than none
+	}
+	rules, err := base.Rules()
+	if err != nil {
+		return
+	}
+	// Clone before touching it: Rules hands back the registry lexer's own map.
+	rules = rules.Clone()
+	// Prepended, so `extends Node` still reaches the identifier rule below. Both patterns
+	// consume at least one rune — a zero-width "pop on anything" guard would leave the
+	// lexer's position unmoved and spin forever — and both stop at a newline, which leaves
+	// an unterminated quote on Chroma's existing error path, where hitting the '\n' resets
+	// the stack to root and keeps the damage on one line.
+	rules["classname"] = append([]chroma.Rule{
+		{Pattern: `"(?:\\.|[^"\\\n])*"`, Type: chroma.LiteralStringDouble, Mutator: chroma.Pop(1)},
+		{Pattern: `'(?:\\.|[^'\\\n])*'`, Type: chroma.LiteralStringSingle, Mutator: chroma.Pop(1)},
+	}, rules["classname"]...)
+
+	// Chroma types only the engine classes it ships a list of, so a project's own classes,
+	// autoload singletons and enum type names fall through to root's `[a-zA-Z_]\w*`
+	// catch-all and render unstyled. This rule claims them for the same NameClass the
+	// engine list uses — a user class is a type, and reads as one.
+	//
+	// The lowercase in the middle is what separates PascalCase from CONSTANT_CASE: MyClass,
+	// Node2D and HTTPManager match, MAX_SPEED, AABB and a lone X do not. The trailing \w*
+	// is greedy, so a match always spans the whole identifier rather than a prefix. The
+	// lookbehind blocks a mid-identifier match but deliberately allows one after '.', so
+	// Game.PlayerState colors — which is how the engine list already behaves for Foo.Node.
+	//
+	// It goes ahead of root's call rule so `MyClass.new()` and `MyClass(…)` read as a type
+	// rather than a function, matching `Vector2(1, 2)`, whose engine-list rule already
+	// outranks that call rule. Everything above the anchor — keywords, annotations,
+	// operators, the class/extends rules, the engine types, builtins, numbers — still wins.
+	const callRule = `(\b[a-zA-Z_]\w*)([(])`
+	for i, rule := range rules["root"] {
+		if rule.Pattern != callRule {
+			continue
+		}
+		root := make([]chroma.Rule, 0, len(rules["root"])+1)
+		root = append(root, rules["root"][:i]...)
+		root = append(root, chroma.Rule{Pattern: `(?<!\w)[A-Z]\w*[a-z]\w*`, Type: chroma.NameClass})
+		rules["root"] = append(root, rules["root"][i:]...)
+		break
+	}
+
+	lexers.Register(chroma.MustNewLexer(base.Config(), func() chroma.Rules { return rules }))
 }
 
 // Parse tokenizes doc and splits the token stream into per-line spans. Tokens cross line
