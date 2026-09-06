@@ -137,10 +137,8 @@ var blockComments = map[string][2]string{
 
 func buildLanguageProfiles() map[string]*languageProfile {
 	// Before the first lexers.Get below, and before anything else in the process can
-	// resolve either language: see registerPatchedGDScript for the upstream defect it
-	// repairs, and registerPatchedGo for the type names it claims.
+	// resolve GDScript: see registerPatchedGDScript for what it repairs.
 	registerPatchedGDScript()
-	registerPatchedGo()
 	profiles := make(map[string]*languageProfile, len(chromaExts)+2)
 	for _, ext := range chromaExts {
 		lexer := lexers.Match("file" + ext)
@@ -442,12 +440,22 @@ func shebangExt(path string) string {
 	return extByInterpreter[strings.ToLower(filepath.Base(fields[0]))]
 }
 
+// editorLanguageForPath is the editor's LanguageResolver. Besides answering with the
+// profile, it binds the path into the highlighter factory: the resolver is the editor's
+// only path-derived seam, and the semantic overlay needs to know which file's tokens to
+// read. The config is copied before that is written, because profiles are shared across
+// every editor that resolves to the same language.
 func editorLanguageForPath(path string) *editor.LanguageConfig {
 	profile := languageForPath(path)
 	if profile == nil {
 		return nil
 	}
-	return &profile.editor
+	if path == "" || profile.editor.NewHighlighter == nil {
+		return &profile.editor
+	}
+	cfg := profile.editor
+	cfg.NewHighlighter = semanticHighlighterFactory(profile.editor.NewHighlighter, path)
+	return &cfg
 }
 
 func afterLeadingIndent(ctx editor.EnterContext) bool {

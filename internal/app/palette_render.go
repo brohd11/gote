@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -25,38 +24,6 @@ import (
 type RenderOptions struct {
 	Path  string
 	Basic bool
-}
-
-// paletteSlots pairs each config key with the style it produces, in the order
-// syntaxColorSlots walks. The styles are read through pointers to the package vars rather
-// than copied, because RenderPalette may re-apply the palette (for Basic) after this list
-// is built and a copy would show the palette that was replaced.
-func paletteSlots() []struct {
-	key   string
-	style *lipgloss.Style
-} {
-	return []struct {
-		key   string
-		style *lipgloss.Style
-	}{
-		{"keyword", &chKeywordStyle},
-		{"type", &chTypeStyle},
-		{"func", &chFuncStyle},
-		{"string", &chStringStyle},
-		{"number", &chNumberStyle},
-		{"comment", &chCommentStyle},
-		{"operator", &chOperatorStyle},
-		{"inserted", &chInsertedStyle},
-		{"deleted", &chDeletedStyle},
-		{"error", &chErrorStyle},
-		{"md_heading", &mdHeadingStyle},
-		{"md_emphasis", &mdEmphasisStyle},
-		{"md_strong", &mdStrongStyle},
-		{"md_code", &mdCodeStyle},
-		{"md_quote", &mdQuoteStyle},
-		{"md_link", &mdLinkStyle},
-		{"md_list", &mdListStyle},
-	}
 }
 
 // RenderPalette writes the report to w. cfg supplies the palette in effect, so what the
@@ -210,14 +177,6 @@ func writeHighlighted(w io.Writer, name, text string) error {
 		}
 	}
 	return nil
-}
-
-func spansPlainText(spans []editor.Span) string {
-	var b strings.Builder
-	for _, sp := range spans {
-		b.WriteString(sp.Text)
-	}
-	return b.String()
 }
 
 // renderSpace prints the 256-color space in its own shape rather than as a flat run.

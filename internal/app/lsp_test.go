@@ -45,6 +45,10 @@ type recordingLSPServer struct {
 	formattingResult []protocol.TextEdit
 	codeActionResult []protocol.CommandOrCodeAction
 	signatureResult  *protocol.SignatureHelp
+	// semanticResult is armed with the legend the server will advertise and the token
+	// data it will answer with; the capability appears only when the legend is set.
+	semanticLegend []string
+	semanticData   []uint32
 }
 
 func newRecordingLSPServer() *recordingLSPServer {
@@ -78,6 +82,12 @@ func (s *recordingLSPServer) Initialize(_ context.Context, params *protocol.Init
 		result.Capabilities.DocumentFormattingProvider = protocol.Boolean(true)
 		result.Capabilities.CodeActionProvider = protocol.Boolean(true)
 	}
+	if s.semanticLegend != nil {
+		result.Capabilities.SemanticTokensProvider = &protocol.SemanticTokensOptions{
+			Legend: protocol.SemanticTokensLegend{TokenTypes: s.semanticLegend},
+			Full:   protocol.Boolean(true),
+		}
+	}
 	if s.signatureResult != nil {
 		result.Capabilities.SignatureHelpProvider = &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}}
 	}
@@ -97,6 +107,13 @@ func (s *recordingLSPServer) Hover(_ context.Context, params *protocol.HoverPara
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.hoverResult, nil
+}
+
+func (s *recordingLSPServer) SemanticTokensFull(_ context.Context, _ *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
+	s.calls <- recordedLSPCall{method: "semanticTokens"}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &protocol.SemanticTokens{Data: s.semanticData}, nil
 }
 
 func (s *recordingLSPServer) References(_ context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {

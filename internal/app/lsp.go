@@ -95,6 +95,7 @@ type lspEvent struct {
 	status     string
 	completion *lspCompletionResult
 	request    *lspRequestResult
+	semantic   *lspSemanticResult
 }
 
 // lspManager is an actor around all server and document lifecycle work. The UI writes
@@ -119,8 +120,15 @@ type lspManager struct {
 	nextRequest       uint64
 	signatureTriggers map[string]map[string]bool
 	capabilities      map[string]*protocol.ServerCapabilities
-	restart           bool
-	closed            bool
+	// The semantic-token lane (lsp_semantic.go): its own slot and counter for the same
+	// reason the on-demand lane has its own — a background refresh must never evict the
+	// definition the user just asked for. semanticLegends is per session because a token's
+	// type arrives as an index into the server's own list.
+	semantic        *lspSemanticRequest
+	nextSemantic    uint64
+	semanticLegends map[string][]string
+	restart         bool
+	closed          bool
 
 	wake    chan struct{}
 	stop    chan struct{}
@@ -156,6 +164,7 @@ func newLSPManager(cfg Config, version string) *lspManager {
 		diagnostics: map[string][]lspDiagnostic{}, completionTriggers: map[string]map[string]bool{},
 		signatureTriggers: map[string]map[string]bool{},
 		capabilities:      map[string]*protocol.ServerCapabilities{},
+		semanticLegends:   map[string][]string{},
 		wake:              make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		events: make(chan lspEvent, 64), dead: make(chan deadSession, 8),
 	}
@@ -354,6 +363,7 @@ func (m *lspManager) loop() {
 	var changeTimerC <-chan time.Time
 	var cancelCompletion context.CancelFunc
 	var cancelRequest context.CancelFunc
+	var cancelSemantic context.CancelFunc
 	stopChangeTimer := func() {
 		if changeTimer == nil {
 			return
@@ -390,6 +400,12 @@ func (m *lspManager) loop() {
 					cancelRequest()
 				}
 				cancelRequest = m.startRequest(sessions, pending, *request)
+			}
+			if request := m.takeSemantic(); request != nil {
+				if cancelSemantic != nil {
+					cancelSemantic()
+				}
+				cancelSemantic = m.startSemantic(sessions, pending, *request)
 			}
 			switch {
 			case len(pending) == 0:
@@ -822,6 +838,27 @@ func (m *lspManager) startSession(session *lspSession) error {
 						},
 					},
 				},
+				// AugmentsSyntaxTokens is the overlay design stated to the server: the
+				// spec defines it as "client side created syntax tokens and semantic
+				// tokens are both used for colorization", which is exactly what gote
+				// does — chroma paints first and these correct it.
+				//
+				// The full spec name lists are declared rather than only the ones the
+				// palette maps, because this says what the client can DECODE; a server
+				// may omit anything from its legend, and narrowing the declaration would
+				// quietly change which tokens it bothers to compute.
+				//
+				// This capability alone is not enough for gopls, which gates the whole
+				// feature behind its own semanticTokens option — see defaultLanguageServers.
+				SemanticTokens: protocol.SemanticTokensClientCapabilities{
+					Requests: protocol.ClientSemanticTokensRequestOptions{
+						Full: protocol.Boolean(true),
+					},
+					TokenTypes:           semanticTokenTypeNames,
+					TokenModifiers:       semanticTokenModifierNames,
+					Formats:              []protocol.TokenFormat{protocol.TokenFormatRelative},
+					AugmentsSyntaxTokens: &yes,
+				},
 				SignatureHelp: &protocol.SignatureHelpClientCapabilities{
 					SignatureInformation: &protocol.ClientSignatureInformationOptions{
 						DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
@@ -858,6 +895,13 @@ func (m *lspManager) startSession(session *lspSession) error {
 		if signature := session.caps.SignatureHelpProvider; signature != nil {
 			m.signatureTriggers[session.key] = triggerSet(signature.TriggerCharacters)
 		}
+		// The legend is the server's, and a token's type arrives as an INDEX into it —
+		// the numbers differ between servers, so it has to be kept to decode anything at
+		// all. Cached here for the same reason the trigger sets are: this is the one
+		// moment the capabilities are in hand.
+		if legend, ok := semanticLegend(session.caps.SemanticTokensProvider); ok {
+			m.semanticLegends[session.key] = legend
+		}
 	}
 	m.mu.Unlock()
 	session.failure, session.retryAt = "", time.Time{}
@@ -888,6 +932,7 @@ func (m *lspManager) forgetCapabilitiesLocked(key string) {
 	delete(m.completionTriggers, key)
 	delete(m.signatureTriggers, key)
 	delete(m.capabilities, key)
+	delete(m.semanticLegends, key)
 }
 
 func (m *lspManager) failSession(session *lspSession, err error) {

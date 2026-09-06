@@ -186,61 +186,6 @@ func registerPatchedGDScript() {
 	lexers.Register(chroma.MustNewLexer(base.Config(), func() chroma.Rules { return rules }))
 }
 
-// registerPatchedGo gives Go's user-defined types a color. Chroma's Go lexer ends root
-// with a single `[^\W\d]\w*` → NameOther catch-all, so a type name, a variable, a struct
-// field and a package name all arrive as the same token — and NameOther has no style, so
-// every type in a Go buffer renders as plain text. There is no mapping that fixes this:
-// the type color only ever reaches KeywordType (int, string) and NameClass, which this
-// lexer never emits at all.
-//
-// So the same heuristic registerPatchedGDScript uses, and for the same reason — a lexer
-// that cannot tell a type from an identifier still leaves the CASE of the identifier to
-// read. The interior [a-z] separates PascalCase from CONSTANT_CASE: Config and DocFilter
-// match, EOF and MAX do not.
-//
-// Two things are deliberately backwards from the GDScript rule:
-//
-//   - It goes AFTER root's call rule rather than before it, so NewDocFilter(…) stays a
-//     function. GDScript wants the opposite because Vector2(1, 2) is a constructor.
-//   - The lookbehind excludes '.', where GDScript's allows it. In Go a qualified name is
-//     far more often a field or a method — cfg.ScanDepth, b.String — than a type, so
-//     this gives up coloring strings.Builder to avoid coloring every exported field
-//     access in the file.
-//
-// It is a heuristic and it over-reaches: an unqualified exported non-type reads as a
-// type, so struct field declarations, exported consts and exported error values are
-// colored too. That is inherent to guessing at what the lexer declined to say, and it is
-// the better failure — the alternative is what it replaces, which is coloring nothing.
-func registerPatchedGo() {
-	base, ok := lexers.Get("go").(*chroma.RegexLexer)
-	if !ok {
-		return // upstream changed shape; the stock lexer is still better than none
-	}
-	rules, err := base.Rules()
-	if err != nil {
-		return
-	}
-	// Clone before touching it: Rules hands back the registry lexer's own map.
-	rules = rules.Clone()
-
-	// Anchored on the catch-all itself rather than on an index, so the rule lands last
-	// even if upstream adds rules above it — and lands nowhere, leaving the stock lexer
-	// untouched, if upstream ever stops emitting it.
-	const catchAll = `[^\W\d]\w*`
-	for i, rule := range rules["root"] {
-		if rule.Pattern != catchAll {
-			continue
-		}
-		root := make([]chroma.Rule, 0, len(rules["root"])+1)
-		root = append(root, rules["root"][:i]...)
-		root = append(root, chroma.Rule{Pattern: `(?<![\w.])[A-Z]\w*[a-z]\w*`, Type: chroma.NameClass})
-		rules["root"] = append(root, rules["root"][i:]...)
-		break
-	}
-
-	lexers.Register(chroma.MustNewLexer(base.Config(), func() chroma.Rules { return rules }))
-}
-
 // Parse tokenizes doc and splits the token stream into per-line spans. Tokens cross line
 // boundaries — a block comment is one token, a string may contain newlines — so each
 // token's Value is cut on '\n' and its pieces distributed, which is what turns chroma's

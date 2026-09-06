@@ -47,24 +47,24 @@ import (
 // so with `number: "179"`.
 func defaultSyntaxColors() SyntaxColors {
 	return SyntaxColors{
-		Keyword:  "164", // #d700d7 → 13
-		Type:     "30",  // #008787 → 6
-		Func:     "25",  // #005faf → 4
-		String:   "28",  // #008700 → 2
-		Number:   "100", // #878700 → 3
-		Comment:  "102", // #878787 → 8
-		Operator: "132", // #af5f87 → 1
+		Keyword:  "176",
+		Type:     "41",
+		Func:     "32",
+		String:   "178",
+		Number:   "114",
+		Comment:  "8",
+		Operator: "117",
 		Inserted: "28",
 		Deleted:  "132",
-		Error:    "196", // #ff0000 → 9
+		Error:    "196",
 
-		MdHeading:  "132",
-		MdEmphasis: "28",
-		MdStrong:   "164",
+		MdHeading:  "124",
+		MdEmphasis: "24",
+		MdStrong:   "27",
 		MdCode:     "100",
 		MdQuote:    "102",
-		MdLink:     "27",
-		MdList:     "30",
+		MdLink:     "38",
+		MdList:     "88",
 	}
 }
 
@@ -77,8 +77,8 @@ func basicSyntaxColors() SyntaxColors {
 		Keyword:  "5",
 		Type:     "6",
 		Func:     "4",
-		String:   "2",
-		Number:   "3",
+		String:   "3",
+		Number:   "2",
 		Comment:  "8",
 		Operator: "1",
 		Inserted: "2",
@@ -214,6 +214,54 @@ func resolveSyntaxColors(sc SyntaxColors) syntaxPalette {
 		mdLink:     col(sc.MdLink, def.MdLink),
 		mdList:     col(sc.MdList, def.MdList),
 	}
+}
+
+// paletteSlots is the slot registry: every config key paired with the style it produces,
+// in the order syntaxColorSlots walks. It is the bridge between the config's vocabulary
+// and the styles, which is what lets `gote colors` print a legend and what lets a semantic
+// token name a slot by the same string the user types in config.yml.
+//
+// The styles are reached through pointers to the package vars rather than copied, because
+// a caller may re-apply the palette after this list is built and a copy would go on
+// showing the palette that was replaced.
+func paletteSlots() []struct {
+	key   string
+	style *lipgloss.Style
+} {
+	return []struct {
+		key   string
+		style *lipgloss.Style
+	}{
+		{"keyword", &chKeywordStyle},
+		{"type", &chTypeStyle},
+		{"func", &chFuncStyle},
+		{"string", &chStringStyle},
+		{"number", &chNumberStyle},
+		{"comment", &chCommentStyle},
+		{"operator", &chOperatorStyle},
+		{"inserted", &chInsertedStyle},
+		{"deleted", &chDeletedStyle},
+		{"error", &chErrorStyle},
+		{"md_heading", &mdHeadingStyle},
+		{"md_emphasis", &mdEmphasisStyle},
+		{"md_strong", &mdStrongStyle},
+		{"md_code", &mdCodeStyle},
+		{"md_quote", &mdQuoteStyle},
+		{"md_link", &mdLinkStyle},
+		{"md_list", &mdListStyle},
+	}
+}
+
+// slotStyle resolves a config slot name to its style. It is how a semantic token type,
+// having been mapped to a slot name, becomes a color — and why that mapping is written in
+// slot names rather than in colors of its own.
+func slotStyle(key string) (lipgloss.Style, bool) {
+	for _, slot := range paletteSlots() {
+		if slot.key == key {
+			return *slot.style, true
+		}
+	}
+	return lipgloss.Style{}, false
 }
 
 // applySyntaxPalette installs sc as the process's syntax palette. Ctx.New calls it once,

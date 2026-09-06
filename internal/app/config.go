@@ -113,6 +113,13 @@ type LanguageServerConfig struct {
 	Address               string         `yaml:"address"`
 	Command               []string       `yaml:"command"`
 	InitializationOptions map[string]any `yaml:"initialization_options,omitempty"`
+	// SemanticTokens overrides how this server's semantic token types land on the syntax
+	// palette, as token-type name to syntax_colors slot name. It is omitempty and normally
+	// absent: the type names are the LSP specification's, so gote's built-in map already
+	// serves every server that speaks them (see semantic_map.go). This is for the
+	// non-standard names a server invents on top — rust-analyzer's builtinType and
+	// lifetime, say. An empty slot value turns a type off rather than painting it.
+	SemanticTokens map[string]string `yaml:"semantic_tokens,omitempty"`
 }
 
 // The values Config.GitGutter takes. Anything else reads as gutterAuto rather than
@@ -182,9 +189,16 @@ func defaultLanguageServers() map[string]LanguageServerConfig {
 			// out anyway so turning calls back on does not also bring back a completion
 			// that types "Sprintf(format string, a ...any)" into the buffer as literal
 			// text — abandoning that tab cycle leaves the signature in the code.
+			// semanticTokens is gopls's own switch and not the LSP capability gote
+			// declares at initialize; gopls defaults it to false and returns no
+			// SemanticTokensProvider at all without it, so both are required. Note this
+			// only reaches a config that has no initialization_options of its own —
+			// LoadConfig fills the fallback wholesale rather than merging keys — so a
+			// user with custom go options here must add it by hand.
 			InitializationOptions: map[string]any{
 				"completeFunctionCalls": false,
 				"usePlaceholders":       false,
+				"semanticTokens":        true,
 			},
 		},
 		"python": {

@@ -122,6 +122,9 @@ type homeScreen struct {
 	previewMap        []int         // that render's source line → pane row map (RenderMarkdownMapped)
 	previewAt         int           // the editor scroll offset the pane was last synced to; -1 re-syncs
 	lspWaiting        bool          // one blocking manager subscription is already in Bubble Tea
+	semanticPath      string        // the path the last semantic-token fetch was issued for
+	semanticSeq       int           // and the edit generation it named, so one edit asks once
+	semanticGen       int           // debounce generation: a later edit supersedes a pending tick
 	completion        completionUI  // parent-owned, input-transparent LSP completion popup
 	hover             hoverUI       // the passive alt+h / context-menu tooltip
 	signature         signatureUI   // the passive parameter hint, above the caret
@@ -256,6 +259,10 @@ func fileText(path string) string {
 // screen. The returned screen is always the wrapper — the modular swap happens in
 // place, never as a screen replacement.
 func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
+	if tick, ok := msg.(semanticTick); ok {
+		s.handleSemanticTick(sh, tick)
+		return s, core.Action{}
+	}
 	if tick, ok := msg.(completionTick); ok {
 		act, _ := s.handleCompletionTick(sh, tick)
 		return s, s.finishHomeUpdate(sh, act)
@@ -435,8 +442,63 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 			s.lspWaiting = true
 			act.Cmd = tea.Batch(act.Cmd, c.lsp.WaitCmd())
 		}
+		act.Cmd = tea.Batch(act.Cmd, s.scheduleSemanticTokens())
 	}
 	return act
+}
+
+// semanticDebounce matches the editor's own highlight debounce. The two are deliberately
+// the same number: the fetch exists to feed the exact parse, so asking on a different
+// cadence only widens the window where the overlay describes text that has moved.
+const semanticDebounce = 250 * time.Millisecond
+
+type semanticTick struct {
+	target     *homeScreen
+	generation int
+}
+
+// scheduleSemanticTokens debounces the fetch behind a generation counter, the shape
+// scheduleCompletion established. Every edit supersedes the pending tick, so a burst of
+// typing sends nothing at all and one fetch goes out once it settles — where the previous
+// version asked on every update, and startSemantic force-flushes the document ahead of the
+// RPC, so that was a full document push per keystroke.
+func (s *homeScreen) scheduleSemanticTokens() tea.Cmd {
+	if s.editor == nil || s.currentPath == "" {
+		return nil
+	}
+	seq := s.editor.EditSeq()
+	if s.semanticPath == s.currentPath && s.semanticSeq == seq {
+		return nil // this generation has already been asked for
+	}
+	s.semanticGen++
+	generation := s.semanticGen
+	return tea.Tick(semanticDebounce, func(time.Time) tea.Msg {
+		return semanticTick{target: s, generation: generation}
+	})
+}
+
+// handleSemanticTick issues the fetch the tick was scheduled for, unless a later edit
+// already superseded it.
+//
+// A refusal is not recorded against semanticSeq, so a document opened before its server
+// finished starting is asked again after the next edit rather than never. Nor is it
+// reported: nobody pressed anything, and a buffer with no server is meant to look exactly
+// as it did before this feature existed.
+func (s *homeScreen) handleSemanticTick(sh *core.Shared, tick semanticTick) {
+	if tick.target != s || tick.generation != s.semanticGen {
+		return
+	}
+	if s.editor == nil || s.currentPath == "" {
+		return
+	}
+	c := Of(sh)
+	if c == nil || c.lsp == nil {
+		return
+	}
+	seq := s.editor.EditSeq()
+	if c.lsp.RequestSemanticTokens(s.currentPath, seq) != 0 {
+		s.semanticPath, s.semanticSeq = s.currentPath, seq
+	}
 }
 
 // View and HelpView both route through the status helpers (status.go): the router's own
@@ -583,6 +645,9 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		act := core.Action{}
 		if event.request != nil {
 			act = s.applyRequestResult(sh, event.request)
+		}
+		if event.semantic != nil {
+			s.applySemanticTokens(event.semantic)
 		}
 		s.refreshDiagnosticSigns()
 		s.lspWaiting = true
