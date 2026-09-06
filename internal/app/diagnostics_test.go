@@ -22,7 +22,7 @@ func TestDiagnosticSignsChooseHighestSeverity(t *testing.T) {
 	}
 }
 
-func TestRenderDiagnosticsCurrentFirst(t *testing.T) {
+func TestDiagnosticsPanelCurrentFirst(t *testing.T) {
 	root := t.TempDir()
 	c := New("test", DefaultConfig(), Options{})
 	defer c.close()
@@ -39,7 +39,10 @@ func TestRenderDiagnosticsCurrentFirst(t *testing.T) {
 		}}
 	}
 
-	body := renderDiagnostics(c, paths[1], 60)
+	panel := newDiagnosticsPanel(nil)
+	panel.SetSize(200, 20)
+	panel.refresh(c, paths[1])
+	body := strings.Join(panel.lines, "\n")
 	positions := []int{
 		strings.Index(body, paths[1]),
 		strings.Index(body, paths[0]),

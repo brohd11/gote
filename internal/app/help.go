@@ -81,7 +81,7 @@ func (s *homeScreen) helpText() string {
 	// here alongside. The description is gote's own: quitting dirty prompts first.
 	quitKey := core.Hint("quit (confirms unsaved changes)",
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
-	general := []key.Binding{quitKey, sidebarKey, flatKey, actionsKey, previewKey, fullPreviewKey,
+	general := []key.Binding{quitKey, sidebarKey, bottomKey, flatKey, actionsKey, previewKey, fullPreviewKey,
 		wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
@@ -97,6 +97,7 @@ func (s *homeScreen) helpText() string {
 	})
 	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
+	writeSection("diagnostics panel", s.diagnostics.PanelHelp())
 	writeSection("editor", s.editor.HelpBindings())
 	b.WriteString(clickHelp(s.sh) + "\n")
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")

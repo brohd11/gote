@@ -182,8 +182,8 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 		t.Fatalf("sidebar rebuild restored editor left edge %d, want %d", got, sidebarWidth+5)
 	}
 	state := s.modular.ResizeState()
-	if len(state.Rows) == 0 || !reflect.DeepEqual(state.Rows[0], s.sidebarRows) {
-		t.Fatalf("sidebar row split after rebuild = %v, want %v", state.Rows, s.sidebarRows)
+	if !reflect.DeepEqual(state.Splits["sidebar"].Weights, s.sidebarRows) {
+		t.Fatalf("sidebar row split after rebuild = %v, want %v", state.Splits["sidebar"].Weights, s.sidebarRows)
 	}
 
 	// With the preview present, setPreview focuses the editor. Its trailing edge
@@ -200,8 +200,8 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 	s.setSidebar(false)
 	s.setPreview(previewPane)
 	state = s.modular.ResizeState()
-	if len(state.Flex) != 2 || math.Abs(state.Flex[0]-wantFlex) > 1e-9 {
-		t.Fatalf("editor flex after rebuilds = %v, want leading share %g", state.Flex, wantFlex)
+	if weights := state.Splits["main"].Weights; len(weights) != 2 || math.Abs(weights[0]/(weights[0]+weights[1])-wantFlex) > 1e-9 {
+		t.Fatalf("editor flex after rebuilds = %v, want leading share %g", weights, wantFlex)
 	}
 }
 
@@ -2275,7 +2275,7 @@ func TestHomeEditorContextItems(t *testing.T) {
 	s, sh := newHome(t)
 
 	rows := s.editorContextItems(sh)
-	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Diagnostics", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
+	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
 	if len(rows) != len(want) {
 		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
 	}

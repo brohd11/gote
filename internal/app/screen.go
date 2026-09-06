@@ -24,6 +24,7 @@ const sidebarWidth = 30
 // lose the letter (alt+? is the modified alias that summons help from anywhere,
 // the editor included).
 var (
+	bottomKey  = key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "bottom panel"))
 	sidebarKey = key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "sidebar"))
 	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
@@ -92,6 +93,10 @@ type ReseedMsg struct{}
 // instance so the router never re-Inits it (a re-Init would re-run the editor's file
 // load over a dirty buffer).
 type homeScreen struct {
+	bottomVisible     bool
+	bottomFraction    float64
+	bottomPanel       components.Panel
+	diagnostics       *diagnosticsPanel
 	modular           *components.ModularScreen
 	docsPanel         *components.CompactListPanel
 	filePanel         *components.FilePanel // the folder view alt+t swaps into the docs slot
@@ -204,6 +209,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	s.previewPanel.OnLink = func(sh *core.Shared, l components.Link) core.Action {
 		return s.previewLinks().Do(sh, l)
 	}
+	s.diagnostics = newDiagnosticsPanel(s.activateDiagnostic)
+	s.bottomPanel = s.diagnostics
 	s.modular = s.buildModular()
 	return s
 }
@@ -279,6 +286,12 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
+		if core.MatchKey(k, bottomKey) {
+			return s, s.toggleBottom(sh)
+		}
+		if s.bottomVisible && s.diagnostics.Focused() && !s.modular.Resizing() && core.MatchKey(k, core.Keys.Back) {
+			return s, core.Async(s.modular.FocusSlot(s.editorSlot()))
+		}
 		if core.MatchKey(k, newBufferKey) {
 			if s.minimal {
 				return s, core.Action{}
@@ -426,6 +439,7 @@ func clickModifierMatches(setting string, mod tea.KeyMod) bool {
 }
 
 func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Action {
+	defer s.refreshDiagnostics()
 	s.applyPendingJump()
 	// After the jump, so a caret that has just landed somewhere else is judged on where it
 	// landed. Here rather than in the typing hook because this is the exit every path that
@@ -523,6 +537,7 @@ func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 	resized := width != s.w || bodyHeight != s.h
 	s.w, s.h = width, bodyHeight
 	s.modular.SetSize(sh, width, bodyHeight)
+	s.refreshDiagnostics()
 	s.refreshPreview() // the pane's new width re-wraps the render
 	if resized {
 		// A height-only resize leaves the render alone but moves both viewports under
@@ -638,6 +653,7 @@ func (s *homeScreen) CrumbLabel(short bool) string {
 // The editor and panel frames read theme colors while rendering; only bubbles lists
 // cache themed styles and need an explicit refresh here.
 func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
+	defer s.refreshDiagnostics()
 	if event, ok := payload.(lspEvent); ok {
 		if event.completion != nil {
 			s.applyCompletionResult(event.completion)
@@ -689,6 +705,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 		core.StyleList(s.filePanel.List())
 		core.StyleList(s.openPanel.List())
 		s.refreshDiagnosticSigns()
+		s.diagnostics.paint()
 	}
 	return s.modular.Receive(sh, payload)
 }
@@ -841,12 +858,9 @@ func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) tea.Cmd {
 	return nil
 }
 
-// buildModular lays the current combination out: the sidebar column is optional
-// (ctrl+b) and the preview column is optional (ctrl+p), so the grid is assembled
-// rather than picked from a fixed set. The preview column is appended AFTER the
-// editor, which is what keeps editorSlot's indexes valid whether or not it is up; the
-// editor and preview both flex (ColWidths 0) and so split whatever the fixed sidebar
-// leaves.
+// buildModular declares gote's pane tree. The framework knows only horizontal
+// and vertical splits; tool visibility and the initial workspace split live here.
+// Depth-first leaf order keeps the existing upper-pane indexes stable.
 func (s *homeScreen) buildModular() *components.ModularScreen {
 	opts := components.ModularOpts{
 		// One entry, and it is the pointer at all the others: every app key gote has
@@ -861,86 +875,81 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		// its own, so the reader's own hints never reach this bar.
 		opts.Help = append([]key.Binding{fullPreviewKey}, opts.Help...)
 	}
-	var cols [][]components.Slot
-	var widths []int
+	leaf := func(panel components.Panel) components.LayoutNode {
+		return components.LayoutNode{Slot: &components.Slot{Panel: panel}}
+	}
+	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
 	if s.sidebar {
-		cols = append(cols, []components.Slot{
-			{Panel: s.docsPane(), Weight: 1},
-			{Panel: s.openPanel, Weight: 1},
+		main.Children = append(main.Children, components.LayoutNode{
+			ID: "sidebar", Axis: components.LayoutVertical, Size: s.sidebarPaneWidth(),
+			Children: []components.LayoutNode{leaf(s.docsPane()), leaf(s.openPanel)},
 		})
-		widths = append(widths, s.sidebarPaneWidth())
 	}
-	// ExpandH on the editor: its body is only as wide as its longest line unless the
-	// scrollbar forces the padding, so a short doc would leave the column ragged
-	// against the preview's border (or the terminal edge).
-	cols = append(cols, []components.Slot{{Panel: s.editorPanel, Weight: 1, ExpandH: true}})
-	widths = append(widths, 0)
+	main.Children = append(main.Children, leaf(s.editorPanel))
 	if panel := s.previewTarget(); panel != nil {
-		cols = append(cols, []components.Slot{{Panel: panel, Weight: 1}})
-		widths = append(widths, 0)
+		main.Children = append(main.Children, leaf(panel))
 	}
-	if s.sidebar {
-		opts.ColWidths = widths // all-flex needs no entry at all
+	root := main
+	if s.bottomVisible {
+		main.Weight = 3
+		root = components.LayoutNode{ID: "workspace", Axis: components.LayoutVertical,
+			Children: []components.LayoutNode{main, {
+				ID: "tools", Axis: components.LayoutHorizontal,
+				Children: []components.LayoutNode{leaf(s.bottomPanel)},
+			}},
+		}
 	}
-	opts.Resize = &components.ResizeOpts{
-		State:    s.resizeState(),
-		OnChange: s.saveResize,
-	}
-	return components.NewModularScreen(cols, opts)
+	opts.Resize = &components.ResizeOpts{State: s.resizeState(), OnChange: s.saveResize}
+	return components.NewModularLayout(root, opts)
 }
 
 // resizeState maps the persistent gote pane identities onto ModularScreen's
 // positional state. The sidebar and preview columns can disappear on a rebuild,
 // while the editor always remains between them.
 func (s *homeScreen) resizeState() components.ResizeState {
-	cols := 1
+	// Gote maps pane identities to split children. Hidden panes keep their own
+	// preferences, rather than saving a snapshot of a different child list over them.
+	state := components.ResizeState{Splits: make(map[string]components.SplitState)}
+	sizes, weights := []int{}, []float64{}
 	if s.sidebar {
-		cols++
-	}
-	preview := s.previewTarget() != nil
-	if preview {
-		cols++
-	}
-	state := components.ResizeState{
-		Cols: make([]int, cols),
-		Flex: make([]float64, cols),
-		Rows: make([][]float64, cols),
-	}
-	editorCol := 0
-	if s.sidebar {
-		state.Cols[0] = s.sidebarPaneWidth()
+		sizes, weights = append(sizes, s.sidebarPaneWidth()), append(weights, 1)
 		if len(s.sidebarRows) == 2 {
-			state.Rows[0] = append([]float64(nil), s.sidebarRows...)
+			state.Splits["sidebar"] = components.SplitState{Sizes: []int{0, 0}, Weights: append([]float64(nil), s.sidebarRows...)}
 		}
-		editorCol = 1
 	}
-	if preview {
-		share := s.editorFlex
-		if share <= 0 || share >= 1 {
-			share = 0.5
-		}
-		state.Flex[editorCol] = share
-		state.Flex[editorCol+1] = 1 - share
-	} else {
-		state.Flex[editorCol] = 1
+	share := s.editorFlex
+	if share <= 0 || share >= 1 {
+		share = 0.5
+	}
+	sizes, weights = append(sizes, 0), append(weights, share)
+	if s.previewTarget() != nil {
+		sizes, weights = append(sizes, 0), append(weights, 1-share)
+	}
+	state.Splits["main"] = components.SplitState{Sizes: sizes, Weights: weights}
+	if s.bottomVisible && s.bottomFraction > 0 && s.bottomFraction < 1 {
+		state.Splits["workspace"] = components.SplitState{Sizes: []int{0, 0}, Weights: []float64{1 - s.bottomFraction, s.bottomFraction}}
 	}
 	return state
 }
 
-// saveResize translates the current positional snapshot back to gote's stable
-// pane identities so ctrl+b, ctrl+p and alt+p rebuilds retain the adjustments.
+// saveResize retains gote's pane preferences independently of which panes exist
+// in this layout. The framework knows only named splits and their child weights.
 func (s *homeScreen) saveResize(state components.ResizeState) {
+	if split, ok := state.Splits["workspace"]; s.bottomVisible && ok && len(split.Weights) == 2 {
+		s.bottomFraction = split.Weights[1] / (split.Weights[0] + split.Weights[1])
+	}
 	editorCol := 0
 	if s.sidebar {
-		if len(state.Cols) > 0 && state.Cols[0] > 0 {
-			s.sidebarW = state.Cols[0]
+		if split, ok := state.Splits["main"]; ok && len(split.Sizes) > 0 && split.Sizes[0] > 0 {
+			s.sidebarW = split.Sizes[0]
 		}
-		if len(state.Rows) > 0 && len(state.Rows[0]) == 2 {
-			s.sidebarRows = append(s.sidebarRows[:0], state.Rows[0]...)
+		if split, ok := state.Splits["sidebar"]; ok && len(split.Weights) == 2 {
+			sum := split.Weights[0] + split.Weights[1]
+			s.sidebarRows = append(s.sidebarRows[:0], split.Weights[0]/sum, split.Weights[1]/sum)
 		}
 		editorCol = 1
 	}
-	if s.previewTarget() != nil && editorCol < len(state.Flex) && state.Flex[editorCol] > 0 {
-		s.editorFlex = state.Flex[editorCol]
+	if split, ok := state.Splits["main"]; ok && s.previewTarget() != nil && len(split.Weights) > editorCol+1 {
+		s.editorFlex = split.Weights[editorCol] / (split.Weights[editorCol] + split.Weights[editorCol+1])
 	}
 }

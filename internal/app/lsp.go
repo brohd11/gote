@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -107,13 +108,14 @@ type lspManager struct {
 	version        string
 	changeDebounce time.Duration
 
-	mu                 sync.Mutex
-	desired            map[string]lspDocument
-	saves              map[string]bool
-	diagnostics        map[string][]lspDiagnostic
-	completion         *lspCompletionRequest
-	nextComplete       uint64
-	completionTriggers map[string]map[string]bool
+	mu                  sync.Mutex
+	desired             map[string]lspDocument
+	saves               map[string]bool
+	diagnosticsRevision uint64
+	diagnostics         map[string][]lspDiagnostic
+	completion          *lspCompletionRequest
+	nextComplete        uint64
+	completionTriggers  map[string]map[string]bool
 	// The on-demand lane (lsp_request.go): its own slot and counter, so a queued
 	// hover never cancels a completion the same keystroke asked for.
 	request           *lspRequest
@@ -221,6 +223,9 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 	})
 	for path := range m.desired {
 		if _, ok := next[path]; !ok {
+			if _, ok := m.diagnostics[path]; ok {
+				m.diagnosticsRevision++
+			}
 			delete(m.diagnostics, path)
 			if m.completion != nil && m.completion.path == path {
 				m.completion = nil
@@ -1036,7 +1041,10 @@ func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.Publi
 	for _, item := range params.Diagnostics {
 		diagnostics = append(diagnostics, projectDiagnostic(item))
 	}
-	c.manager.diagnostics[path] = diagnostics
+	if !slices.Equal(c.manager.diagnostics[path], diagnostics) {
+		c.manager.diagnosticsRevision++
+		c.manager.diagnostics[path] = diagnostics
+	}
 	c.manager.mu.Unlock()
 	c.manager.emit(lspEvent{})
 	return nil
@@ -1101,4 +1109,11 @@ func (t *stdioTransport) Close() error {
 		go func() { _ = t.cmd.Wait() }()
 	})
 	return first
+}
+
+// DiagnosticsRevision changes only when the stored diagnostic set changes.
+func (m *lspManager) DiagnosticsRevision() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.diagnosticsRevision
 }

@@ -98,7 +98,16 @@ syntax as errors. It also analyzes the whole workspace in the background, which 
 with no project root above it means the directory it sits in; narrow that with a
 `globPattern` under its `initialization_options` if you open shell files from a large tree.
 
-Diagnostics appear in their own gutter column and in Actions → Diagnostics. The Actions
+Diagnostics appear in their own gutter column and in a full-width bottom panel beneath
+the sidebar, editor, and preview. `alt+b` (or Actions → Diagnostics) toggles the panel
+without taking focus from the editor. Drag its top divider to resize it; the split is
+remembered during the session. Cycle panes with `shift+tab` or click a diagnostic;
+Up/Down selects entries, Enter jumps to the location, and `ctrl+o` returns. Messages
+wrap in full; Page Up/Down and the mouse wheel scroll them. Escape returns focus to
+the editor while leaving the panel open. It shows all open files, current file first.
+`alt+left` and `ctrl+left` still move backward by word; gote reserves `alt+b` for the panel.
+
+The Actions
 and editor context menus independently toggle the diagnostics and git gutters and can
 restart failed server connections.
 

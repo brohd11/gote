@@ -1,17 +1,12 @@
 package app
 
 import (
-	"fmt"
 	"image/color"
-	"sort"
-	"strings"
 
-	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"go.lsp.dev/protocol"
 )
 
@@ -103,81 +98,6 @@ func severityName(severity protocol.DiagnosticSeverity) string {
 	default:
 		return "info"
 	}
-}
-
-func (s *homeScreen) diagnosticsScreen(sh *core.Shared) *components.DocScreen {
-	c := Of(sh)
-	current := s.currentPath
-	return components.NewDocScreen(components.DocOpts{
-		Title:  "Diagnostics",
-		Crumb:  "diagnostics",
-		Render: func(width int) string { return renderDiagnostics(c, current, width) },
-	})
-}
-
-func renderDiagnostics(c *Ctx, current string, width int) string {
-	if c == nil || c.lsp == nil {
-		return "Language-server support is disabled (auto-lsp: false)."
-	}
-	paths := make([]string, 0, len(c.OpenDocs()))
-	for _, doc := range c.OpenDocs() {
-		if doc.Path != "" && doc.Path != current {
-			paths = append(paths, doc.Path)
-		}
-	}
-	sort.Strings(paths)
-	if current != "" {
-		if _, ok := c.Doc(current); ok {
-			paths = append([]string{current}, paths...)
-		}
-	}
-
-	var body strings.Builder
-	groups := 0
-	for _, path := range paths {
-		diagnostics := c.lsp.Diagnostics(path)
-		if len(diagnostics) == 0 {
-			continue
-		}
-		sort.SliceStable(diagnostics, func(i, j int) bool {
-			if diagnostics[i].Line != diagnostics[j].Line {
-				return diagnostics[i].Line < diagnostics[j].Line
-			}
-			if diagnostics[i].Character != diagnostics[j].Character {
-				return diagnostics[i].Character < diagnostics[j].Character
-			}
-			return normalizedSeverity(diagnostics[i].Severity) < normalizedSeverity(diagnostics[j].Severity)
-		})
-		if groups > 0 {
-			body.WriteString("\n")
-		}
-		groups++
-		fmt.Fprintf(&body, "%s  (%d)\n\n", path, len(diagnostics))
-		for _, diagnostic := range diagnostics {
-			meta := severityName(diagnostic.Severity)
-			if diagnostic.Source != "" {
-				meta += " · " + diagnostic.Source
-			}
-			if diagnostic.Code != "" {
-				meta += " " + diagnostic.Code
-			}
-			prefix := fmt.Sprintf("  %d:%d  %-7s ", diagnostic.Line+1, diagnostic.Character+1, meta)
-			messageWidth := max(width-ansi.StringWidth(prefix), 20)
-			message := ansi.Wrap(strings.TrimSpace(diagnostic.Message), messageWidth, "")
-			lines := strings.Split(message, "\n")
-			body.WriteString(prefix)
-			body.WriteString(lines[0])
-			body.WriteByte('\n')
-			indent := strings.Repeat(" ", ansi.StringWidth(prefix))
-			for _, line := range lines[1:] {
-				body.WriteString(indent + line + "\n")
-			}
-		}
-	}
-	if groups == 0 {
-		return "No diagnostics for open files."
-	}
-	return strings.TrimRight(body.String(), "\n")
 }
 
 func (s *homeScreen) restartLanguageServers(sh *core.Shared) core.Action {

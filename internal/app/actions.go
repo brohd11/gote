@@ -14,8 +14,8 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 		"reload the document list", refreshAction, nil,
 		vaultsItem(),
 		components.Item{
-			Name: "⚠ Diagnostics", Desc: "show diagnostics for every open file",
-			Pick: func(sh *core.Shared) core.Action { return core.Push(s.diagnosticsScreen(sh)) },
+			Name: "⚠ Diagnostics", Desc: "toggle bottom panel for open-file diagnostics (alt+b)",
+			Pick: func(sh *core.Shared) core.Action { return core.Seq(core.Pop(), s.toggleBottom(sh)) },
 		},
 		components.Item{
 			Name: "Toggle diagnostics gutter", Desc: "show or hide LSP severity markers",

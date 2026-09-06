@@ -128,8 +128,8 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 			s.editor.ToggleLineNums()
 			return core.Pop()
 		}},
-		{Label: "Diagnostics", Pick: func(*core.Shared) core.Action {
-			return core.Replace(s.diagnosticsScreen(sh))
+		{Label: "Toggle diagnostics panel", Pick: func(*core.Shared) core.Action {
+			return core.Seq(core.Pop(), s.toggleBottom(sh))
 		}},
 		{Label: "Toggle diagnostics gutter", Pick: func(*core.Shared) core.Action {
 			s.setDiagnosticsGutter(!s.diagnosticsGutter)

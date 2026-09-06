@@ -22,16 +22,21 @@ type openEntry struct {
 // their id; unsaved buffers use an opaque id allocated by Ctx. byPath indexes real files
 // so Ctx.OpenDoc can still answer "already open" by filename.
 type openSet struct {
-	byID   map[string]*openEntry
-	byPath map[string]string // real path -> id
-	order  []string          // ids, in opening order
+	revision uint64
+	byID     map[string]*openEntry
+	byPath   map[string]string // real path -> id
+	order    []string          // ids, in opening order
 }
 
 func newOpenSet() openSet {
 	return openSet{byID: map[string]*openEntry{}, byPath: map[string]string{}}
 }
 
-func (o *openSet) reset() { *o = newOpenSet() }
+func (o *openSet) reset() {
+	next := o.revision + 1
+	*o = newOpenSet()
+	o.revision = next
+}
 
 func (o *openSet) get(id string) (*openEntry, bool) {
 	entry, ok := o.byID[id]
@@ -66,6 +71,7 @@ func (o *openSet) add(entry openEntry) {
 	if o.byPath == nil {
 		o.byPath = map[string]string{}
 	}
+	o.revision++
 	copy := entry
 	o.byID[entry.id] = &copy
 	if entry.path != "" {
@@ -85,6 +91,7 @@ func (o *openSet) rekey(oldID, newPath string, ed *editor.Screen) {
 		return
 	}
 
+	o.revision++
 	old, tracked := o.get(oldID)
 	targetID := o.byPath[newPath]
 	root := filepath.Dir(newPath)
@@ -144,6 +151,7 @@ func (o *openSet) remove(id string) (next string) {
 	if !ok {
 		return ""
 	}
+	o.revision++
 	delete(o.byID, id)
 	if entry.path != "" {
 		delete(o.byPath, entry.path)
