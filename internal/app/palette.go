@@ -264,6 +264,25 @@ func slotStyle(key string) (lipgloss.Style, bool) {
 	return lipgloss.Style{}, false
 }
 
+// slotStylePtrs is slotStyle's answer as the reference an editor.Span holds, rebuilt with
+// the palette so the pointers it hands out never change under spans already carrying them.
+// paletteSlots points at the mutable package vars themselves, which is exactly what a span
+// must not reference.
+var slotStylePtrs map[string]*lipgloss.Style
+
+func rebuildSlotStylePtrs() {
+	next := make(map[string]*lipgloss.Style, len(paletteSlots()))
+	for _, slot := range paletteSlots() {
+		next[slot.key] = styleRef(*slot.style)
+	}
+	slotStylePtrs = next
+}
+
+func slotStylePtr(key string) (*lipgloss.Style, bool) {
+	st, ok := slotStylePtrs[key]
+	return st, ok
+}
+
 // applySyntaxPalette installs sc as the process's syntax palette. Ctx.New calls it once,
 // before any screen exists and so before any document is parsed — which is the only
 // timing that matters, since a Highlighter bakes these styles into its spans at Parse
@@ -272,6 +291,7 @@ func applySyntaxPalette(sc SyntaxColors) {
 	p := resolveSyntaxColors(sc)
 	applyChromaPalette(p)
 	applyMarkdownPalette(p)
+	rebuildSlotStylePtrs() // after both: it copies what they just installed
 }
 
 // The defaults are installed at init so that a caller which never loads a config — a

@@ -58,7 +58,13 @@ func chromaCodeBlock(lang string, code []string, width int) []string {
 		}
 		var b strings.Builder
 		for _, sp := range spans {
-			b.WriteString(sp.Style.Render(sp.Text))
+			// Every run goes through lipgloss, unstyled ones included: Render is also what
+			// expands a tab to the editor's four-cell display form, and a code block's
+			// leading indent is exactly the run no lexer claims. The editor's own render
+			// can skip Render for an unstyled run because expandLine has already done the
+			// tabs by the time it gets there; this has no such pass.
+			style, _ := sp.SpanStyle()
+			b.WriteString(style.Render(sp.Text))
 		}
 		rows[i] = b.String()
 	}

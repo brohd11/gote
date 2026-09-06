@@ -34,7 +34,7 @@ func assertMarkdownSpans(t *testing.T, doc string, row int, want ...markdownWant
 		if got[i].Text != want[i].text {
 			t.Errorf("%q row %d span %d text = %q, want %q", doc, row, i, got[i].Text, want[i].text)
 		}
-		if !markdownStyleEqual(got[i].Style, want[i].style) {
+		if !markdownStyleEqual(spanStyle(got[i]), want[i].style) {
 			t.Errorf("%q row %d span %d (%q): style mismatch", doc, row, i, got[i].Text)
 		}
 	}
@@ -55,7 +55,7 @@ func TestMarkdownSpansReconstructDocument(t *testing.T) {
 			t.Fatalf("line %d spans = %q, want %q", row, got, line)
 		}
 		for _, span := range spans {
-			if span.Style.GetForeground() != nil {
+			if spanStyle(span).GetForeground() != nil {
 				styled++
 			}
 		}
@@ -94,7 +94,7 @@ func TestMarkdownStylesStructuralAndInlineText(t *testing.T) {
 	} {
 		found := false
 		for _, span := range hl.HighlightLine(tc.row) {
-			if strings.Contains(span.Text, tc.text) && span.Style.GetForeground() != nil {
+			if strings.Contains(span.Text, tc.text) && spanStyle(span).GetForeground() != nil {
 				found = true
 				break
 			}
@@ -106,7 +106,9 @@ func TestMarkdownStylesStructuralAndInlineText(t *testing.T) {
 }
 
 func TestMarkdownExactInlineSpans(t *testing.T) {
-	none := mdStyles[mdStyleNone]
+	// The unstyled run: mdStyles[mdStyleNone] is nil now, and spanStyle reports the same
+	// zero Style for it.
+	var none lipgloss.Style
 	assertMarkdownSpans(t, "# Heading\n", 0,
 		markdownWantSpan{"# Heading", mdHeadingStyle})
 	assertMarkdownSpans(t, "a *em* b\n", 0,
@@ -158,7 +160,7 @@ func TestMarkdownCodeBlocks(t *testing.T) {
 }
 
 func TestMarkdownBlockquoteAndLists(t *testing.T) {
-	none := mdStyles[mdStyleNone]
+	var none lipgloss.Style // mdStyles[mdStyleNone] is nil; spanStyle reports the zero Style
 	doc := "> quote *em*\n> second\n>\n> > nested\n\nafter\n"
 	assertMarkdownSpans(t, doc, 0,
 		markdownWantSpan{"> quote *", mdQuoteStyle},

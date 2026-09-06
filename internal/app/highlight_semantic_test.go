@@ -86,7 +86,7 @@ func TestOverlaySpansSplitsOnRunes(t *testing.T) {
 	var typed string
 	for _, span := range got {
 		rebuilt += span.Text
-		if span.Style.Render("z") == chTypeStyle.Render("z") {
+		if spanStyle(span).Render("z") == chTypeStyle.Render("z") {
 			typed += span.Text
 		}
 	}
@@ -121,7 +121,7 @@ func TestOverlaySpansPreservesBaseStyles(t *testing.T) {
 	applySyntaxPalette(defaultSyntaxColors())
 	line := "var x Foo"
 	base := []editor.Span{
-		{Text: "var", Style: chKeywordStyle},
+		{Text: "var", Style: &chKeywordStyle},
 		{Text: " x "},
 		{Text: "Foo"},
 	}
@@ -129,11 +129,11 @@ func TestOverlaySpansPreservesBaseStyles(t *testing.T) {
 	if !ok {
 		t.Fatal("overlaySpans refused")
 	}
-	if got[0].Text != "var" || got[0].Style.Render("z") != chKeywordStyle.Render("z") {
+	if got[0].Text != "var" || spanStyle(got[0]).Render("z") != chKeywordStyle.Render("z") {
 		t.Errorf("first span = %+v, want chroma's keyword", got[0])
 	}
 	last := got[len(got)-1]
-	if last.Text != "Foo" || last.Style.Render("z") != chTypeStyle.Render("z") {
+	if last.Text != "Foo" || spanStyle(last).Render("z") != chTypeStyle.Render("z") {
 		t.Errorf("last span = %+v, want the type style", last)
 	}
 }
@@ -200,7 +200,7 @@ func TestOverlayFollowsTheLineNotTheRow(t *testing.T) {
 	typed := func(h editor.Highlighter, row int) string {
 		var out string
 		for _, sp := range h.HighlightLine(row) {
-			if sp.Style.Render("z") == chTypeStyle.Render("z") {
+			if spanStyle(sp).Render("z") == chTypeStyle.Render("z") {
 				out += sp.Text
 			}
 		}
@@ -263,7 +263,7 @@ func TestOverlayAppliesToAPreviewFragment(t *testing.T) {
 
 	var typed string
 	for _, sp := range h.HighlightLine(1) {
-		if sp.Style.Render("z") == chTypeStyle.Render("z") {
+		if spanStyle(sp).Render("z") == chTypeStyle.Render("z") {
 			typed += sp.Text
 		}
 	}

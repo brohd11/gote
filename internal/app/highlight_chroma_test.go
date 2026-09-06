@@ -70,7 +70,7 @@ func TestChromaHighlightsSomething(t *testing.T) {
 	styled := 0
 	for i := 0; i < 3; i++ {
 		for _, sp := range hl.HighlightLine(i) {
-			if sp.Style.GetForeground() != nil {
+			if spanStyle(sp).GetForeground() != nil {
 				styled++
 			}
 		}
@@ -215,6 +215,14 @@ func BenchmarkChromaHighlighterViewport(b *testing.B) {
 // spanFor finds the span whose Text is exactly want. Under the unpatched Chroma lexer a
 // quoted extends path is shredded into an Error rune and a handful of names and
 // operators, so "the whole path came back as one span" is itself half the assertion.
+// spanStyle is a span's style as a value, and the zero Style for an unstyled run. Span
+// carries a *lipgloss.Style now (see editor.Span), so these assertions go through the
+// accessor rather than dereferencing a pointer that is legitimately nil.
+func spanStyle(sp editor.Span) lipgloss.Style {
+	st, _ := sp.SpanStyle()
+	return st
+}
+
 func spanFor(spans []editor.Span, want string) (editor.Span, bool) {
 	for _, sp := range spans {
 		if sp.Text == want {
@@ -238,11 +246,11 @@ func TestGDScriptExtendsPathIsAString(t *testing.T) {
 	if !ok {
 		t.Fatalf("extends path is not one span: %q", line0)
 	}
-	if got := path.Style.GetForeground(); got != chStringStyle.GetForeground() {
+	if got := spanStyle(path).GetForeground(); got != chStringStyle.GetForeground() {
 		t.Errorf("extends path foreground = %v, want the string color %v", got, chStringStyle.GetForeground())
 	}
 	for _, sp := range line0 {
-		if sp.Style.GetForeground() == chErrorStyle.GetForeground() && sp.Style.GetBold() {
+		if spanStyle(sp).GetForeground() == chErrorStyle.GetForeground() && spanStyle(sp).GetBold() {
 			t.Errorf("extends line has an error span %q", sp.Text)
 		}
 	}
@@ -253,7 +261,7 @@ func TestGDScriptExtendsPathIsAString(t *testing.T) {
 	if !ok {
 		t.Fatalf("row 3 lost its comment span: %q", hl.HighlightLine(3))
 	}
-	if got := comment.Style.GetForeground(); got != chCommentStyle.GetForeground() {
+	if got := spanStyle(comment).GetForeground(); got != chCommentStyle.GetForeground() {
 		t.Errorf("trailing comment foreground = %v, want the comment color %v", got, chCommentStyle.GetForeground())
 	}
 }
@@ -268,7 +276,7 @@ func TestGDScriptExtendsIdentifierStillTyped(t *testing.T) {
 	if !ok {
 		t.Fatalf("extends Node lost its class span: %q", hl.HighlightLine(0))
 	}
-	if got := node.Style.GetForeground(); got != chTypeStyle.GetForeground() {
+	if got := spanStyle(node).GetForeground(); got != chTypeStyle.GetForeground() {
 		t.Errorf("extends Node foreground = %v, want the type color %v", got, chTypeStyle.GetForeground())
 	}
 }
@@ -285,11 +293,11 @@ func TestGDScriptClassExtendsPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("inner class extends path is not one span: %q", line1)
 	}
-	if got := path.Style.GetForeground(); got != chStringStyle.GetForeground() {
+	if got := spanStyle(path).GetForeground(); got != chStringStyle.GetForeground() {
 		t.Errorf("extends path foreground = %v, want the string color %v", got, chStringStyle.GetForeground())
 	}
 	for _, sp := range line1 {
-		if sp.Style.GetForeground() == chErrorStyle.GetForeground() && sp.Style.GetBold() {
+		if spanStyle(sp).GetForeground() == chErrorStyle.GetForeground() && spanStyle(sp).GetBold() {
 			t.Errorf("class/extends line has an error span %q", sp.Text)
 		}
 	}
@@ -297,7 +305,7 @@ func TestGDScriptClassExtendsPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("row 2 lost its comment span: %q", hl.HighlightLine(2))
 	}
-	if got := comment.Style.GetForeground(); got != chCommentStyle.GetForeground() {
+	if got := spanStyle(comment).GetForeground(); got != chCommentStyle.GetForeground() {
 		t.Errorf("trailing comment foreground = %v, want the comment color %v", got, chCommentStyle.GetForeground())
 	}
 }
@@ -322,7 +330,7 @@ func TestGDScriptPascalCaseIsTyped(t *testing.T) {
 			t.Errorf("row %d has no %q span: %q", row, name, hl.HighlightLine(row))
 			continue
 		}
-		if got := sp.Style.GetForeground(); got != chTypeStyle.GetForeground() {
+		if got := spanStyle(sp).GetForeground(); got != chTypeStyle.GetForeground() {
 			t.Errorf("row %d %q foreground = %v, want the type color %v", row, name, got, chTypeStyle.GetForeground())
 		}
 	}
@@ -335,7 +343,7 @@ func TestGDScriptPascalCaseIsTyped(t *testing.T) {
 		}
 		// An unstyled span is the zero Style, whose foreground is lipgloss's own
 		// "no color" rather than a nil interface — compare against that, not nil.
-		if got, plain := sp.Style.GetForeground(), (lipgloss.Style{}).GetForeground(); got != plain {
+		if got, plain := spanStyle(sp).GetForeground(), (lipgloss.Style{}).GetForeground(); got != plain {
 			t.Errorf("row %d %q foreground = %v, want it left unstyled (%v)", row, name, got, plain)
 		}
 	}

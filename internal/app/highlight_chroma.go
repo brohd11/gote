@@ -51,7 +51,12 @@ var (
 // a token up to its sub-category and category, so every one of chroma's ~200 leaf types
 // resolves to one of these or to nothing (an unstyled run, which is correct for plain
 // text, punctuation and whitespace — coloring everything colors nothing).
-var chromaStyles map[chroma.TokenType]lipgloss.Style
+// The map holds POINTERS, and applyChromaPalette allocates fresh ones every time it
+// rebuilds: editor.Span carries the style by reference now (a lipgloss.Style is ~650
+// bytes and a parsed document is millions of spans), so spans baked before a palette
+// change must keep pointing at the palette they were baked with rather than having it
+// change under them.
+var chromaStyles map[chroma.TokenType]*lipgloss.Style
 
 // applyChromaPalette rebuilds the styles above from p, and chromaStyles with them: the
 // map holds style values, not pointers, so reassigning the vars alone would leave every
@@ -68,37 +73,57 @@ func applyChromaPalette(p syntaxPalette) {
 	chDeletedStyle = lipgloss.NewStyle().Foreground(p.deleted)
 	chErrorStyle = lipgloss.NewStyle().Foreground(p.err).Bold(true)
 
-	chromaStyles = map[chroma.TokenType]lipgloss.Style{
-		chroma.Keyword:         chKeywordStyle,
-		chroma.KeywordType:     chTypeStyle,
-		chroma.NameClass:       chTypeStyle,
-		chroma.NameBuiltin:     chFuncStyle,
-		chroma.NameFunction:    chFuncStyle,
-		chroma.NameDecorator:   chFuncStyle,
-		chroma.NameTag:         chKeywordStyle,
-		chroma.NameAttribute:   chFuncStyle,
-		chroma.LiteralString:   chStringStyle,
-		chroma.LiteralNumber:   chNumberStyle,
-		chroma.Comment:         chCommentStyle,
-		chroma.CommentPreproc:  chKeywordStyle,
-		chroma.Operator:        chOperatorStyle,
-		chroma.GenericInserted: chInsertedStyle,
-		chroma.GenericDeleted:  chDeletedStyle,
-		chroma.Error:           chErrorStyle,
+	chKeywordStyleRef := styleRef(chKeywordStyle)
+	chTypeStyleRef := styleRef(chTypeStyle)
+	chFuncStyleRef := styleRef(chFuncStyle)
+	chStringStyleRef := styleRef(chStringStyle)
+	chNumberStyleRef := styleRef(chNumberStyle)
+	chCommentStyleRef := styleRef(chCommentStyle)
+	chOperatorStyleRef := styleRef(chOperatorStyle)
+	chInsertedStyleRef := styleRef(chInsertedStyle)
+	chDeletedStyleRef := styleRef(chDeletedStyle)
+	chErrorStyleRef := styleRef(chErrorStyle)
+
+	chromaStyles = map[chroma.TokenType]*lipgloss.Style{
+		chroma.Keyword:         chKeywordStyleRef,
+		chroma.KeywordType:     chTypeStyleRef,
+		chroma.NameClass:       chTypeStyleRef,
+		chroma.NameBuiltin:     chFuncStyleRef,
+		chroma.NameFunction:    chFuncStyleRef,
+		chroma.NameDecorator:   chFuncStyleRef,
+		chroma.NameTag:         chKeywordStyleRef,
+		chroma.NameAttribute:   chFuncStyleRef,
+		chroma.LiteralString:   chStringStyleRef,
+		chroma.LiteralNumber:   chNumberStyleRef,
+		chroma.Comment:         chCommentStyleRef,
+		chroma.CommentPreproc:  chKeywordStyleRef,
+		chroma.Operator:        chOperatorStyleRef,
+		chroma.GenericInserted: chInsertedStyleRef,
+		chroma.GenericDeleted:  chDeletedStyleRef,
+		chroma.Error:           chErrorStyleRef,
 	}
 }
 
+// styleRef is one palette entry: a pointer to its own copy, so the table can be replaced
+// wholesale without writing through to spans that already reference it.
+func styleRef(st lipgloss.Style) *lipgloss.Style { return &st }
+
 // styleFor resolves a token type to a style, falling back through chroma's own
 // hierarchy: the exact type, then its sub-category (LiteralStringDouble → LiteralString),
-// then its category (NameVariableGlobal → Name). A miss is the zero Style, which the
-// editor renders unstyled.
-func styleFor(tt chroma.TokenType) lipgloss.Style {
+// then its category (NameVariableGlobal → Name). A miss is nil, which the editor renders
+// unstyled — and, since the render path can skip lipgloss entirely for an unstyled run,
+// answering nil rather than a zero Style is worth something now.
+//
+// Deliberately not memoized: Parse runs on a background goroutine for the exact snapshot
+// and on the UI goroutine for the keystroke preview, so a cache filled on read would be a
+// data race. Three map lookups are not what makes a parse expensive.
+func styleFor(tt chroma.TokenType) *lipgloss.Style {
 	for _, t := range []chroma.TokenType{tt, tt.SubCategory(), tt.Category()} {
 		if st, ok := chromaStyles[t]; ok {
 			return st
 		}
 	}
-	return lipgloss.Style{}
+	return nil
 }
 
 // chromaHighlighter is the editor.Highlighter chroma backs. Parse tokenizes the

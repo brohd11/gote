@@ -45,7 +45,9 @@ const (
 	mdStyleList
 )
 
-var mdStyles []lipgloss.Style
+// Pointers, freshly allocated on every rebuild: see chromaStyles for why a span holds a
+// style by reference and why the table is replaced rather than written through.
+var mdStyles []*lipgloss.Style
 
 // applyMarkdownPalette rebuilds the styles above from p, and mdStyles with them: the
 // slice holds style values indexed by mdStyle ID, so reassigning the vars alone would
@@ -59,15 +61,15 @@ func applyMarkdownPalette(p syntaxPalette) {
 	mdLinkStyle = lipgloss.NewStyle().Foreground(p.mdLink).Underline(true)
 	mdListStyle = lipgloss.NewStyle().Foreground(p.mdList).Bold(true)
 
-	mdStyles = []lipgloss.Style{
-		{},
-		mdHeadingStyle,
-		mdEmphasisStyle,
-		mdStrongStyle,
-		mdCodeStyle,
-		mdQuoteStyle,
-		mdLinkStyle,
-		mdListStyle,
+	mdStyles = []*lipgloss.Style{
+		mdStyleNone:     nil, // the unstyled run
+		mdStyleHeading:  styleRef(mdHeadingStyle),
+		mdStyleEmphasis: styleRef(mdEmphasisStyle),
+		mdStyleStrong:   styleRef(mdStrongStyle),
+		mdStyleCode:     styleRef(mdCodeStyle),
+		mdStyleQuote:    styleRef(mdQuoteStyle),
+		mdStyleLink:     styleRef(mdLinkStyle),
+		mdStyleList:     styleRef(mdListStyle),
 	}
 }
 

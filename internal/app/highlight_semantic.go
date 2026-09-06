@@ -241,7 +241,7 @@ func spansPlainText(spans []editor.Span) string {
 func overlaySpans(line string, spans []editor.Span, tokens []lineToken) ([]editor.Span, bool) {
 	runes := []rune(line)
 	keys := make([]int, len(runes))
-	styles := make([]lipgloss.Style, 0, len(spans)+len(tokens))
+	styles := make([]*lipgloss.Style, 0, len(spans)+len(tokens))
 
 	at := 0
 	for _, span := range spans {
@@ -260,7 +260,7 @@ func overlaySpans(line string, spans []editor.Span, tokens []lineToken) ([]edito
 	}
 
 	for _, token := range tokens {
-		style, ok := slotStyle(token.slot)
+		style, ok := slotStylePtr(token.slot)
 		if !ok {
 			continue
 		}
