@@ -35,7 +35,7 @@ type Ctx struct {
 	VaultName string // ModeVault's configured display/lookup name
 	Depth     int
 	Filter    DocFilter // which files the lists seed from
-	NewExt    string    // extension "+ new file" appends to an extensionless name
+	NewExt    string    // extension rename appends to an extensionless name
 	Preview   bool      // --preview: boot straight into the full-screen reader
 	Files     []DocFile
 	Config    Config

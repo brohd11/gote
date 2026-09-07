@@ -152,7 +152,7 @@ func TestIsPathRef(t *testing.T) {
 
 // TestExtFlagOverridesConfig: --ext replaces the config's extensions for one run, in
 // both directions — it narrows an unconfigured gote, and widens a configured one back
-// to any text file. The new-file extension follows it, so a narrowed session cannot
+// to any text file. The rename extension follows it, so a narrowed session cannot
 // create a file it would then hide.
 func TestExtFlagOverridesConfig(t *testing.T) {
 	scan := t.TempDir()
@@ -175,7 +175,7 @@ func TestExtFlagOverridesConfig(t *testing.T) {
 		t.Fatalf("--ext=.TXT seeded %v, want b.txt alone (normalized on the way in)", docNames(c.Files))
 	}
 	if c.NewExt != "txt" {
-		t.Fatalf("new-file extension = %q, want it to follow the flag", c.NewExt)
+		t.Fatalf("rename extension = %q, want it to follow the flag", c.NewExt)
 	}
 
 	// A config that restricts, widened back by `gote --ext=` — which arrives as [""].

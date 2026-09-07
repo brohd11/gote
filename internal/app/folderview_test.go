@@ -67,6 +67,9 @@ func TestFolderViewToggle(t *testing.T) {
 		t.Fatal("gote should start on the flat list")
 	}
 	flat := rowTitles(s.docsPanel.List())
+	if hasRow(flat, "+ new file") {
+		t.Fatalf("flat view should only contain documents, got %v", flat)
+	}
 	if !hasRow(flat, "deep.md") {
 		t.Fatalf("the flat list should carry the nested hit, got %v", flat)
 	}
@@ -85,8 +88,8 @@ func TestFolderViewToggle(t *testing.T) {
 	if hasRow(folder, "node_modules/") {
 		t.Fatalf("the scan's pruning rules should apply here too, got %v", folder)
 	}
-	if !hasRow(folder, "+ new file") {
-		t.Fatalf("the action row should survive the swap, got %v", folder)
+	if hasRow(folder, "+ new file") {
+		t.Fatalf("folder view should only contain filesystem entries, got %v", folder)
 	}
 
 	s.Update(sh, altKey('t'))
@@ -181,6 +184,89 @@ func TestFolderViewWalksIntoFolder(t *testing.T) {
 	}
 }
 
+func TestFolderViewNavigationKeys(t *testing.T) {
+	root := scanTree(t)
+	model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
+	model, _ = model.Update(altKey('t'))
+	selectRow(t, s.filePanel.List(), "sub/")
+	model, _ = model.Update(keyMsg("d"))
+	sub := filepath.Join(root, "sub")
+	if s.filePanel.Dir() != sub {
+		t.Fatal("d should enter the selected folder")
+	}
+	model, _ = model.Update(keyMsg("backspace"))
+	if s.filePanel.Dir() != sub {
+		t.Fatal("Backspace must no longer ascend")
+	}
+	model, _ = model.Update(keyMsg("x"))
+	e, ok := s.filePanel.Selected()
+	if s.filePanel.Dir() != root || !ok || e.Path != sub {
+		t.Fatal("x should return to the parent and select the folder just left")
+	}
+	model, _ = model.Update(keyMsg("x"))
+	if s.filePanel.Dir() != root {
+		t.Fatal("x must not escape the scan root")
+	}
+	model, _ = model.Update(keyMsg("d"))
+	selectRow(t, s.filePanel.List(), "..")
+	model, _ = model.Update(keyMsg("d"))
+	if s.filePanel.Dir() != root {
+		t.Fatal("d on .. should enter the parent")
+	}
+	selectRow(t, s.filePanel.List(), "notes.md")
+	before := s.currentID
+	model, _ = model.Update(keyMsg("d"))
+	if s.filePanel.Dir() != root || s.currentID != before || model.(core.Router).Top() != s {
+		t.Fatal("d on a document should neither open it nor raise an overlay")
+	}
+}
+
+func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
+	for _, state := range []string{"filter", "editor", "flat", "hidden", "resizing"} {
+		t.Run(state, func(t *testing.T) {
+			root := scanTree(t)
+			model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
+			model, _ = model.Update(altKey('t'))
+			selectRow(t, s.filePanel.List(), "sub/")
+			// A nested folder gives both keys somewhere to go: d enters .. and x ascends.
+			model, _ = model.Update(keyMsg("d"))
+			selectRow(t, s.filePanel.List(), "..")
+			switch state {
+			case "filter":
+				model, _ = model.Update(keyMsg("/"))
+			case "editor":
+				s.modular.FocusSlot(s.editorSlot())
+			case "flat":
+				model, _ = model.Update(altKey('t'))
+			case "hidden":
+				model, _ = model.Update(keyMsg("ctrl+b"))
+			case "resizing":
+				s.modular.SetResizing(true)
+			}
+			before := s.editor.Text()
+			model, _ = model.Update(keyMsg("d"))
+			model, _ = model.Update(keyMsg("x"))
+			if s.filePanel.Dir() != filepath.Join(root, "sub") {
+				t.Fatalf("folder navigation fired while %s", state)
+			}
+			if state == "filter" {
+				if got := s.filePanel.List().FilterInput.Value(); got != "dx" {
+					t.Fatalf("filter input = %q, want dx", got)
+				}
+				model.Update(keyMsg("backspace"))
+				if got := s.filePanel.List().FilterInput.Value(); got != "d" {
+					t.Fatalf("Backspace should edit the filter, got %q", got)
+				}
+			}
+			if state == "editor" || state == "hidden" {
+				if s.editor.Text() == before || !strings.Contains(s.editor.Text(), "dx") {
+					t.Fatal("d and x should reach the editor")
+				}
+			}
+		})
+	}
+}
+
 // TestFolderViewRootClamp: the explorer's floor is the scan root, so the sidebar cannot
 // wander off into files the rest of gote knows nothing about.
 func TestFolderViewRootClamp(t *testing.T) {
@@ -194,27 +280,6 @@ func TestFolderViewRootClamp(t *testing.T) {
 	s.filePanel.SetDir(sh, filepath.Dir(root))
 	if s.filePanel.Dir() != root {
 		t.Fatalf("Dir() = %q, want the clamped %q", s.filePanel.Dir(), root)
-	}
-}
-
-// TestFolderViewNewFileUsesCurrentFolder: "+ new file" means the folder on screen. In the
-// flat list there is no such folder and the scan root is still the answer.
-func TestFolderViewNewFileUsesCurrentFolder(t *testing.T) {
-	root := scanTree(t)
-	s, sh := newScanHome(t, root)
-	s.Update(sh, altKey('t'))
-	selectRow(t, s.filePanel.List(), "sub/")
-	s.Update(sh, keyMsg("enter"))
-
-	s.createFile(sh, "made.md")
-	if _, err := os.Stat(filepath.Join(root, "sub", "made.md")); err != nil {
-		t.Fatalf("the file should land in the folder on screen: %v", err)
-	}
-
-	s.setFlat(true)
-	s.createFile(sh, "flat.md")
-	if _, err := os.Stat(filepath.Join(root, "flat.md")); err != nil {
-		t.Fatalf("the flat list should still create at the scan root: %v", err)
 	}
 }
 
@@ -261,9 +326,23 @@ func TestFolderViewInHelp(t *testing.T) {
 	root := scanTree(t)
 	s, _ := newScanHome(t, root)
 	help := s.helpText()
-	for _, want := range []string{"alt+t", "folder view", "alt+r", "row density", "backspace"} {
+	for _, want := range []string{"alt+t", "folder view", "alt+r", "row density"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("missing %q from the ? overlay:\n%s", want, help)
+		}
+	}
+	for _, line := range strings.Split(help, "\n") {
+		fields := strings.Fields(line)
+		if strings.Contains(line, "enter selected folder") && fields[0] != "d" {
+			t.Fatalf("wrong descend binding in help: %s", line)
+		}
+		if strings.Contains(line, "up a folder") && fields[0] != "x" {
+			t.Fatalf("wrong up binding in help: %s", line)
+		}
+	}
+	for _, want := range []string{"enter selected folder (folder view)", "up a folder (folder view)"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("missing folder navigation hint %q", want)
 		}
 	}
 }

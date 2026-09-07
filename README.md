@@ -56,6 +56,9 @@ This shortcut is intentionally unavailable in the chrome-less single-document mo
 The sidebar lists the scan flat by default; `alt+t` swaps it for a folder-by-folder view of
 the same tree (`alt+r` there switches row density). Set `folder_view: true` in the config to
 open on the folder view instead — it only picks the starting view, the scan runs either way.
+In folder view, `d` enters the selected folder (including `..`) and `x` goes up, bounded by
+the scan or vault root. Enter still opens folders and documents; `d` does nothing on a
+document. Backspace uses the normal Back/filter behavior.
 
 `gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.
 Without a depth it uses `scan_depth` from the config (5 by default).

@@ -52,8 +52,8 @@ func normalizeExts(exts []string) []string {
 	return out
 }
 
-// defaultExt is what "+ new file" appends to a name typed without one: the first
-// configured extension, so a filtered session cannot create files it would then hide,
+// defaultExt is what rename appends to a name typed without one: the first
+// configured extension, so a filtered session keeps renamed files visible,
 // and "md" when nothing is configured.
 func defaultExt(exts []string) string {
 	if len(exts) > 0 {
@@ -274,34 +274,12 @@ func openDocItems(c *Ctx, currentID string) []list.Item {
 	return items
 }
 
-// newFileItem is the docs list's first row — an action, not a doc: enter opens
-// the floating line edit that creates a file. A distinct type (not docItem) so
-// pickDoc can route it; the panel's OnSelect bypasses per-item Pick.
-type newFileItem struct{}
-
-func (newFileItem) Title() string       { return "+ new file" }
-func (newFileItem) Description() string { return "(rel/path)" }
-
-// An empty filter value keeps the row out of every search: a filter is a question about
-// which DOCUMENTS you want, and an action row ranked among the answers is noise — worse,
-// it used to answer to "new", "ne" and "ile" and could sort anywhere among the matches,
-// since bubbles orders by fuzzy rank. Nothing matches an empty target, so the row leaves
-// the moment a query has a character in it; an empty query filters nothing and still
-// shows it, which is right — there is nothing to narrow yet.
-func (newFileItem) FilterValue() string { return "" }
-
-// No suffix: the hint about what to type belongs in the line edit this row opens, not in
-// the column the doc paths need. It was also the one row whose suffix was pure decoration —
-// every other one names a real directory.
-func (newFileItem) SuffixText() string { return "" }
-
-// docRows is the docs panel's full row set: the action row, then the seeded docs.
-// Every (re)build of the list goes through here so the row survives reseeds.
+// docRows is the docs panel's full row set, rebuilt from the scan on each reseed.
 func docRows(c *Ctx) []list.Item {
-	return append([]list.Item{newFileItem{}}, docItems(c.Files, "")...)
+	return docItems(c.Files, "")
 }
 
-// newDocPath resolves a name typed into the new-file line edit against base. A name
+// newDocPath resolves a name typed into the rename line edit against base. A name
 // without an extension gets ext (the config's default_extension) — a convenience, not
 // a necessity now that an extensionless file lists fine, but typing "notes" should
 // still land notes.md; "/" in the name nests under base. Absolute names and ones
@@ -341,11 +319,8 @@ func newDocPath(base, name, ext string) (string, error) {
 	return path, nil
 }
 
-// renameDoc moves a doc from old to newPath, making parent dirs as needed (the rename
-// box takes a path, so it nests the same way "+ new file" does). An occupied target is
-// refused rather than clobbered — createDoc's non-destructive rule, which matters more
-// here: a rename that overwrote would destroy a document that is not the one being
-// renamed. Lstat, not Stat, so a dangling symlink still counts as occupied.
+// renameDoc moves a doc from old to newPath, making parent dirs as needed. An occupied
+// target is refused to protect the other document. Lstat counts dangling symlinks too.
 func renameDoc(old, newPath string) error {
 	if _, err := os.Lstat(newPath); err == nil {
 		return fmt.Errorf("%q already exists", filepath.Base(newPath))
@@ -361,19 +336,3 @@ func renameDoc(old, newPath string) error {
 // A missing file reports its error, which the confirm shows: the row promised a
 // document, so its absence is news rather than a no-op.
 func deleteDoc(path string) error { return os.Remove(path) }
-
-// createDoc writes an empty doc at path, making parent dirs as needed, without
-// clobbering: an existing file is left alone (the editor opens it either way).
-func createDoc(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if os.IsExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return f.Close()
-}

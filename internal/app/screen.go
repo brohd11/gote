@@ -58,6 +58,8 @@ var (
 	// only while that panel is focused and not running a /-filter. alt+r, not alt+d/f: the
 	// editor moves by words on those.
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
+	descendKey = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "enter selected folder (folder view)"))
+	upKey      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "up a folder"))
 	// The language-server keys. All carry a modifier, so they pass the router's capture
 	// gate and fire while the editor is typing — which is the only place they mean
 	// anything. alt+g/h/o/n/m are the free alt letters left after the editor's word and
@@ -294,6 +296,10 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
+		if core.MatchKey(k, descendKey) && s.sidebar && !s.flat && s.filePanel.Focused() &&
+			!s.modular.Filtering() && !s.modular.Resizing() {
+			return s, s.descendFolder(sh)
+		}
 		if core.MatchKey(k, bottomKey) {
 			return s, s.toggleBottom(sh)
 		}
@@ -567,7 +573,7 @@ func (s *homeScreen) Filtering() bool { return s.modular.Filtering() }
 // buffer is clean; with unsaved changes they push a confirm popup listing the
 // dirty docs — y quits anyway (discarding them), esc/n cancels. The router
 // consults the stack top-down, so the gate still answers from under a pushed
-// modal (the save-as/new-file line edit, the help overlay).
+// modal (the save-as/rename line edit, the help overlay).
 func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
 	s.closeCompletion()
 	dirty := s.dirtyDocs(sh)
@@ -820,7 +826,7 @@ func (s *homeScreen) setFlat(flat bool) {
 
 // docsPane is the panel currently filling the docs slot. The two views differ in what they
 // list, not in what the screen asks of them: a footprint to lay out, and the row geometry
-// the rename/new-file box anchors to.
+// the rename box anchors to.
 type docsPane interface {
 	components.Panel
 	RowY(int) (int, bool)

@@ -246,8 +246,7 @@ func TestNewDocFilter(t *testing.T) {
 	}
 }
 
-// TestDefaultExt: "+ new file" follows the filter, so a restricted session cannot
-// create a file it would immediately hide.
+// TestDefaultExt: extensionless rename targets follow the session filter.
 func TestDefaultExt(t *testing.T) {
 	if got := defaultExt(nil); got != "md" {
 		t.Errorf("unfiltered default = %q, want md", got)
@@ -282,31 +281,6 @@ func TestNewDocPath(t *testing.T) {
 		if got, err := newDocPath(base, name, "md"); err == nil {
 			t.Errorf("newDocPath(%q) = %q, want an error", name, got)
 		}
-	}
-}
-
-// TestCreateDoc: the file and its parent dirs are created, and a second call on
-// an existing file leaves its contents alone.
-func TestCreateDoc(t *testing.T) {
-	base := t.TempDir()
-	path := filepath.Join(base, "notes", "deep", "todo.md")
-
-	if err := createDoc(path); err != nil {
-		t.Fatalf("createDoc: %v", err)
-	}
-	if st, err := os.Stat(path); err != nil || st.IsDir() {
-		t.Fatalf("expected a file at %s", path)
-	}
-
-	if err := os.WriteFile(path, []byte("keep me"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := createDoc(path); err != nil {
-		t.Fatalf("createDoc over an existing file: %v", err)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil || string(b) != "keep me" {
-		t.Fatalf("existing file clobbered: %q, %v", b, err)
 	}
 }
 

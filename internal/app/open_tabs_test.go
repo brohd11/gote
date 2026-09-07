@@ -49,6 +49,15 @@ func TestDocumentKeysThroughRouter(t *testing.T) {
 	for _, tabs := range []bool{false, true} {
 		t.Run(map[bool]string{false: "list", true: "tabs"}[tabs], func(t *testing.T) {
 			model, s, sh := tabTestHome(t)
+			// Filtering requires a document; an empty Docs pane has no action row.
+			dir, err := DocsDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("notes\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			s.Receive(sh, ReseedMsg{})
 			s.setOpenDocsTabs(sh, tabs)
 			s.newUnsavedBuffer(sh)
 			firstID, firstEditor := s.currentID, s.editor

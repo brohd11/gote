@@ -1807,27 +1807,6 @@ func rowTitles(l *list.Model) []string {
 	return out
 }
 
-// TestFilterDropsNewFileRow: the "+ new file" row is an action, not a document, so a
-// query must not rank it among the documents. It used to answer to "new", "ne" and
-// "ile" — and bubbles orders matches by fuzzy rank, so it could land anywhere in them.
-func TestFilterDropsNewFileRow(t *testing.T) {
-	s, _ := scanHome(t, "news.md")
-	l := s.docsPanel.List()
-	if len(rowTitles(l)) != 2 {
-		t.Fatalf("setup: want the action row and one doc, got %v", rowTitles(l))
-	}
-
-	filterList(t, l, "ne")
-	for _, it := range l.VisibleItems() {
-		if _, ok := it.(newFileItem); ok {
-			t.Error(`the "+ new file" row must not survive a filter`)
-		}
-	}
-	if got := rowTitles(l); len(got) != 1 || got[0] != "news.md" {
-		t.Fatalf("the matching document should be the only row, got %v", got)
-	}
-}
-
 // TestRefreshKeepsFilter is the reported sequence: filter the docs list, accept it,
 // then run Actions ▸ ⟳ Refresh (which is a ReseedMsg broadcast). The reseed used to
 // wipe the match set and leave the sidebar blank.
@@ -1853,9 +1832,7 @@ func TestRefreshKeepsFilter(t *testing.T) {
 	}
 }
 
-// renameFixture seeds a scan root with one doc and drives the real router to the docs
-// list with that doc selected — row 0 is always the "+ new file" action, so one down
-// arrow is what puts the selection on a document.
+// renameFixture seeds a scan root with one doc, selected as the first docs row.
 func renameFixture(t *testing.T, name, body string) (tea.Model, *homeScreen, *core.Shared, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -1867,7 +1844,6 @@ func renameFixture(t *testing.T, name, body string) (tea.Model, *homeScreen, *co
 		t.Fatal(err)
 	}
 	model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: dir})
-	model, _ = model.Update(keyMsg("down"))
 	return model, s, sh, dir
 }
 
@@ -1879,9 +1855,7 @@ func pressRename(model tea.Model) (tea.Model, *components.LineEditScreen) {
 }
 
 // TestRenamePrompt: ctrl+r on a doc row raises the line edit prefilled with the doc's
-// path relative to its scan root — the same shape "+ new file" takes, which is what
-// makes the box a move as well as a rename. The "+ new file" row has no path to
-// rename, so the key falls through to the list there and nothing is pushed.
+// path relative to its scan root, so editing the directory also moves the file.
 func TestRenamePrompt(t *testing.T) {
 	model, _, sh, _ := renameFixture(t, filepath.Join("sub", "todo.md"), "")
 
@@ -1893,18 +1867,10 @@ func TestRenamePrompt(t *testing.T) {
 	if got := stripANSI(edit.View(sh)); !strings.Contains(got, want) {
 		t.Fatalf("the box should be prefilled with %q, got:\n%s", want, got)
 	}
-
-	// esc back to the list, up onto "+ new file", and the key is inert there.
-	model, _ = model.Update(keyMsg("esc"))
-	model, _ = model.Update(keyMsg("up"))
-	if _, edit := pressRename(model); edit != nil {
-		t.Fatal("ctrl+r on the + new file row should do nothing")
-	}
 }
 
 // TestRenameMovesFile: submitting the box moves the file on disk and reseeds the docs
-// list, and a name typed without an extension picks up the default one just as it does
-// in the new-file box.
+// list, and a name typed without an extension picks up the default one.
 func TestRenameMovesFile(t *testing.T) {
 	model, _, sh, dir := renameFixture(t, "old.md", "body")
 
@@ -2031,8 +1997,7 @@ func pressDelete(model tea.Model) (tea.Model, *components.DialogScreen) {
 
 // TestDeletePrompt: ctrl+d on a doc row raises the confirm naming the doc, and esc backs
 // out of it leaving the file alone — the whole point of putting a confirm in front of the
-// one docs-list verb that destroys something. The "+ new file" row has no file to delete,
-// so the key falls through to the list there and nothing is pushed.
+// one docs-list verb that destroys something.
 func TestDeletePrompt(t *testing.T) {
 	model, _, sh, dir := renameFixture(t, filepath.Join("sub", "todo.md"), "body")
 
@@ -2051,18 +2016,12 @@ func TestDeletePrompt(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "sub", "todo.md")); err != nil {
 		t.Fatalf("a cancelled delete must leave the file alone: %v", err)
 	}
-
-	// Up onto "+ new file", where the key is inert.
-	model, _ = model.Update(keyMsg("up"))
-	if _, dlg := pressDelete(model); dlg != nil {
-		t.Fatal("ctrl+d on the + new file row should do nothing")
-	}
 }
 
 // TestDeleteRemovesFile: confirming removes the file from disk and reseeds the docs list
 // off it, popping back to the home screen the way a rename does.
 func TestDeleteRemovesFile(t *testing.T) {
-	model, _, sh, dir := renameFixture(t, "old.md", "body")
+	model, s, sh, dir := renameFixture(t, "old.md", "body")
 
 	model, dlg := pressDelete(model)
 	if dlg == nil {
@@ -2075,6 +2034,9 @@ func TestDeleteRemovesFile(t *testing.T) {
 	}
 	if files := Of(sh).Files; len(files) != 0 {
 		t.Fatalf("the docs list should have reseeded empty, got %+v", files)
+	}
+	if rows := rowTitles(s.docsPanel.List()); len(rows) != 0 {
+		t.Fatalf("an empty scan should leave no docs rows, got %v", rows)
 	}
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
 		t.Fatal("a completed delete should pop back to the home screen")

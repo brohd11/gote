@@ -12,11 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Document operations driven from the docs list: opening, creating and renaming files, and
-// the row-anchored line edit both the new-file and rename boxes are built from.
+// Document operations driven from the docs list: opening, renaming and deleting files.
 
 // filePanelOpts wires the folder view. It is the same set of verbs the flat docs list
-// has — open, create, rename, delete — pointed at one directory instead of a whole scan:
+// has — open, rename, delete — pointed at one directory instead of a whole scan:
 // the panel owns walking into folders, gote owns what a FILE row means.
 func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 	root := docsRoot(c)
@@ -27,15 +26,22 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 		Compact:    true, // a 30-cell column has no room for the standard delegate's second line
 		Colors:     true, // folders apart from documents at a glance in a narrow column
 		DensityKey: densityKey,
+		UpKey:      upKey,
 		Include:    includeDoc(c),
-		// Rebuilt per directory by the panel, which is what makes "+ new file" mean the
-		// folder on screen rather than the root (see createFile).
-		Rows:     func(string) []list.Item { return []list.Item{newFileItem{}} },
-		OnRow:    func(sh *core.Shared, _ list.Item) core.Action { return s.newFile(sh) },
-		OnSelect: func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
-		OnKey:    s.fileKey,
-		OnError:  func(_ *core.Shared, err error) core.Action { return core.Push(errPopup("open folder", err)) },
+		OnSelect:   func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
+		OnKey:      s.fileKey,
+		OnError:    func(_ *core.Shared, err error) core.Action { return core.Push(errPopup("open folder", err)) },
 	}
+}
+
+// descendFolder also handles "..", which FilePanel's OnKey hook deliberately skips.
+// Documents have nothing to descend into; Enter still opens them.
+func (s *homeScreen) descendFolder(sh *core.Shared) core.Action {
+	e, ok := s.filePanel.Selected()
+	if !ok || !e.IsDir {
+		return core.Action{}
+	}
+	return s.filePanel.SetDir(sh, e.Path)
 }
 
 // fileKey is the folder view's row keys, docsKey's counterpart: the same ctrl+r rename and
@@ -57,12 +63,8 @@ func (s *homeScreen) fileKey(sh *core.Shared, k string, e components.FileEntry) 
 	return core.Action{}, false
 }
 
-// pickDoc routes the docs list's rows: the action row opens the new-file line
-// edit; a doc row opens (or switches to) that doc in the editor pane.
+// pickDoc opens (or switches to) the selected document in the editor pane.
 func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
-	if _, ok := it.(newFileItem); ok {
-		return s.newFile(sh)
-	}
 	di, ok := it.(docItem)
 	if !ok {
 		return core.Action{}
@@ -116,7 +118,7 @@ func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 }
 
 // rowLineEdit builds a floating line edit sitting exactly over the selected docs row —
-// the shape both the new-file and rename boxes take. Anchor math: the docs panel is
+// for renaming. Anchor math: the docs panel is
 // column 0 row 0 of the layout, so its outer top-left is (0, BodyY); RowY gives the row
 // WITHIN the panel (its border, and its filter line when one is live), and the LineEdit
 // anchor sits one row above the row it covers, since it draws its own top border there.
@@ -135,49 +137,10 @@ func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	return edit
 }
 
-// newFile pushes the row-anchored line edit that names a document into being.
-func (s *homeScreen) newFile(sh *core.Shared) core.Action {
-	return core.Push(s.rowLineEdit(sh, "name (a/b nests dirs)", s.createFile))
-}
-
-// createFile is the line edit's OnDone: resolve the typed name against the doc
-// store (the scan root in scan mode), write the file (making parent dirs for
-// names containing "/"), then reseed the list and open the file in the editor.
-// Blank input cancels quietly. Errors surface as a popup — gote has no status
-// pane — swapped in over the line edit so the overlay's stack depth holds.
-func (s *homeScreen) createFile(sh *core.Shared, name string) core.Action {
-	if strings.TrimSpace(name) == "" {
-		return core.Pop()
-	}
-	c := Of(sh)
-	// The folder view creates where you are looking; the flat list has no such place, so
-	// it creates at the root of the scan (or in the doc store).
-	base := s.filePanel.Dir()
-	if s.flat {
-		base = c.ScanDir
-		if c.Mode == ModeHome {
-			dir, err := DocsDir()
-			if err != nil {
-				return core.Replace(errPopup("new file", err))
-			}
-			base = dir
-		}
-	}
-	path, err := newDocPath(base, name, c.NewExt)
-	if err != nil {
-		return core.Replace(errPopup("new file", err))
-	}
-	if err := createDoc(path); err != nil {
-		return core.Replace(errPopup("new file", err))
-	}
-	return core.Seq(core.Pop(), core.PropagateAll(ReseedMsg{}), s.openDoc(sh, path))
-}
-
 // docsKey is the docs panel's OnKey (ListPanelOpts.OnKey): ctrl+r renames the selected
 // doc, ctrl+d deletes it. The hook fires only while the panel is focused and only when it
 // is not running a /-filter, so neither the editor nor a filter query can lose either
-// chord. Reporting false hands the key back to the list — which is what leaves the
-// "+ new file" row inert for both, since an action row has no file to act on.
+// chord. Reporting false hands the key back to the list when there is no document.
 func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Action, bool) {
 	di, ok := it.(docItem)
 	if !ok {
@@ -192,7 +155,7 @@ func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Acti
 	return core.Action{}, false
 }
 
-// renameFile pushes the same row-anchored line edit newFile does, prefilled with the
+// renameFile pushes a row-anchored line edit prefilled with the
 // doc's path relative to its origin root — so editing the directory part moves the file
 // as well as renaming it.
 func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
@@ -206,7 +169,7 @@ func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
 // submitRename is the rename box's OnDone: resolve the typed path against the doc's
 // own root, move the file, then catch the app up with where it now lives. Blank input
 // and an unchanged name cancel quietly. Errors surface as a popup swapped in over the
-// line edit, so the overlay's stack depth holds (createFile's precedent).
+// line edit, so the overlay's stack depth holds.
 //
 // A doc that is OPEN needs three things pointed at the new path, and each is the only
 // home of one fact: the editor knows where to save (SetPath, which also moves its title
@@ -301,7 +264,7 @@ func (s *homeScreen) submitDelete(sh *core.Shared, doc DocFile) core.Action {
 	return core.Seq(core.Pop(), act, core.PropagateAll(ReseedMsg{}))
 }
 
-// errPopup builds the error dialog a failed new-file submit is replaced with.
+// errPopup builds the error dialog for a failed document operation.
 func errPopup(title string, err error) *components.DialogScreen {
 	return components.CreatePopup(title, err.Error(), core.Pop())
 }

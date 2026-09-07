@@ -99,7 +99,7 @@ func (s *homeScreen) helpText() string {
 	writeSection("language server", []key.Binding{
 		completionKey, definitionKey, jumpBackKey, hoverKey, symbolsKey, referencesKey, formatKey,
 	})
-	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey,
+	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
 	writeSection("diagnostics panel", s.diagnostics.PanelHelp())
 	writeSection("editor", s.editor.HelpBindings())
