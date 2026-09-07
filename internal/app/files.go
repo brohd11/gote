@@ -22,11 +22,13 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 	return components.FilePanelOpts{
 		Dir:        root,
 		Root:       root,
-		Border:     true, // as both sidebar lists are: with three panes up, the focused one must show
-		Compact:    true, // a 30-cell column has no room for the standard delegate's second line
-		Colors:     true, // folders apart from documents at a glance in a narrow column
+		Border:     true,                      // as both sidebar lists are: with three panes up, the focused one must show
+		Compact:    true,                      // a 30-cell column has no room for the standard delegate's second line
+		Colors:     components.FileColorsDirs, // folders apart from documents at a glance in a narrow column
 		DensityKey: densityKey,
 		UpKey:      upKey,
+		TitleColor: s.fileTitleColor,
+		OnDir:      func(*core.Shared, string) core.Action { return core.Async(s.requestDocsGit()) },
 		Include:    includeDoc(c),
 		OnSelect:   func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
 		OnKey:      s.fileKey,

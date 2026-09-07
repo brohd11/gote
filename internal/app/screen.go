@@ -95,6 +95,7 @@ type ReseedMsg struct{}
 // instance so the router never re-Inits it (a re-Init would re-run the editor's file
 // load over a dirty buffer).
 type homeScreen struct {
+	gitDocs           docsGit
 	bottomVisible     bool
 	bottomFraction    float64
 	bottomPanel       components.Panel
@@ -176,7 +177,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// a core.Borderer child).
 	// No Help: that field only feeds the bar, and rename is documented in the ? overlay
 	// with the rest. The binding stays live — OnKey (docsKey) is what fires it.
-	s.docsPanel = components.NewCompactListPanel(docRows(c), "Docs", components.ListPanelOpts{
+	s.docsPanel = components.NewCompactListPanel(s.docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
 		OnKey:    s.docsKey,
 		Border:   true,
@@ -239,7 +240,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 //
 // The swap runs before modular.Init on purpose — a SetChild before the panel is
 // initialized is silent, and the host's own Init starts the child that is there.
-func (s *homeScreen) Init(sh *core.Shared) tea.Cmd {
+func (s *homeScreen) Init(sh *core.Shared) (initCmd tea.Cmd) {
+	defer func() { initCmd = tea.Batch(initCmd, s.syncDocsGit()) }()
 	s.sh = sh
 	if s.launchPreview {
 		s.launchPreview = false
@@ -272,7 +274,8 @@ func fileText(path string) string {
 // Update intercepts the wrapper's own keys, then delegates to the current modular
 // screen. The returned screen is always the wrapper — the modular swap happens in
 // place, never as a screen replacement.
-func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
+func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, result core.Action) {
+	defer func() { result.Cmd = tea.Batch(result.Cmd, s.syncDocsGit()) }()
 	if act, handled := s.documentTabInput(sh, msg); handled {
 		return s, s.finishHomeUpdate(sh, act)
 	}
@@ -667,7 +670,14 @@ func (s *homeScreen) CrumbLabel(short bool) string {
 // rebuilds the root and would discard the scratch buffer and the pane's live wiring.
 // The editor and panel frames read theme colors while rendering; only bubbles lists
 // cache themed styles and need an explicit refresh here.
-func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
+func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) {
+	defer func() { result.Cmd = tea.Batch(result.Cmd, s.syncDocsGit()) }()
+	if act, handled := s.receiveDocsGit(payload); handled {
+		return act
+	}
+	if _, ok := payload.(ReseedMsg); ok {
+		defer func() { result.Cmd = tea.Batch(result.Cmd, s.requestDocsGit()) }()
+	}
 	defer s.refreshDiagnostics()
 	if event, ok := payload.(lspEvent); ok {
 		if event.completion != nil {
@@ -691,7 +701,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) core.Action {
 	if _, ok := payload.(ReseedMsg); ok {
 		c := Of(sh)
 		c.Seed()
-		s.docsPanel.SetItems(docRows(c))
+		s.docsPanel.SetItems(s.docRows(c))
 		s.filePanel.Refresh()
 		s.openPanel.SetItems(openDocItems(c, s.currentID))
 		if c.lsp != nil {
@@ -748,10 +758,11 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	if err := c.SwitchVault(name); err != nil {
 		return core.Replace(errPopup("open vault", err))
 	}
+	s.resetDocsGit()
 	s.installScratch(c)
 	s.fullPreview = nil // the vault's scratch buffer is the editor, not a reader over it
 	cmd := s.editorPanel.SetChild(s.editor)
-	s.docsPanel.SetItems(docRows(c))
+	s.docsPanel.SetItems(s.docRows(c))
 	// Rebuilt, not re-pointed: the new vault brings a new root as well as a new directory,
 	// and the explorer's floor is fixed at construction.
 	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))

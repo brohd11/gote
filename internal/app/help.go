@@ -8,6 +8,7 @@ import (
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 )
 
 // helpScreen is the pushed "?" overlay: a scrollable doc listing gote's shortcuts,
@@ -101,6 +102,20 @@ func (s *homeScreen) helpText() string {
 	})
 	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
+	b.WriteString("Git colors: ")
+	for i, entry := range []struct {
+		name  string
+		state gitFileState
+	}{
+		{"staged", gitStaged}, {"untracked", gitUntracked}, {"modified", gitModified},
+		{"conflict/deleted", gitConflict}, {"ignored", gitIgnored},
+	} {
+		if i > 0 {
+			b.WriteString(" · ")
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(gitStateColor(entry.state)).Render(entry.name))
+	}
+	b.WriteString(". Clean files are plain; folders reflect changes beneath them.\n\n")
 	writeSection("diagnostics panel", s.diagnostics.PanelHelp())
 	writeSection("editor", s.editor.HelpBindings())
 	b.WriteString(clickHelp(s.sh) + "\n")

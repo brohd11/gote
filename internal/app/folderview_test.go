@@ -47,6 +47,7 @@ func newHomeCfg(t *testing.T, cfg Config, opts Options) (*homeScreen, *core.Shar
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	sh := core.NewShared(New("test", cfg, opts))
 	s := NewHomeScreen(sh).(*homeScreen)
+	s.gitDocs.timer = noDocsGitTimer
 	s.Init(sh)
 	s.SetSize(sh, 100, 30)
 	return s, sh

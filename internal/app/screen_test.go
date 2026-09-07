@@ -48,6 +48,7 @@ func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	sh := core.NewShared(New("test", DefaultConfig(), opts))
 	s := NewHomeScreen(sh).(*homeScreen)
+	s.gitDocs.timer = noDocsGitTimer
 	s.Init(sh)
 	s.SetSize(sh, 100, 30)
 	return s, sh
@@ -67,7 +68,9 @@ func newHomeRouter(t *testing.T, opts Options) (tea.Model, *homeScreen, *core.Sh
 	r.Init()
 	var model tea.Model = r
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	return model, model.(core.Router).Top().(*homeScreen), sh
+	s := model.(core.Router).Top().(*homeScreen)
+	s.gitDocs.timer = noDocsGitTimer
+	return model, s, sh
 }
 
 // ansiSGR matches the color escapes the render is dressed in, so assertions can be

@@ -60,6 +60,17 @@ In folder view, `d` enters the selected folder (including `..`) and `x` goes up,
 the scan or vault root. Enter still opens folders and documents; `d` does nothing on a
 document. Backspace uses the normal Back/filter behavior.
 
+Both docs views color names by Git status: staged green, untracked bright green,
+modified yellow, conflicts/deletions red, and ignored gray. Clean files use the normal
+foreground; folders keep their directory color unless changes beneath them take priority.
+Mixed staged/unstaged files show the unstaged state. Nested repos, submodules, and
+worktrees are supported. Colors refresh in the background every two seconds while the
+sidebar is visible, and after saves, folder navigation, or Actions → Refresh. Git is
+optional; unavailable status leaves the normal file/directory colors. File listings
+retain their existing refresh behavior; deleted files affect parent colors without
+adding deleted-file rows. The `?` page includes a color legend.
+
+
 `gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.
 Without a depth it uses `scan_depth` from the config (5 by default).
 

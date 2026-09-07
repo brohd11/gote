@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"image/color"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -201,9 +202,10 @@ func sortDocs(docs []DocFile) {
 // value read at build time would go stale the moment the next character landed, while a
 // probe is answered afresh by every render.
 type docItem struct {
-	doc     DocFile
-	current bool
-	dirty   func() bool
+	doc        DocFile
+	current    bool
+	dirty      func() bool
+	titleColor func(string) color.Color
 }
 
 func (i docItem) Title() string {
@@ -211,6 +213,12 @@ func (i docItem) Title() string {
 		return "• " + i.doc.Name
 	}
 	return i.doc.Name
+}
+func (i docItem) TitleColor() color.Color {
+	if i.titleColor != nil {
+		return i.titleColor(i.doc.Path)
+	}
+	return nil
 }
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
@@ -275,8 +283,14 @@ func openDocItems(c *Ctx, currentID string) []list.Item {
 }
 
 // docRows is the docs panel's full row set, rebuilt from the scan on each reseed.
-func docRows(c *Ctx) []list.Item {
-	return docItems(c.Files, "")
+func (s *homeScreen) docRows(c *Ctx) []list.Item {
+	items := docItems(c.Files, "")
+	for n, item := range items {
+		row := item.(docItem)
+		row.titleColor = s.docTitleColor
+		items[n] = row
+	}
+	return items
 }
 
 // newDocPath resolves a name typed into the rename line edit against base. A name
