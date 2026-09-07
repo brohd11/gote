@@ -35,7 +35,7 @@ type recordingLSPServer struct {
 	completionEnabled bool
 	completionResult  protocol.CompletionResult
 	initializeParams  *protocol.InitializeParams
-	// The on-demand lane's canned answers. Each is nil until a test arms it, and the
+	// The language-feature canned answers. Each is nil until a test arms it, and the
 	// matching capability is advertised only when armed — which is what lets a test
 	// assert that an unadvertised feature is never even requested.
 	definitionResult protocol.DefinitionResult
@@ -339,6 +339,21 @@ func waitRequestResult(t *testing.T, manager *lspManager) *lspRequestResult {
 	}
 }
 
+func waitOutlineResult(t *testing.T, manager *lspManager) *lspOutlineResult {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case event := <-manager.events:
+			if event.outline != nil {
+				return event.outline
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for an LSP outline result")
+		}
+	}
+}
+
 // newRequestLaneCtx wires a live TCP server to one open Python buffer and waits until
 // its capabilities have been cached, which is the state every on-demand request needs.
 func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*Ctx, string, *editor.Screen) {
@@ -358,7 +373,7 @@ func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*
 	waitLSPCall(t, server.calls, "open")
 	deadline := time.Now().Add(3 * time.Second)
 	for !c.lsp.Supports(path, lspReqHover) && !c.lsp.Supports(path, lspReqDefinition) &&
-		!c.lsp.Supports(path, lspReqSymbols) && !c.lsp.Supports(path, lspReqFormat) &&
+		!c.lsp.SupportsOutline(path) && !c.lsp.Supports(path, lspReqFormat) &&
 		!c.lsp.Supports(path, lspReqReferences) && !c.lsp.Supports(path, lspReqSignature) {
 		if time.Now().After(deadline) {
 			t.Fatal("timed out waiting for the server's capabilities to be cached")
@@ -415,23 +430,59 @@ func TestLSPRequestLaneCarriesUTF16Position(t *testing.T) {
 	}
 }
 
-// TestLSPRequestLaneFlushesLatestDocument: startRequest writes the pending didChange on
-// the actor goroutine before the RPC, so the server sees the text whose caret position
-// the request names — the same guarantee startCompletion gives.
-func TestLSPRequestLaneFlushesLatestDocument(t *testing.T) {
+// TestLSPOutlineLaneFlushesLatestDocument: startOutline writes the pending didChange on
+// the actor goroutine before the RPC, so the server describes the latest text.
+func TestLSPOutlineLaneFlushesLatestDocument(t *testing.T) {
 	server := newRecordingLSPServer()
 	server.symbolsResult = protocol.DocumentSymbolSlice{{Name: "f", Kind: protocol.SymbolKindFunction}}
 	c, path, ed := newRequestLaneCtx(t, server, "one = 1\n")
 
 	ed.SetText("one = 1\ntwo = 2\n")
 	c.lsp.Reconcile(c)
-	c.lsp.Request(lspReqSymbols, path, ed.EditSeq(), protocol.Position{})
+	c.lsp.RequestOutline(path, ed.EditSeq())
 	seen := waitLSPCallSet(t, server.calls, "change", "symbols")
 	if got := seen["change"].text; got != "one = 1\ntwo = 2\n" {
 		t.Fatalf("the flush sent %q, want the latest buffer", got)
 	}
-	if got := waitRequestResult(t, c.lsp); len(got.symbols) != 1 || got.symbols[0].Name != "f" {
+	if got := waitOutlineResult(t, c.lsp); len(got.symbols) != 1 || got.symbols[0].Name != "f" {
 		t.Fatalf("projected symbols = %#v", got.symbols)
+	}
+}
+
+func TestLSPOutlineLaneDoesNotReplaceUserRequest(t *testing.T) {
+	server := newRecordingLSPServer()
+	server.symbolsResult = protocol.DocumentSymbolSlice{{Name: "f", Kind: protocol.SymbolKindFunction}}
+	server.hoverResult = &protocol.Hover{Contents: protocol.String("doc")}
+	c, path, ed := newRequestLaneCtx(t, server, "value = 1\n")
+
+	requestID := c.lsp.Request(lspReqHover, path, ed.EditSeq(), protocol.Position{})
+	outlineID := c.lsp.RequestOutline(path, ed.EditSeq())
+	if requestID == 0 || outlineID == 0 {
+		t.Fatalf("request ids = user %d outline %d, want both accepted", requestID, outlineID)
+	}
+	waitLSPCallSet(t, server.calls, "hover", "symbols")
+
+	var request *lspRequestResult
+	var outline *lspOutlineResult
+	deadline := time.After(3 * time.Second)
+	for request == nil || outline == nil {
+		select {
+		case event := <-c.lsp.events:
+			if event.request != nil {
+				request = event.request
+			}
+			if event.outline != nil {
+				outline = event.outline
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for independent outline and user-request results")
+		}
+	}
+	if request.id != requestID || request.hover != "doc" {
+		t.Fatalf("user request = %#v, want hover id %d", request, requestID)
+	}
+	if outline.id != outlineID || len(outline.symbols) != 1 {
+		t.Fatalf("outline result = %#v, want id %d with one symbol", outline, outlineID)
 	}
 }
 

@@ -85,8 +85,6 @@ func (s *homeScreen) applyRequestResult(sh *core.Shared, result *lspRequestResul
 		return s.applyReferences(sh, result)
 	case lspReqHover:
 		return s.applyHover(result)
-	case lspReqSymbols:
-		return s.applySymbols(sh, result)
 	case lspReqFormat:
 		return s.applyFormat(result)
 	case lspReqSignature:

@@ -160,7 +160,7 @@ type VaultConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		ScanDepth:       5,
-		OpenDocsView:    "list",
+		OpenDocsView:    "tabs",
 		AutoLSP:         true,
 		GitGutter:       gutterAuto,
 		LanguageServers: defaultLanguageServers(),
@@ -299,8 +299,8 @@ func LoadConfig() (Config, error) {
 		return DefaultConfig(), err
 	}
 	normalizeExtensions(&cfg)
-	if cfg.OpenDocsView != "tabs" {
-		cfg.OpenDocsView = "list"
+	if cfg.OpenDocsView != "tabs" && cfg.OpenDocsView != "list" {
+		cfg.OpenDocsView = "tabs"
 	}
 	if cfg.ScanDepth <= 0 {
 		cfg.ScanDepth = 5

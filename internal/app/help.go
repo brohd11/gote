@@ -100,6 +100,12 @@ func (s *homeScreen) helpText() string {
 	writeSection("language server", []key.Binding{
 		completionKey, definitionKey, jumpBackKey, hoverKey, symbolsKey, referencesKey, formatKey,
 	})
+	writeSection("outline panel", []key.Binding{
+		core.Hint("jump", core.Keys.Select),
+		core.Hint("collapse/expand", core.Keys.Left, core.Keys.Right),
+		core.Hint("toggle fold", core.Keys.Toggle),
+		core.Hint("filter", s.outlinePanel.List().KeyMap.Filter),
+	})
 	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
 	b.WriteString("Git colors: ")

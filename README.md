@@ -33,17 +33,17 @@ the basic palette explicitly).
 
 Open documents can appear in the sidebar list or in a tab bar above the editor.
 Use **Actions → Show open documents as tabs/list** to switch for the current session.
-The list remains the default; set `open_docs_view: tabs` in `~/.gote/config.yml`
-to start with tabs (`list` restores the default).
+Tabs are the default; set `open_docs_view: list` in `~/.gote/config.yml` to put open
+documents back in the sidebar.
 
 **Alt+9 / Alt+0** switch to the previous/next open document while editing, in either
 view. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
 show `(*)` for unsaved changes and `[P]` on the current document in full preview.
 Click a tab to open it; overflow arrows scroll the bar without changing documents.
 Tab mode omits the duplicate filename header in the editor and full preview.
-The bar remains visible with the sidebar hidden. Single-file mode stays minimal.
+The bar remains visible with the sidebar hidden. Single-file mode starts minimal.
 
-Default mode, shows a sidebar with docs in a location folder, as well as a list of open docs.
+Default mode shows a sidebar with docs in a location folder and open documents in tabs.
 `gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
 
@@ -153,14 +153,21 @@ modified key so it fires while you are typing in the editor:
 | `alt+g` | go to definition — jumps, or lists them when there is more than one |
 | `ctrl+o` | jump back, through as many jumps as you made |
 | `alt+h` | hover info for the symbol at the cursor |
-| `alt+o` | outline: every symbol in the document, filterable, opens where you are |
+| `alt+o` | show or hide the document outline |
 | `alt+n` | find references |
 | `alt+m` | format the document, organizing imports first |
 | `ctrl+space` | completion |
 
 Signature help needs no key: it appears above the cursor when you open an argument list
-and follows the parameter you are on. Each feature is offered only where the server said
-it can answer, so a server implementing less simply shows less.
+and follows the parameter you are on. Gote sends each request only where the server said
+it can answer; unsupported outline panels show an unavailable message.
+
+The outline is a filterable tree in the sidebar and starts hidden. In tab mode it sits
+below Docs; in list mode the order is Docs, Open, Outline. Nested server symbols keep
+their hierarchy. Enter or a click jumps to a symbol, left/right and space fold branches,
+and the selection follows the enclosing symbol while you edit. The panel refreshes after
+document switches and settled edits. A server without document-symbol support leaves an
+unavailable message in the panel instead of failing the session.
 
 Two mouse gestures cover the same ground for the pointer: **alt+click** goes to a
 definition, and **ctrl+click** opens the editor menu — a stand-in for right-click in
@@ -192,6 +199,8 @@ get a hint for.
 `gote <my/file.md>`
 
 Open the editor with a single document. Useful if you have your terminal default editor set to gote.
+This launch still starts with only the editor, but `alt+o` may add the outline and `alt+b`
+may add the diagnostics panel without restoring the normal breadcrumb or help bar.
 
 `gote -P <my/file.md>`
 

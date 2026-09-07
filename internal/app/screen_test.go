@@ -33,6 +33,9 @@ import (
 func testConfig() Config {
 	cfg := DefaultConfig()
 	cfg.AutoLSP = false
+	// Most screen tests predate the tab default and exercise the four-pane list layout.
+	// Tests of startup configuration use DefaultConfig directly.
+	cfg.OpenDocsView = "list"
 	return cfg
 }
 
@@ -46,7 +49,9 @@ func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
-	sh := core.NewShared(New("test", DefaultConfig(), opts))
+	cfg := DefaultConfig()
+	cfg.OpenDocsView = "list"
+	sh := core.NewShared(New("test", cfg, opts))
 	s := NewHomeScreen(sh).(*homeScreen)
 	s.gitDocs.timer = noDocsGitTimer
 	s.Init(sh)
@@ -61,7 +66,9 @@ func newHomeRouter(t *testing.T, opts Options) (tea.Model, *homeScreen, *core.Sh
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
-	sh := core.NewShared(New("test", DefaultConfig(), opts))
+	cfg := DefaultConfig()
+	cfg.OpenDocsView = "list"
+	sh := core.NewShared(New("test", cfg, opts))
 	r := core.NewRouter(sh, []core.TabEntry{
 		{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
 	})
@@ -165,7 +172,8 @@ func TestHomePaneNavigation(t *testing.T) {
 }
 
 func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
-	s, _ := newHome(t)
+	s, sh := newHome(t)
+	s.setOpenDocsTabs(sh, false)
 
 	// The initial focus is the Docs pane, so both nudges move its trailing
 	// boundaries: the sidebar/editor seam and the Docs/Open seam.
@@ -175,8 +183,9 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 	if s.sidebarW != sidebarWidth+5 {
 		t.Fatalf("saved sidebar width = %d, want %d", s.sidebarW, sidebarWidth+5)
 	}
-	if len(s.sidebarRows) != 2 || s.sidebarRows[0] <= 0.5 || s.sidebarRows[1] >= 0.5 {
-		t.Fatalf("saved Docs/Open split = %v, want the Docs pane enlarged", s.sidebarRows)
+	rows := s.sidebarSplits["docs/open"]
+	if len(rows) != 2 || rows[0] <= 0.5 || rows[1] >= 0.5 {
+		t.Fatalf("saved Docs/Open split = %v, want the Docs pane enlarged", rows)
 	}
 
 	s.setSidebar(false)
@@ -185,8 +194,8 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 		t.Fatalf("sidebar rebuild restored editor left edge %d, want %d", got, sidebarWidth+5)
 	}
 	state := s.modular.ResizeState()
-	if !reflect.DeepEqual(state.Splits["sidebar"].Weights, s.sidebarRows) {
-		t.Fatalf("sidebar row split after rebuild = %v, want %v", state.Splits["sidebar"].Weights, s.sidebarRows)
+	if !reflect.DeepEqual(state.Splits["sidebar"].Weights, rows) {
+		t.Fatalf("sidebar row split after rebuild = %v, want %v", state.Splits["sidebar"].Weights, rows)
 	}
 
 	// With the preview present, setPreview focuses the editor. Its trailing edge
@@ -263,8 +272,7 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 	r.Init()
 	var model tea.Model = r
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	model, _ = model.Update(keyMsg("shift+tab")) // docs -> open
-	model, _ = model.Update(keyMsg("shift+tab")) // open -> editor
+	model, _ = model.Update(keyMsg("shift+tab")) // docs -> editor (Open is the tab bar)
 	model, _ = model.Update(keyMsg("unsaved theme text"))
 
 	if !strings.Contains(stripANSI(view(model)), "unsaved theme text") {
@@ -2240,7 +2248,7 @@ func TestHomeEditorContextItems(t *testing.T) {
 	s, sh := newHome(t)
 
 	rows := s.editorContextItems(sh)
-	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
+	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Show outline", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
 	if len(rows) != len(want) {
 		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
 	}
@@ -2287,7 +2295,7 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 	// back into the anchor the overlay is placed at.
 	_ = view(model)
 
-	drive(right(45, 15)) // the editor column
+	drive(right(45, 10)) // the editor column
 	menu, ok := model.(core.Router).Top().(*components.MenuScreen)
 	if !ok {
 		t.Fatalf("a right click in the editor should raise the menu, top is %T", model.(core.Router).Top())
@@ -2301,8 +2309,8 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 	// It has to land just under the pointer, not merely exist: same column, one row down
 	// so the clicked text stays readable. The editor receives the click pane-relative, so
 	// a menu placed at the sidebar's left edge is the failure this catches.
-	if x, y := menu.OverlayPos(0, 0); x != 45 || y != 16 {
-		t.Errorf("the menu placed at (%d,%d), want (45,16) — the click column, one row below:\n%s", x, y, view)
+	if x, y := menu.OverlayPos(0, 0); x != 45 || y != 11 {
+		t.Errorf("the menu placed at (%d,%d), want (45,11) — the click column, one row below:\n%s", x, y, view)
 	}
 
 	drive(keyMsg("esc"))

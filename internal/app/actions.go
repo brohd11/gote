@@ -32,10 +32,7 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 				return core.Seq(core.Async(s.setGitGutter(on)), core.SetStatus(fmt.Sprintf("git gutter %s", onOff(on))))
 			},
 		},
-		components.Item{
-			Name: "◈ Outline", Desc: "jump to a symbol in the current document (alt+o)",
-			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqSymbols) },
-		},
+		s.outlineActionItem(),
 		components.Item{
 			Name: "Find references", Desc: "every use of the symbol at the cursor (alt+n)",
 			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqReferences) },
@@ -49,6 +46,17 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 			Pick: s.restartLanguageServers,
 		},
 	)
+}
+
+func (s *homeScreen) outlineActionItem() components.Item {
+	verb := "Show"
+	if s.outlineVisible {
+		verb = "Hide"
+	}
+	return components.Item{
+		Name: verb + " outline", Desc: "toggle the document-symbol panel (alt+o)",
+		Pick: func(sh *core.Shared) core.Action { return core.Seq(core.Pop(), s.toggleOutline(sh)) },
+	}
 }
 
 func onOff(on bool) string {

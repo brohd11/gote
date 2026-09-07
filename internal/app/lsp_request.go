@@ -32,7 +32,6 @@ const (
 	lspReqDefinition lspRequestKind = iota
 	lspReqHover
 	lspReqReferences
-	lspReqSymbols
 	lspReqFormat // organize imports followed by formatting, as one answer
 	lspReqSignature
 )
@@ -45,8 +44,6 @@ func (k lspRequestKind) String() string {
 		return "hover"
 	case lspReqReferences:
 		return "references"
-	case lspReqSymbols:
-		return "symbols"
 	case lspReqFormat:
 		return "format"
 	case lspReqSignature:
@@ -70,14 +67,14 @@ type lspLocation struct {
 	Range protocol.Range
 }
 
-// lspSymbol is one row of an outline. Both documentSymbol shapes — the flat
-// SymbolInformation list and the nested DocumentSymbol tree — flatten to this, with
-// Depth carrying whatever nesting the tree had.
+// lspSymbol is one node of an outline. Range is the symbol's full extent, used to
+// follow the editor caret; SelectionRange is the name-sized jump target.
 type lspSymbol struct {
-	Name, Detail string
-	Kind         protocol.SymbolKind
-	Depth        int
-	Range        protocol.Range // the selection range: the name, not the whole body
+	Name, Detail   string
+	Kind           protocol.SymbolKind
+	Range          protocol.Range
+	SelectionRange protocol.Range
+	Children       []lspSymbol
 }
 
 type lspTextEdit struct {
@@ -110,7 +107,6 @@ type lspRequestResult struct {
 	locations  []lspLocation // definition, references
 	hover      string        // markdown, flattened from HoverContents
 	hoverRange *protocol.Range
-	symbols    []lspSymbol
 	edits      []lspTextEdit
 	signature  *lspSignature
 	err        error
@@ -173,8 +169,6 @@ func (m *lspManager) supportsLocked(doc lspDocument, kind lspRequestKind) bool {
 		return lspProvided(caps.HoverProvider)
 	case lspReqReferences:
 		return lspProvided(caps.ReferencesProvider)
-	case lspReqSymbols:
-		return lspProvided(caps.DocumentSymbolProvider)
 	case lspReqFormat:
 		// Either half is worth running on its own: gopls answers both, but a server
 		// with only organizeImports still has something useful to do here.
@@ -294,9 +288,6 @@ func dispatchLSPRequest(ctx context.Context, server protocol.Server, path string
 		if answer != nil {
 			result.hover, result.hoverRange = flattenHover(answer.Contents), answer.Range
 		}
-	case lspReqSymbols:
-		answer, err := server.DocumentSymbol(ctx, &protocol.DocumentSymbolParams{TextDocument: document})
-		result.symbols, result.err = projectSymbols(answer), err
 	case lspReqSignature:
 		answer, err := server.SignatureHelp(ctx, &protocol.SignatureHelpParams{TextDocumentPositionParams: positionParams})
 		result.signature, result.err = projectSignature(answer), err
@@ -452,30 +443,31 @@ func sameFilePath(left, right string) bool {
 	return left == right
 }
 
-// projectSymbols flattens both documentSymbol shapes. The nested one is walked
-// depth-first so the outline reads in document order with its nesting intact; the flat
-// one is sorted into document order, which SymbolInformation does not guarantee.
+// projectSymbols preserves the hierarchy of DocumentSymbol results. The legacy
+// SymbolInformation shape has no reliable parent relation, so it stays flat and is
+// sorted into document order, which that response shape does not guarantee.
 func projectSymbols(result protocol.DocumentSymbolResult) []lspSymbol {
 	switch value := result.(type) {
 	case protocol.DocumentSymbolSlice:
-		var out []lspSymbol
-		var walk func(symbols []protocol.DocumentSymbol, depth int)
-		walk = func(symbols []protocol.DocumentSymbol, depth int) {
+		var project func([]protocol.DocumentSymbol) []lspSymbol
+		project = func(symbols []protocol.DocumentSymbol) []lspSymbol {
+			out := make([]lspSymbol, 0, len(symbols))
 			for _, symbol := range symbols {
-				row := lspSymbol{Name: symbol.Name, Kind: symbol.Kind, Depth: depth, Range: symbol.SelectionRange}
+				node := lspSymbol{Name: symbol.Name, Kind: symbol.Kind, Range: symbol.Range,
+					SelectionRange: symbol.SelectionRange, Children: project(symbol.Children)}
 				if symbol.Detail != nil {
-					row.Detail = *symbol.Detail
+					node.Detail = *symbol.Detail
 				}
-				out = append(out, row)
-				walk(symbol.Children, depth+1)
+				out = append(out, node)
 			}
+			return out
 		}
-		walk([]protocol.DocumentSymbol(value), 0)
-		return out
+		return project([]protocol.DocumentSymbol(value))
 	case protocol.SymbolInformationSlice:
 		out := make([]lspSymbol, 0, len(value))
 		for _, symbol := range value {
-			row := lspSymbol{Name: symbol.Name, Kind: symbol.Kind, Range: symbol.Location.Range}
+			row := lspSymbol{Name: symbol.Name, Kind: symbol.Kind, Range: symbol.Location.Range,
+				SelectionRange: symbol.Location.Range}
 			if symbol.ContainerName != nil {
 				row.Detail = *symbol.ContainerName
 			}

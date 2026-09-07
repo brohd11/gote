@@ -54,23 +54,20 @@ func TestProjectDefinitionCoversEveryUnionArm(t *testing.T) {
 	}
 }
 
-func TestProjectSymbolsFlattensBothShapes(t *testing.T) {
+func TestProjectSymbolsPreservesNestedShapeAndSortsFlatShape(t *testing.T) {
 	detail := "func()"
 	nested := protocol.DocumentSymbolSlice{{
-		Name: "Outer", Kind: protocol.SymbolKindStruct, SelectionRange: atLine(1),
+		Name: "Outer", Kind: protocol.SymbolKindStruct, Range: protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 8}}, SelectionRange: atLine(1),
 		Children: []protocol.DocumentSymbol{
-			{Name: "Inner", Kind: protocol.SymbolKindMethod, Detail: &detail, SelectionRange: atLine(2)},
+			{Name: "Inner", Kind: protocol.SymbolKindMethod, Detail: &detail, Range: protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 6}}, SelectionRange: atLine(2)},
 		},
 	}}
 	got := projectSymbols(nested)
-	if len(got) != 2 {
-		t.Fatalf("nested projection returned %d rows, want 2", len(got))
+	if len(got) != 1 || len(got[0].Children) != 1 {
+		t.Fatalf("nested projection = %#v, want one root with one child", got)
 	}
-	if got[0].Depth != 0 || got[1].Depth != 1 {
-		t.Errorf("depths = %d, %d; want the tree's nesting preserved", got[0].Depth, got[1].Depth)
-	}
-	if got[1].Name != "Inner" || got[1].Detail != detail {
-		t.Errorf("child row = %+v", got[1])
+	if child := got[0].Children[0]; child.Name != "Inner" || child.Detail != detail || child.Range.End.Line != 6 {
+		t.Errorf("child node = %+v", child)
 	}
 
 	// The flat shape carries no order guarantee, so the projection imposes one.
@@ -93,18 +90,27 @@ func TestProjectSymbolsFlattensBothShapes(t *testing.T) {
 	}
 }
 
-func TestSymbolNearestFindsTheEnclosingRow(t *testing.T) {
+func TestOutlineNodeAtFindsContainingOrNearestSymbol(t *testing.T) {
 	symbols := []lspSymbol{
-		{Name: "a", Range: atLine(0)},
-		{Name: "b", Range: atLine(10)},
-		{Name: "c", Range: atLine(20)},
+		{Name: "a", Range: atLine(0), SelectionRange: atLine(0)},
+		{Name: "b", Range: atLine(10), SelectionRange: atLine(10)},
+		{Name: "c", Range: atLine(20), SelectionRange: atLine(20)},
+	}
+	nodes := outlineTree("test.go", symbols)
+	nameFor := func(id string) string {
+		for _, node := range nodes {
+			if item := node.Item.(outlineItem); item.id == id {
+				return item.name
+			}
+		}
+		return ""
 	}
 	for _, tc := range []struct {
 		line uint32
-		want int
-	}{{0, 0}, {5, 0}, {10, 1}, {19, 1}, {200, 2}} {
-		if got := symbolNearest(symbols, protocol.Position{Line: tc.line}); got != tc.want {
-			t.Errorf("caret on line %d selected row %d, want %d", tc.line, got, tc.want)
+		want string
+	}{{0, "a"}, {5, "a"}, {10, "b"}, {19, "b"}, {200, "c"}} {
+		if got := nameFor(outlineNodeAt(nodes, protocol.Position{Line: tc.line})); got != tc.want {
+			t.Errorf("caret on line %d selected %q, want %q", tc.line, got, tc.want)
 		}
 	}
 }

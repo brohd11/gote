@@ -97,6 +97,7 @@ type lspEvent struct {
 	completion *lspCompletionResult
 	request    *lspRequestResult
 	semantic   *lspSemanticResult
+	outline    *lspOutlineResult
 }
 
 // lspManager is an actor around all server and document lifecycle work. The UI writes
@@ -129,8 +130,12 @@ type lspManager struct {
 	semantic        *lspSemanticRequest
 	nextSemantic    uint64
 	semanticLegends map[string][]string
-	restart         bool
-	closed          bool
+	// The outline lane (lsp_outline.go) is background work like semantic tokens, but
+	// independently replaceable so neither refresh can cancel the other.
+	outline     *lspOutlineRequest
+	nextOutline uint64
+	restart     bool
+	closed      bool
 
 	wake    chan struct{}
 	stop    chan struct{}
@@ -232,6 +237,9 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 			}
 			if m.request != nil && m.request.path == path {
 				m.request = nil
+			}
+			if m.outline != nil && m.outline.path == path {
+				m.outline = nil
 			}
 		}
 	}
@@ -369,6 +377,7 @@ func (m *lspManager) loop() {
 	var cancelCompletion context.CancelFunc
 	var cancelRequest context.CancelFunc
 	var cancelSemantic context.CancelFunc
+	var cancelOutline context.CancelFunc
 	stopChangeTimer := func() {
 		if changeTimer == nil {
 			return
@@ -412,6 +421,12 @@ func (m *lspManager) loop() {
 				}
 				cancelSemantic = m.startSemantic(sessions, pending, *request)
 			}
+			if request := m.takeOutline(); request != nil {
+				if cancelOutline != nil {
+					cancelOutline()
+				}
+				cancelOutline = m.startOutline(sessions, pending, *request)
+			}
 			switch {
 			case len(pending) == 0:
 				stopChangeTimer()
@@ -439,6 +454,12 @@ func (m *lspManager) loop() {
 			}
 			if cancelRequest != nil {
 				cancelRequest()
+			}
+			if cancelSemantic != nil {
+				cancelSemantic()
+			}
+			if cancelOutline != nil {
+				cancelOutline()
 			}
 			for _, session := range sessions {
 				m.closeSession(session)
@@ -826,7 +847,7 @@ func (m *lspManager) startSession(session *lspSession) error {
 				},
 				// Nothing below is optional politeness: a server that is not told the
 				// client supports a feature is entitled not to advertise it back, and
-				// Supports() gates every on-demand request on that advertisement.
+				// Request dispatch gates every feature on that advertisement.
 				Hover: &protocol.HoverClientCapabilities{
 					ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
 				},

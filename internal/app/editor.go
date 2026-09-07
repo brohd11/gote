@@ -108,12 +108,15 @@ func (s *homeScreen) editorLanguageItems(sh *core.Shared) []components.MenuItem 
 		request("Hover info", lspReqHover),
 		request("Go to definition", lspReqDefinition),
 		request("Find references", lspReqReferences),
-		request("Outline", lspReqSymbols),
 		request("Format document", lspReqFormat),
 	}
 }
 
 func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
+	outlineLabel := "Show outline"
+	if s.outlineVisible {
+		outlineLabel = "Hide outline"
+	}
 	return []components.MenuItem{
 		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.cyclePreview())
@@ -128,6 +131,9 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 		{Label: "Toggle line numbers", Pick: func(*core.Shared) core.Action {
 			s.editor.ToggleLineNums()
 			return core.Pop()
+		}},
+		{Label: outlineLabel, Pick: func(*core.Shared) core.Action {
+			return core.Seq(core.Pop(), s.toggleOutline(sh))
 		}},
 		{Label: "Toggle diagnostics panel", Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.toggleBottom(sh))

@@ -26,9 +26,9 @@ func TestOpenDocsViewConfig(t *testing.T) {
 	for _, value := range []string{"", "list", "tabs", "unknown"} {
 		t.Run(value, func(t *testing.T) {
 			cfg := writeConfig(t, "open_docs_view: "+value+"\n")
-			want := "list"
-			if value == "tabs" {
-				want = "tabs"
+			want := "tabs"
+			if value == "list" {
+				want = "list"
 			}
 			if cfg.OpenDocsView != want {
 				t.Fatalf("view = %q, want %q", cfg.OpenDocsView, want)
@@ -105,10 +105,12 @@ func TestDocumentKeysThroughRouter(t *testing.T) {
 
 func TestOpenTabsTogglePreservesStateAndGeometry(t *testing.T) {
 	_, s, sh := tabTestHome(t)
+	s.setOpenDocsTabs(sh, false)
 	s.newUnsavedBuffer(sh)
 	s.Update(sh, keyMsg("A"))
 	ed, id, position := s.editor, s.currentID, s.editor.CursorPosition()
-	s.sidebarW, s.sidebarRows, s.editorFlex = 34, []float64{0.7, 0.3}, 0.6
+	s.sidebarW, s.editorFlex = 34, 0.6
+	s.sidebarSplits["docs/open"] = []float64{0.7, 0.3}
 	s.setPreview(previewPane)
 	s.toggleBottom(sh)
 	s.modular.FocusSlot(s.panelSlot(s.openPanel))
@@ -142,7 +144,7 @@ func TestOpenTabsTogglePreservesStateAndGeometry(t *testing.T) {
 	if y != listY+1-titleRows {
 		t.Fatalf("cursor anchor did not account for hidden title: tabs=%d list=%d", y, listY)
 	}
-	if s.sidebarW != 34 || s.sidebarRows[0] != 0.7 || s.editorFlex != 0.6 {
+	if s.sidebarW != 34 || s.sidebarSplits["docs/open"][0] != 0.7 || s.editorFlex != 0.6 {
 		t.Fatal("toggle changed pane proportions")
 	}
 	if s.editor != ed || s.editor.Text() != "A" {

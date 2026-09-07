@@ -64,11 +64,12 @@ var (
 	// gate and fire while the editor is typing — which is the only place they mean
 	// anything. alt+g/h/o/n/m are the free alt letters left after the editor's word and
 	// clipboard chords (alt+b/c/d/f/i/v/x), core's alt+wasd arrows and alt+u, and gote's
-	// own alt+p/r/t/z. ctrl+o is vim's jump-back and is unclaimed in all three layers.
+	// own alt+p/r/t/z. ctrl+o remains vim's jump-back; alt+o now toggles the persistent
+	// outline panel rather than pushing a picker.
 	definitionKey = key.NewBinding(key.WithKeys("alt+g"), key.WithHelp("alt+g", "go to definition"))
 	jumpBackKey   = key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back"))
 	hoverKey      = key.NewBinding(key.WithKeys("alt+h"), key.WithHelp("alt+h", "hover info"))
-	symbolsKey    = key.NewBinding(key.WithKeys("alt+o"), key.WithHelp("alt+o", "outline"))
+	symbolsKey    = key.NewBinding(key.WithKeys("alt+o"), key.WithHelp("alt+o", "toggle outline"))
 	referencesKey = key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "find references"))
 	formatKey     = key.NewBinding(key.WithKeys("alt+m"), key.WithHelp("alt+m", "format document"))
 )
@@ -95,56 +96,67 @@ type ReseedMsg struct{}
 // instance so the router never re-Inits it (a re-Init would re-run the editor's file
 // load over a dirty buffer).
 type homeScreen struct {
-	gitDocs           docsGit
-	bottomVisible     bool
-	bottomFraction    float64
-	bottomPanel       components.Panel
-	diagnostics       *diagnosticsPanel
-	modular           *components.ModularScreen
-	docsPanel         *components.CompactListPanel
-	filePanel         *components.FilePanel // the folder view alt+t swaps into the docs slot
-	openPanel         *components.CompactListPanel
-	openTabs          *documentTabBar
-	openDocsTabs      bool
-	panelSlots        map[components.Panel]int
-	editorPanel       *components.ScreenPanel
-	previewPanel      *components.ScrollContainer // the live preview pane
-	editor            *editor.Screen              // the editor pane's live buffer (ScreenPanel exposes none)
-	fullPreview       *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
-	currentID         string                      // stable buffer identity; path for saved docs, opaque for unsaved
-	currentPath       string                      // filesystem path; empty while the current buffer is unsaved
-	currentName       string                      // visible filename or unsaved_N label
-	sidebar           bool
-	sidebarW          int           // adjusted sidebar width; zero uses sidebarWidth
-	sidebarRows       []float64     // adjusted Docs/Open split, retained across layout rebuilds
-	editorFlex        float64       // editor's share when the preview flex column is present; zero uses half
-	flat              bool          // the docs slot shows the flat scan (true) or the folder explorer
-	minimal           bool          // ModeFile: the editor alone, all chrome masked, sidebar unreachable
-	indentGuides      bool          // config-selected leading-indent visualization for every buffer
-	gitGutter         bool          // draw change markers against HEAD (see gitgutter.go)
-	diagnosticsGutter bool          // independently toggle the LSP marker column
-	gutter            gutter        // the baseline and last-drawn markers behind them
-	gutterDebounce    time.Duration // internal test seam; production uses gitGutterDebounce
-	launchPreview     bool          // --preview: open the reader from Init, once
-	preview           int           // previewOff/previewPane
-	previewPrior      int           // the ctrl+p mode alt+p folded away, restored when the reader closes
-	previewSrc        string        // the buffer text the pane was last rendered from
-	previewW          int           // the width it was last rendered at (a resize must re-wrap)
-	previewMap        []int         // that render's source line → pane row map (RenderMarkdownMapped)
-	previewAt         int           // the editor scroll offset the pane was last synced to; -1 re-syncs
-	lspWaiting        bool          // one blocking manager subscription is already in Bubble Tea
-	semanticPath      string        // the path the last semantic-token fetch was issued for
-	semanticSeq       int           // and the edit generation it named, so one edit asks once
-	semanticGen       int           // debounce generation: a later edit supersedes a pending tick
-	completion        completionUI  // parent-owned, input-transparent LSP completion popup
-	hover             hoverUI       // the passive alt+h / context-menu tooltip
-	signature         signatureUI   // the passive parameter hint, above the caret
-	lspRequestID      uint64        // the on-demand request whose answer this screen is waiting for
-	jumps             []jumpSite    // ctrl+o's back-stack of caret locations (navigate.go)
-	pendingJump       *jumpSite     // a jump waiting on its destination buffer's file read
-	pendingRange      *protocol.Range
-	sh                *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
-	w, h              int
+	gitDocs              docsGit
+	bottomVisible        bool
+	bottomFraction       float64
+	bottomPanel          components.Panel
+	diagnostics          *diagnosticsPanel
+	modular              *components.ModularScreen
+	docsPanel            *components.CompactListPanel
+	filePanel            *components.FilePanel // the folder view alt+t swaps into the docs slot
+	openPanel            *components.CompactListPanel
+	outlinePanel         *components.TreePanel
+	openTabs             *documentTabBar
+	openDocsTabs         bool
+	panelSlots           map[components.Panel]int
+	editorPanel          *components.ScreenPanel
+	previewPanel         *components.ScrollContainer // the live preview pane
+	editor               *editor.Screen              // the editor pane's live buffer (ScreenPanel exposes none)
+	fullPreview          *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
+	currentID            string                      // stable buffer identity; path for saved docs, opaque for unsaved
+	currentPath          string                      // filesystem path; empty while the current buffer is unsaved
+	currentName          string                      // visible filename or unsaved_N label
+	sidebar              bool
+	sidebarW             int                  // adjusted sidebar width; zero uses sidebarWidth
+	sidebarSplits        map[string][]float64 // adjusted vertical shares, keyed by visible pane composition
+	editorFlex           float64              // editor's share when the preview flex column is present; zero uses half
+	flat                 bool                 // the docs slot shows the flat scan (true) or the folder explorer
+	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
+	indentGuides         bool                 // config-selected leading-indent visualization for every buffer
+	gitGutter            bool                 // draw change markers against HEAD (see gitgutter.go)
+	diagnosticsGutter    bool                 // independently toggle the LSP marker column
+	gutter               gutter               // the baseline and last-drawn markers behind them
+	gutterDebounce       time.Duration        // internal test seam; production uses gitGutterDebounce
+	launchPreview        bool                 // --preview: open the reader from Init, once
+	preview              int                  // previewOff/previewPane
+	previewPrior         int                  // the ctrl+p mode alt+p folded away, restored when the reader closes
+	previewSrc           string               // the buffer text the pane was last rendered from
+	previewW             int                  // the width it was last rendered at (a resize must re-wrap)
+	previewMap           []int                // that render's source line → pane row map (RenderMarkdownMapped)
+	previewAt            int                  // the editor scroll offset the pane was last synced to; -1 re-syncs
+	lspWaiting           bool                 // one blocking manager subscription is already in Bubble Tea
+	semanticPath         string               // the path the last semantic-token fetch was issued for
+	semanticSeq          int                  // and the edit generation it named, so one edit asks once
+	semanticGen          int                  // debounce generation: a later edit supersedes a pending tick
+	completion           completionUI         // parent-owned, input-transparent LSP completion popup
+	hover                hoverUI              // the passive alt+h / context-menu tooltip
+	signature            signatureUI          // the passive parameter hint, above the caret
+	lspRequestID         uint64               // the on-demand request whose answer this screen is waiting for
+	outlineVisible       bool
+	outlineNodes         []components.TreeNode
+	outlineDataPath      string
+	outlineDataSeq       int
+	outlineRequestID     uint64
+	outlineRequestedPath string
+	outlineRequestedSeq  int
+	outlineScheduledPath string
+	outlineScheduledSeq  int
+	outlineGeneration    int
+	jumps                []jumpSite // ctrl+o's back-stack of caret locations (navigate.go)
+	pendingJump          *jumpSite  // a jump waiting on its destination buffer's file read
+	pendingRange         *protocol.Range
+	sh                   *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
+	w, h                 int
 }
 
 var _ core.Screen = (*homeScreen)(nil)
@@ -168,7 +180,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
 	// there and nothing writes the choice back.
 	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
-		openDocsTabs: c.Config.OpenDocsView == "tabs",
+		openDocsTabs:  c.Config.OpenDocsView == "tabs",
+		sidebarSplits: make(map[string][]float64), outlineDataSeq: -1, outlineScheduledSeq: -1,
 		indentGuides: c.Config.IndentGuides,
 		gitGutter:    gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil,
 		gutterDebounce: gitGutterDebounce}
@@ -186,6 +199,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
+	s.outlinePanel = s.newOutlinePanel()
 	s.openTabs = &documentTabBar{TabBar: components.NewTabBar()}
 	// Built alongside the flat list rather than on first use: both panels outlive the
 	// ModularScreen that holds them, and a layout rebuild does not Init what it builds
@@ -282,6 +296,10 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 	if tick, ok := msg.(semanticTick); ok {
 		s.handleSemanticTick(sh, tick)
 		return s, core.Action{}
+	}
+	if tick, ok := msg.(outlineTick); ok {
+		s.handleOutlineTick(sh, tick)
+		return s, s.finishHomeUpdate(sh, core.Action{})
 	}
 	if tick, ok := msg.(completionTick); ok {
 		act, _ := s.handleCompletionTick(sh, tick)
@@ -399,7 +417,7 @@ func (s *homeScreen) languageServerKey(sh *core.Shared, k string) (core.Action, 
 		return s.requestAt(sh, lspReqHover), true
 	case core.MatchKey(k, symbolsKey):
 		s.closeCompletion()
-		return s.requestAt(sh, lspReqSymbols), true
+		return s.toggleOutline(sh), true
 	case core.MatchKey(k, referencesKey):
 		s.closeCompletion()
 		return s.requestAt(sh, lspReqReferences), true
@@ -464,6 +482,7 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 	s.dismissSignatureIfLeft()
 	s.refreshPreview()
 	s.syncPreviewScroll()
+	s.syncOutlineCaret()
 	// Batched into the cmd lane rather than folded in with core.Seq: Seq builds an
 	// Action carrying only a control message, which would drop whatever cmd the panes
 	// just returned (the editor's clipboard writes, a list's own async work).
@@ -474,6 +493,7 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 			act.Cmd = tea.Batch(act.Cmd, c.lsp.WaitCmd())
 		}
 		act.Cmd = tea.Batch(act.Cmd, s.scheduleSemanticTokens())
+		act.Cmd = tea.Batch(act.Cmd, s.scheduleOutline())
 	}
 	return act
 }
@@ -690,9 +710,12 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		if event.semantic != nil {
 			s.applySemanticTokens(event.semantic)
 		}
+		if event.outline != nil {
+			s.applyOutlineResult(event.outline)
+		}
 		s.refreshDiagnosticSigns()
 		s.lspWaiting = true
-		wait := core.Async(Of(sh).lsp.WaitCmd())
+		wait := core.Async(tea.Batch(Of(sh).lsp.WaitCmd(), s.retryOutlineAfterLSP(sh)))
 		if event.status != "" {
 			return core.Seq(act, core.SetStatusAndLog(event.status), wait)
 		}
@@ -729,6 +752,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		core.StyleList(s.docsPanel.List())
 		core.StyleList(s.filePanel.List())
 		core.StyleList(s.openPanel.List())
+		core.StyleList(s.outlinePanel.List())
 		s.refreshDiagnosticSigns()
 		s.diagnostics.paint()
 	}
@@ -767,6 +791,9 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	// and the explorer's floor is fixed at construction.
 	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))
 	s.openPanel.SetItems(nil)
+	if s.outlineVisible {
+		s.prepareOutlineDocument()
+	}
 	s.preview, s.previewPrior = previewOff, previewOff
 	s.resetPreviewCache()
 	s.minimal = false
@@ -781,16 +808,53 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	return core.Seq(core.Async(tea.Batch(cmd, focus, gutterCmd)), core.ResetToRoot())
 }
 
-// editorLeft is the terminal column the editor pane starts at: the sidebar's adjusted
-// width when it is up, zero otherwise (buildModular puts the sidebar column first and
+// editorLeft is the terminal column the editor pane starts at: the side column's adjusted
+// width when it is up, zero otherwise (buildModular puts the side column first and
 // everything after it flexes). Caret-anchored panels use it as their
 // left bound — a tooltip is about the caret, so it belongs over the text rather than
 // spilling across the file list.
 func (s *homeScreen) editorLeft() int {
-	if s.sidebar {
+	if s.sideColumnVisible() {
 		return s.sidebarPaneWidth()
 	}
 	return 0
+}
+
+func (s *homeScreen) sideColumnPanels() []components.Panel {
+	if s.minimal {
+		if s.outlineVisible {
+			return []components.Panel{s.outlinePanel}
+		}
+		return nil
+	}
+	if !s.sidebar {
+		return nil
+	}
+	panels := []components.Panel{s.docsPane()}
+	if !s.tabsVisible() {
+		panels = append(panels, s.openPanel)
+	}
+	if s.outlineVisible {
+		panels = append(panels, s.outlinePanel)
+	}
+	return panels
+}
+
+func (s *homeScreen) sideColumnVisible() bool { return len(s.sideColumnPanels()) > 0 }
+
+func (s *homeScreen) sidebarSplitKey() string {
+	var names []string
+	for _, panel := range s.sideColumnPanels() {
+		switch panel {
+		case s.docsPanel, s.filePanel:
+			names = append(names, "docs")
+		case s.openPanel:
+			names = append(names, "open")
+		case s.outlinePanel:
+			names = append(names, "outline")
+		}
+	}
+	return strings.Join(names, "/")
 }
 
 func (s *homeScreen) sidebarPaneWidth() int {
@@ -905,10 +969,10 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	}
 	s.panelSlots = make(map[components.Panel]int)
 	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
-	if s.sidebar {
-		children := []components.LayoutNode{leaf(s.docsPane())}
-		if !s.tabsVisible() {
-			children = append(children, leaf(s.openPanel))
+	if panels := s.sideColumnPanels(); len(panels) > 0 {
+		children := make([]components.LayoutNode, 0, len(panels))
+		for _, panel := range panels {
+			children = append(children, leaf(panel))
 		}
 		main.Children = append(main.Children, components.LayoutNode{
 			ID: "sidebar", Axis: components.LayoutVertical, Size: s.sidebarPaneWidth(),
@@ -953,10 +1017,10 @@ func (s *homeScreen) resizeState() components.ResizeState {
 	// preferences, rather than saving a snapshot of a different child list over them.
 	state := components.ResizeState{Splits: make(map[string]components.SplitState)}
 	sizes, weights := []int{}, []float64{}
-	if s.sidebar {
+	if panels := s.sideColumnPanels(); len(panels) > 0 {
 		sizes, weights = append(sizes, s.sidebarPaneWidth()), append(weights, 1)
-		if !s.tabsVisible() && len(s.sidebarRows) == 2 {
-			state.Splits["sidebar"] = components.SplitState{Sizes: []int{0, 0}, Weights: append([]float64(nil), s.sidebarRows...)}
+		if saved := s.sidebarSplits[s.sidebarSplitKey()]; len(saved) == len(panels) {
+			state.Splits["sidebar"] = components.SplitState{Sizes: make([]int, len(panels)), Weights: append([]float64(nil), saved...)}
 		}
 	}
 	share := s.editorFlex
@@ -991,13 +1055,22 @@ func (s *homeScreen) saveResize(state components.ResizeState) {
 		s.bottomFraction = split.Weights[1] / (split.Weights[0] + split.Weights[1])
 	}
 	editorCol := 0
-	if s.sidebar {
+	if s.sideColumnVisible() {
 		if split, ok := state.Splits["main"]; ok && len(split.Sizes) > 0 && split.Sizes[0] > 0 {
 			s.sidebarW = split.Sizes[0]
 		}
-		if split, ok := state.Splits["sidebar"]; !s.tabsVisible() && ok && len(split.Weights) == 2 {
-			sum := split.Weights[0] + split.Weights[1]
-			s.sidebarRows = append(s.sidebarRows[:0], split.Weights[0]/sum, split.Weights[1]/sum)
+		if split, ok := state.Splits["sidebar"]; ok && len(split.Weights) == len(s.sideColumnPanels()) {
+			sum := 0.0
+			for _, weight := range split.Weights {
+				sum += weight
+			}
+			if sum > 0 {
+				weights := make([]float64, len(split.Weights))
+				for i, weight := range split.Weights {
+					weights[i] = weight / sum
+				}
+				s.sidebarSplits[s.sidebarSplitKey()] = weights
+			}
 		}
 		editorCol = 1
 	}
