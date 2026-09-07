@@ -262,9 +262,9 @@ func TestDiagnosticsRevisionTracksPublishedChanges(t *testing.T) {
 func TestBottomActionsMenuReturnsToHome(t *testing.T) {
 	model, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
-	// Theme, Vaults, Diagnostics: exercise the real picker and router Pop,
+	// Theme, Vaults, Open view, Diagnostics: exercise the real picker and router Pop,
 	// including the capture gate when Alt+B is subsequently pressed in editor.
-	for _, k := range []string{"a", "down", "down", "enter"} {
+	for _, k := range []string{"a", "down", "down", "down", "enter"} {
 		var cmd tea.Cmd
 		model, cmd = model.Update(keyMsg(k))
 		model = pumpModel(model, cmd)

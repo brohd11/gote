@@ -18,6 +18,7 @@ import (
 // for a doc, left empty for the scratch buffer).
 func (s *homeScreen) editorOpts() editor.Opts {
 	return editor.Opts{
+		HideTitle:       s.tabsVisible(),
 		OnExit:          s.editorExit,
 		OnRelease:       s.editorRelease,
 		OnSaved:         s.editorSaved,

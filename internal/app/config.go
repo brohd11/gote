@@ -24,6 +24,8 @@ type Config struct {
 	// a preset for alt+t, not a mode: the scan still runs and the flat list is still
 	// seeded behind it, so the toggle shows it with nothing left to load.
 	FolderView bool `yaml:"folder_view"`
+	// OpenDocsView selects the startup presentation; Actions changes only the session.
+	OpenDocsView string `yaml:"open_docs_view"`
 	// IndentGuides makes the editor visualize complete leading indent levels. It is
 	// off by default so existing configs retain the uncluttered rendering.
 	IndentGuides bool `yaml:"indent_guides"`
@@ -158,6 +160,7 @@ type VaultConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		ScanDepth:       5,
+		OpenDocsView:    "list",
 		AutoLSP:         true,
 		GitGutter:       gutterAuto,
 		LanguageServers: defaultLanguageServers(),
@@ -296,6 +299,9 @@ func LoadConfig() (Config, error) {
 		return DefaultConfig(), err
 	}
 	normalizeExtensions(&cfg)
+	if cfg.OpenDocsView != "tabs" {
+		cfg.OpenDocsView = "list"
+	}
 	if cfg.ScanDepth <= 0 {
 		cfg.ScanDepth = 5
 	}

@@ -85,8 +85,12 @@ func (s *homeScreen) helpText() string {
 		wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
+		general = append(general, previousDocumentKey, nextDocumentKey)
 	}
 	writeSection("general", general)
+	if !s.minimal {
+		b.WriteString("[ / ]: previous/next document outside text entry; Actions switches Open between list and tabs.\n\n")
+	}
 	// These act on the selected row, so they are the docs list's keys rather than the
 	// screen's — and, off the bar, this is the only place they are written down.
 	// The language-server section. These fire from the editor (they all carry a

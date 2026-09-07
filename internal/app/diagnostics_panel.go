@@ -237,22 +237,13 @@ func (s *homeScreen) toggleBottom(sh *core.Shared) core.Action {
 	s.closeCompletion()
 	s.closeHover()
 	s.saveResize(s.modular.ResizeState())
-	focus := s.editorSlot()
-	// Preserve pane identity before rebuilding; the bottom is appended after all
-	// upper panes, so their flat indexes are unchanged by this toggle.
-	if s.sidebar {
-		if f, ok := s.docsPane().(components.Focusable); ok && f.Focused() {
-			focus = 0
-		}
-		if s.openPanel.Focused() {
-			focus = 1
-		}
-	}
-	if s.previewTarget() != nil && s.previewPanel.Focused() {
-		focus = s.editorSlot() + 1
-	}
+	focus := s.focusedPane()
 	s.bottomVisible = !s.bottomVisible
-	cmd := s.rebuildModular(sh, focus)
+	s.rebuildModular(sh, noFocus)
+	if s.panelSlot(focus) == noFocus {
+		focus = s.editorPanel
+	}
+	cmd := s.modular.FocusSlot(s.panelSlot(focus))
 	s.previewAt = -1
 	s.refreshPreview()
 	s.syncPreviewScroll()

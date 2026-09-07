@@ -92,7 +92,7 @@ func (s *homeScreen) previewScreen() *components.DocScreen {
 	return components.NewDocScreen(components.DocOpts{
 		// Document first, mode second — the editor's own title bar is the filename, and
 		// the reader is a view of the same document, so the two bars line up.
-		Title:  s.previewName() + " · preview",
+		Title:  s.readerTitle(),
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
 		// Bound here with the buffer accessor, and for the same reason: the reader is
 		// built over ONE document, so the directory its relative links resolve against is
@@ -150,6 +150,7 @@ func (s *homeScreen) closeFullPreview() core.Action {
 // one editor's Text at build time, and the old reader would otherwise keep rendering the
 // document that has just left.
 func (s *homeScreen) paneChild() tea.Cmd {
+	s.editor.SetTitleVisible(!s.tabsVisible())
 	if s.fullPreview == nil {
 		return s.editorPanel.SetChild(s.editor)
 	}

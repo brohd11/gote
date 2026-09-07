@@ -13,6 +13,7 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 	return components.NewActionsMenu(selfUpdateHooks(Of(sh).Version),
 		"reload the document list", refreshAction, nil,
 		vaultsItem(),
+		s.openDocsViewItem(),
 		components.Item{
 			Name: "⚠ Diagnostics", Desc: "toggle bottom panel for open-file diagnostics (alt+b)",
 			Pick: func(sh *core.Shared) core.Action { return core.Seq(core.Pop(), s.toggleBottom(sh)) },

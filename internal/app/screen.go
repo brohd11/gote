@@ -101,6 +101,9 @@ type homeScreen struct {
 	docsPanel         *components.CompactListPanel
 	filePanel         *components.FilePanel // the folder view alt+t swaps into the docs slot
 	openPanel         *components.CompactListPanel
+	openTabs          *documentTabBar
+	openDocsTabs      bool
+	panelSlots        map[components.Panel]int
 	editorPanel       *components.ScreenPanel
 	previewPanel      *components.ScrollContainer // the live preview pane
 	editor            *editor.Screen              // the editor pane's live buffer (ScreenPanel exposes none)
@@ -162,6 +165,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
 	// there and nothing writes the choice back.
 	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
+		openDocsTabs: c.Config.OpenDocsView == "tabs",
 		indentGuides: c.Config.IndentGuides,
 		gitGutter:    gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil,
 		gutterDebounce: gitGutterDebounce}
@@ -179,6 +183,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		OnSelect: s.pickDoc,
 		Border:   true,
 	})
+	s.openTabs = &documentTabBar{TabBar: components.NewTabBar()}
 	// Built alongside the flat list rather than on first use: both panels outlive the
 	// ModularScreen that holds them, and a layout rebuild does not Init what it builds
 	// (see rebuildModular), so a panel that deferred its first read would swap in empty.
@@ -266,6 +271,9 @@ func fileText(path string) string {
 // screen. The returned screen is always the wrapper — the modular swap happens in
 // place, never as a screen replacement.
 func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Action) {
+	if act, handled := s.documentTabInput(sh, msg); handled {
+		return s, s.finishHomeUpdate(sh, act)
+	}
 	if tick, ok := msg.(semanticTick); ok {
 		s.handleSemanticTick(sh, tick)
 		return s, core.Action{}
@@ -519,6 +527,7 @@ func (s *homeScreen) handleSemanticTick(sh *core.Shared, tick semanticTick) {
 // status row is masked away, so this screen is the one that has to find the message a
 // home. In minimal mode there is no help bar, so the body's last row takes it.
 func (s *homeScreen) View(sh *core.Shared) string {
+	s.refreshOpenTabs(sh)
 	body := s.modular.View(sh)
 	if s.minimal {
 		body = statusOver(sh, body, s.h)
@@ -776,10 +785,7 @@ func (s *homeScreen) sidebarPaneWidth() int {
 
 // editorSlot is the editor pane's flat slot index in the current layout.
 func (s *homeScreen) editorSlot() int {
-	if s.sidebar {
-		return 2
-	}
-	return 0
+	return s.panelSlot(s.editorPanel)
 }
 
 // setSidebar rebuilds the internal modular screen with or without the sidebar
@@ -862,6 +868,7 @@ func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) tea.Cmd {
 // and vertical splits; tool visibility and the initial workspace split live here.
 // Depth-first leaf order keeps the existing upper-pane indexes stable.
 func (s *homeScreen) buildModular() *components.ModularScreen {
+	s.editor.SetTitleVisible(!s.tabsVisible())
 	opts := components.ModularOpts{
 		// One entry, and it is the pointer at all the others: every app key gote has
 		// is documented in the ? overlay (helpText), so the bar names the way in
@@ -876,18 +883,36 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		opts.Help = append([]key.Binding{fullPreviewKey}, opts.Help...)
 	}
 	leaf := func(panel components.Panel) components.LayoutNode {
+		s.panelSlots[panel] = len(s.panelSlots)
 		return components.LayoutNode{Slot: &components.Slot{Panel: panel}}
 	}
+	s.panelSlots = make(map[components.Panel]int)
 	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
 	if s.sidebar {
+		children := []components.LayoutNode{leaf(s.docsPane())}
+		if !s.tabsVisible() {
+			children = append(children, leaf(s.openPanel))
+		}
 		main.Children = append(main.Children, components.LayoutNode{
 			ID: "sidebar", Axis: components.LayoutVertical, Size: s.sidebarPaneWidth(),
-			Children: []components.LayoutNode{leaf(s.docsPane()), leaf(s.openPanel)},
+			Children: children,
 		})
 	}
-	main.Children = append(main.Children, leaf(s.editorPanel))
-	if panel := s.previewTarget(); panel != nil {
-		main.Children = append(main.Children, leaf(panel))
+	if s.tabsVisible() {
+		bar := leaf(s.openTabs)
+		bar.Size, bar.FixedSize = 1, true
+		editors := components.LayoutNode{ID: "editors", Axis: components.LayoutHorizontal,
+			Children: []components.LayoutNode{leaf(s.editorPanel)}}
+		if panel := s.previewTarget(); panel != nil {
+			editors.Children = append(editors.Children, leaf(panel))
+		}
+		main.Children = append(main.Children, components.LayoutNode{ID: "documents", Axis: components.LayoutVertical,
+			Children: []components.LayoutNode{bar, editors}})
+	} else {
+		main.Children = append(main.Children, leaf(s.editorPanel))
+		if panel := s.previewTarget(); panel != nil {
+			main.Children = append(main.Children, leaf(panel))
+		}
 	}
 	root := main
 	if s.bottomVisible {
@@ -913,7 +938,7 @@ func (s *homeScreen) resizeState() components.ResizeState {
 	sizes, weights := []int{}, []float64{}
 	if s.sidebar {
 		sizes, weights = append(sizes, s.sidebarPaneWidth()), append(weights, 1)
-		if len(s.sidebarRows) == 2 {
+		if !s.tabsVisible() && len(s.sidebarRows) == 2 {
 			state.Splits["sidebar"] = components.SplitState{Sizes: []int{0, 0}, Weights: append([]float64(nil), s.sidebarRows...)}
 		}
 	}
@@ -921,9 +946,19 @@ func (s *homeScreen) resizeState() components.ResizeState {
 	if share <= 0 || share >= 1 {
 		share = 0.5
 	}
-	sizes, weights = append(sizes, 0), append(weights, share)
-	if s.previewTarget() != nil {
-		sizes, weights = append(sizes, 0), append(weights, 1-share)
+	if s.tabsVisible() {
+		sizes, weights = append(sizes, 0), append(weights, 1)
+		editors := components.SplitState{Sizes: []int{0}, Weights: []float64{share}}
+		if s.previewTarget() != nil {
+			editors.Sizes = append(editors.Sizes, 0)
+			editors.Weights = append(editors.Weights, 1-share)
+		}
+		state.Splits["editors"] = editors
+	} else {
+		sizes, weights = append(sizes, 0), append(weights, share)
+		if s.previewTarget() != nil {
+			sizes, weights = append(sizes, 0), append(weights, 1-share)
+		}
 	}
 	state.Splits["main"] = components.SplitState{Sizes: sizes, Weights: weights}
 	if s.bottomVisible && s.bottomFraction > 0 && s.bottomFraction < 1 {
@@ -943,13 +978,17 @@ func (s *homeScreen) saveResize(state components.ResizeState) {
 		if split, ok := state.Splits["main"]; ok && len(split.Sizes) > 0 && split.Sizes[0] > 0 {
 			s.sidebarW = split.Sizes[0]
 		}
-		if split, ok := state.Splits["sidebar"]; ok && len(split.Weights) == 2 {
+		if split, ok := state.Splits["sidebar"]; !s.tabsVisible() && ok && len(split.Weights) == 2 {
 			sum := split.Weights[0] + split.Weights[1]
 			s.sidebarRows = append(s.sidebarRows[:0], split.Weights[0]/sum, split.Weights[1]/sum)
 		}
 		editorCol = 1
 	}
-	if split, ok := state.Splits["main"]; ok && s.previewTarget() != nil && len(split.Weights) > editorCol+1 {
+	group := "main"
+	if s.tabsVisible() {
+		group, editorCol = "editors", 0
+	}
+	if split, ok := state.Splits[group]; ok && s.previewTarget() != nil && len(split.Weights) > editorCol+1 {
 		s.editorFlex = split.Weights[editorCol] / (split.Weights[editorCol] + split.Weights[editorCol+1])
 	}
 }

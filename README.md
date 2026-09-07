@@ -30,6 +30,19 @@ the basic palette explicitly).
 ## gote works in 2 modes:
 
 ### Multi Document
+
+Open documents can appear in the sidebar list or in a tab bar above the editor.
+Use **Actions → Show open documents as tabs/list** to switch for the current session.
+The list remains the default; set `open_docs_view: tabs` in `~/.gote/config.yml`
+to start with tabs (`list` restores the default).
+
+**Alt+9 / Alt+0** switch to the previous/next open document while editing, in either
+view. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
+show `(*)` for unsaved changes and `[P]` on the current document in full preview.
+Click a tab to open it; overflow arrows scroll the bar without changing documents.
+Tab mode omits the duplicate filename header in the editor and full preview.
+The bar remains visible with the sidebar hidden. Single-file mode stays minimal.
+
 Default mode, shows a sidebar with docs in a location folder, as well as a list of open docs.
 `gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
