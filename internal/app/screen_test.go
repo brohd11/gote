@@ -1308,8 +1308,10 @@ func TestLaunchPreview(t *testing.T) {
 		t.Helper()
 		sh := core.NewShared(New("test", testConfig(), opts))
 		sh.Chrome = &core.Chrome{Breadcrumb: core.NewBreadcrumbPane()}
+		home := NewHomeScreen(sh).(*homeScreen)
+		home.gitDocs.timer = noDocsGitTimer
 		r := core.NewRouter(sh, []core.TabEntry{
-			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+			{Title: "Editor", New: func(*core.Shared) core.Screen { return home }},
 		})
 		// Threaded, not pumped: the launch push rides the same batch as the editor's file
 		// read, and a push changes the STACK — which a discarded model copy would drop.
@@ -1475,8 +1477,10 @@ func TestMinimalFrame(t *testing.T) {
 	frame := func(opts Options) string {
 		sh := core.NewShared(New("test", DefaultConfig(), opts))
 		sh.Chrome = &core.Chrome{Breadcrumb: core.NewBreadcrumbPane()}
+		home := NewHomeScreen(sh).(*homeScreen)
+		home.gitDocs.timer = noDocsGitTimer
 		r := core.NewRouter(sh, []core.TabEntry{
-			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+			{Title: "Editor", New: func(*core.Shared) core.Screen { return home }},
 		})
 		// The file read is async — the editor's Init returns the cmd that does it — so
 		// the frame is only worth looking at once the resulting message has been fed
@@ -1546,8 +1550,10 @@ func TestStatusCostsNoRows(t *testing.T) {
 		t.Helper()
 		sh := core.NewShared(New("test", DefaultConfig(), opts))
 		sh.Chrome = &core.Chrome{Breadcrumb: core.NewBreadcrumbPane(), Status: components.NewStatusLine()}
+		home := NewHomeScreen(sh).(*homeScreen)
+		home.gitDocs.timer = noDocsGitTimer
 		r := core.NewRouter(sh, []core.TabEntry{
-			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
+			{Title: "Editor", New: func(*core.Shared) core.Screen { return home }},
 		})
 		pump(r, r.Init()) // the editor's file read is async; without this the buffer is empty
 		if status != "" {
