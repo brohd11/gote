@@ -15,8 +15,20 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 		vaultsItem(),
 		s.openDocsViewItem(),
 		components.Item{
-			Name: "⚠ Diagnostics", Desc: "toggle bottom panel for open-file diagnostics (alt+b)",
-			Pick: func(sh *core.Shared) core.Action { return core.Seq(core.Pop(), s.toggleBottom(sh)) },
+			Name: "⚠ Diagnostics", Desc: "show open-file diagnostics in the bottom panel",
+			Pick: func(sh *core.Shared) core.Action {
+				s.bottom.selectTab(bottomDiagnostics)
+				if s.bottomVisible {
+					return core.Seq(core.Pop(), core.Async(s.modular.FocusSlot(s.panelSlot(s.bottom))))
+				}
+				return core.Seq(core.Pop(), s.toggleBottom(sh))
+			},
+		},
+		components.Item{
+			Name: "⌕ Find in Files", Desc: "search text beneath a folder (alt+shift+f)",
+			Pick: func(sh *core.Shared) core.Action {
+				return core.Seq(core.Pop(), core.Push(s.findFilesForm(sh)))
+			},
 		},
 		components.Item{
 			Name: "Toggle diagnostics gutter", Desc: "show or hide LSP severity markers",

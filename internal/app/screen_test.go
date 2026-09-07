@@ -721,9 +721,9 @@ func TestHomeEditorSearch(t *testing.T) {
 	}
 	s.openDoc(sh, a)
 	drive(keyMsg("alpha body"))
-	drive(keyMsg("ctrl+f"))
+	drive(keyMsg("alt+f"))
 	if overlay := stripANSI(view(model)); !strings.Contains(overlay, "╭") || !strings.Contains(overlay, "find:") {
-		t.Fatalf("ctrl+f should show the shared rounded line-edit overlay:\n%s", overlay)
+		t.Fatalf("alt+f should show the shared rounded line-edit overlay:\n%s", overlay)
 	}
 	drive(keyMsg("alpha"))
 	drive(keyMsg("enter"))
@@ -736,7 +736,7 @@ func TestHomeEditorSearch(t *testing.T) {
 		t.Fatalf("a new buffer inherited the previous buffer's search:\n%s", view)
 	}
 	drive(keyMsg("beta body"))
-	drive(keyMsg("ctrl+f"))
+	drive(keyMsg("alt+f"))
 	drive(keyMsg("beta"))
 	drive(keyMsg("enter"))
 
@@ -745,7 +745,7 @@ func TestHomeEditorSearch(t *testing.T) {
 	if !strings.Contains(view, "find: alpha") || strings.Contains(view, "find: beta") {
 		t.Fatalf("switching back should restore a's search only:\n%s", view)
 	}
-	if help := s.helpText(); !strings.Contains(help, "ctrl+f") || !strings.Contains(help, "search") {
+	if help := s.helpText(); !strings.Contains(help, "alt+f") || !strings.Contains(help, "search") {
 		t.Fatalf("gote shortcut help should advertise editor search:\n%s", help)
 	}
 }
@@ -800,7 +800,7 @@ func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single.md")
 	model, _, _ := newHomeRouter(t, Options{Mode: ModeFile, File: path})
 	drive := func(msg tea.Msg) { model, _ = model.Update(msg) }
-	drive(keyMsg("ctrl+f"))
+	drive(keyMsg("alt+f"))
 	drive(keyMsg("needle"))
 	drive(keyMsg("enter"))
 	view := stripANSI(view(model))

@@ -224,13 +224,7 @@ func (p *diagnosticsPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Actio
 }
 
 func (p *diagnosticsPanel) PanelHelp() []key.Binding {
-	return []key.Binding{
-		core.Hint("diagnostic", core.Keys.Up, core.Keys.Down),
-		core.Hint("jump", core.Keys.Select),
-		key.NewBinding(key.WithKeys("home", "end"), key.WithHelp("home/end", "first/last diagnostic")),
-		key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdown", "scroll message")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "focus editor")),
-	}
+	return []key.Binding{core.Hint("jump", core.Keys.Select)}
 }
 
 func (s *homeScreen) toggleBottom(sh *core.Shared) core.Action {

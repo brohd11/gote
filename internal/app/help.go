@@ -47,8 +47,8 @@ func clickHelp(sh *core.Shared) string {
 }
 
 // helpText renders the overlay's body. This is the COMPLETE reference, not the overflow
-// from a bar that lists the common keys: the bar carries only "? more", so anything not
-// written here is written nowhere. The editor section comes from the live editor's own
+// from the deliberately four-entry contextual bar, so anything omitted there must live
+// here. The editor section comes from the live editor's own
 // HelpBindings, so its chords are stated once (in bubblestack).
 //
 // The key column is 14 wide because "alt+backspace" is 13 — every label here spells its
@@ -82,7 +82,7 @@ func (s *homeScreen) helpText() string {
 	// here alongside. The description is gote's own: quitting dirty prompts first.
 	quitKey := core.Hint("quit (confirms unsaved changes)",
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
-	general := []key.Binding{quitKey, sidebarKey, bottomKey, flatKey, actionsKey, previewKey, fullPreviewKey,
+	general := []key.Binding{quitKey, sidebarKey, bottomKey, findFilesKey, flatKey, actionsKey, previewKey, fullPreviewKey,
 		wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
@@ -122,7 +122,20 @@ func (s *homeScreen) helpText() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(gitStateColor(entry.state)).Render(entry.name))
 	}
 	b.WriteString(". Clean files are plain; folders reflect changes beneath them.\n\n")
-	writeSection("diagnostics panel", s.diagnostics.PanelHelp())
+	writeSection("bottom panel", []key.Binding{
+		key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("left/right", "switch Diag/Search tab")),
+		core.Hint("item", core.Keys.Up, core.Keys.Down),
+		core.Hint("jump", core.Keys.Select),
+		key.NewBinding(key.WithKeys("home", "end"), key.WithHelp("home/end", "first/last item")),
+		key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdown", "scroll message")),
+		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "focus editor")),
+	})
+	writeSection("find in files", []key.Binding{
+		findFilesKey,
+		key.NewBinding(key.WithKeys("tab", "shift+tab"), key.WithHelp("tab/shift+tab", "move form field")),
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "search / jump to result")),
+		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel form")),
+	})
 	writeSection("editor", s.editor.HelpBindings())
 	b.WriteString(clickHelp(s.sh) + "\n")
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")

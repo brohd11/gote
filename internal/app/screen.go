@@ -99,8 +99,13 @@ type homeScreen struct {
 	gitDocs              docsGit
 	bottomVisible        bool
 	bottomFraction       float64
-	bottomPanel          components.Panel
+	bottom               *bottomDock
 	diagnostics          *diagnosticsPanel
+	search               *searchPanel
+	searchGeneration     uint64
+	searchCancel         func()
+	searchQuery          string
+	searchPath           string
 	modular              *components.ModularScreen
 	docsPanel            *components.CompactListPanel
 	filePanel            *components.FilePanel // the folder view alt+t swaps into the docs slot
@@ -232,7 +237,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		return s.previewLinks().Do(sh, l)
 	}
 	s.diagnostics = newDiagnosticsPanel(s.activateDiagnostic)
-	s.bottomPanel = s.diagnostics
+	s.search = newSearchPanel(s.activateSearchResult)
+	s.bottom = newBottomDock(s.diagnostics, s.search)
 	s.modular = s.buildModular()
 	return s
 }
@@ -324,7 +330,11 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 		if core.MatchKey(k, bottomKey) {
 			return s, s.toggleBottom(sh)
 		}
-		if s.bottomVisible && s.diagnostics.Focused() && !s.modular.Resizing() && core.MatchKey(k, core.Keys.Back) {
+		if core.MatchKey(k, findFilesKey) {
+			s.closeCompletion()
+			return s, core.Push(s.findFilesForm(sh))
+		}
+		if s.bottomVisible && s.bottom.Focused() && !s.modular.Resizing() && core.MatchKey(k, core.Keys.Back) {
 			return s, core.Async(s.modular.FocusSlot(s.editorSlot()))
 		}
 		if core.MatchKey(k, newBufferKey) {
@@ -699,6 +709,13 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		defer func() { result.Cmd = tea.Batch(result.Cmd, s.requestDocsGit()) }()
 	}
 	defer s.refreshDiagnostics()
+	if request, ok := payload.(findFilesRequest); ok {
+		return s.beginFindFiles(sh, request)
+	}
+	if search, ok := payload.(findFilesResult); ok {
+		s.finishFindFiles(search)
+		return core.Action{}
+	}
 	if event, ok := payload.(lspEvent); ok {
 		if event.completion != nil {
 			s.applyCompletionResult(event.completion)
@@ -755,6 +772,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		core.StyleList(s.outlinePanel.List())
 		s.refreshDiagnosticSigns()
 		s.diagnostics.paint()
+		s.search.paint()
 	}
 	return s.modular.Receive(sh, payload)
 }
@@ -955,7 +973,8 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		// is documented in the ? overlay (helpText), so the bar names the way in
 		// rather than reprinting a handful of them beside the framework's own
 		// pane/back/select hints. The keys themselves are untouched.
-		Help: []key.Binding{helpKey},
+		Help:      []key.Binding{helpKey},
+		HelpLimit: 4,
 	}
 	if s.fullPreview != nil {
 		// The one exception, and it earns the cell: a reader sitting where the editor was
@@ -1001,7 +1020,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		root = components.LayoutNode{ID: "workspace", Axis: components.LayoutVertical,
 			Children: []components.LayoutNode{main, {
 				ID: "tools", Axis: components.LayoutHorizontal,
-				Children: []components.LayoutNode{leaf(s.bottomPanel)},
+				Children: []components.LayoutNode{leaf(s.bottom)},
 			}},
 		}
 	}
