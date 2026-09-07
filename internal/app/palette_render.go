@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -24,13 +25,16 @@ import (
 type RenderOptions struct {
 	Path  string
 	Basic bool
+	// Profile is the output capability detected by the CLI. Unknown preserves
+	// configured colors for callers without a terminal.
+	Profile colorprofile.Profile
 }
 
 // RenderPalette writes the report to w. cfg supplies the palette in effect, so what the
 // report shows is what the editor would draw — the caller is expected to hand w through a
 // colorprofile.Writer for the same reason, since outside the TUI nothing else downsamples.
 func RenderPalette(w io.Writer, cfg Config, opts RenderOptions) error {
-	sc := cfg.SyntaxColors
+	sc := syntaxColorsForProfile(cfg.SyntaxColors, opts.Profile)
 	if opts.Basic {
 		sc = SyntaxColors{BasicColors: true}
 	}
@@ -46,7 +50,12 @@ func RenderPalette(w io.Writer, cfg Config, opts RenderOptions) error {
 		normalizeSyntaxColors(&resolved)
 	}
 
-	if err := renderSlots(w, resolved, opts.Basic); err != nil {
+	if opts.Profile != colorprofile.Unknown {
+		if _, err := fmt.Fprintf(w, "Terminal color profile: %s\n\n", opts.Profile); err != nil {
+			return err
+		}
+	}
+	if err := renderSlots(w, resolved, sc.BasicColors); err != nil {
 		return err
 	}
 	if err := renderSample(w, opts.Path); err != nil {
@@ -166,7 +175,11 @@ func writeHighlighted(w io.Writer, name, text string) error {
 		if spans := h.HighlightLine(row); spans != nil {
 			var b strings.Builder
 			for _, sp := range spans {
-				b.WriteString(sp.Style.Render(sp.Text))
+				if sp.Style == nil {
+					b.WriteString(sp.Text)
+				} else {
+					b.WriteString(sp.Style.Render(sp.Text))
+				}
 			}
 			if plain := spansPlainText(spans); plain == line {
 				out = b.String()

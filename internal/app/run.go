@@ -1,9 +1,12 @@
 package app
 
 import (
+	"os"
+
 	"github.com/brohd11/bubblestack"
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // Run builds the context from the already-loaded config (seeding the doc list for the
@@ -17,7 +20,10 @@ import (
 // bare argument against the configured vault names is part of the argument grammar, and
 // reading config.yml twice could have it answer the two questions differently.
 func Run(version string, cfg Config, opts Options) error {
-	c := New(version, cfg, opts)
+	// Use the same capability detector and output as Bubble Tea, before any
+	// highlighter caches styles. Detection includes terminfo and tmux capabilities.
+	profile := colorprofile.Detect(os.Stdout, os.Environ())
+	c := newWithColorProfile(version, cfg, opts, profile)
 	defer c.close()
 	return bubblestack.Run(bubblestack.Config{
 		App:    c,

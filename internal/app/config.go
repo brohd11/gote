@@ -77,6 +77,8 @@ const (
 // its default rather than failing the load (normalizeSyntaxColors), which is also why
 // every key is written out: an unwritten key is one nobody knows they can set.
 //
+// A detected 16-color terminal selects the basic palette at runtime, without changing
+// this configuration. BasicColors also forces that palette on richer terminals.
 // BasicColors overrides all of them with the eight-color ANSI palette gote used before
 // this key existed. Those colors are the terminal's own, so they follow whatever scheme
 // the user runs — the one thing a 256-color palette cannot do. The other keys are left

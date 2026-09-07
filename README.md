@@ -20,6 +20,13 @@ entirely, `alt+/` does the same thing.
 **Note:** on MacOS, option is treated as alt, but the key does not reach the terminal input by default.
 `Terminal -> Settings -> Profiles -> Keyboard -> Use Option as Meta Key`
 
+Gote checks terminal color capability at startup. A 16-color terminal uses the basic
+syntax palette directly; 256-color and true-color terminals use your configured
+`syntax_colors`. This does not rewrite your configuration. Set
+`syntax_colors.basic_colors: true` to force the basic syntax palette on any terminal.
+Run `gote colors` to see the detected profile and effective palette (`--basic` previews
+the basic palette explicitly).
+
 ## gote works in 2 modes:
 
 ### Multi Document

@@ -8,6 +8,7 @@ import (
 
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // Mode is the active document source: the flat ~/.gote/docs store, an ad-hoc recursive
@@ -95,9 +96,14 @@ type Options struct {
 // New builds the context from the loaded config and the CLI's launch options, and
 // performs the initial seed so the first screen has rows to show.
 func New(version string, cfg Config, opts Options) *Ctx {
+	return newWithColorProfile(version, cfg, opts, colorprofile.Unknown)
+}
+
+// Runtime capability affects styles, never c.Config or a later config save.
+func newWithColorProfile(version string, cfg Config, opts Options, profile colorprofile.Profile) *Ctx {
 	// Before anything can parse a document: a Highlighter bakes these styles into its
 	// spans at Parse time and nothing re-parses to pick up a later palette.
-	applySyntaxPalette(cfg.SyntaxColors)
+	applySyntaxPalette(syntaxColorsForProfile(cfg.SyntaxColors, profile))
 	c := &Ctx{
 		Version: version,
 		Mode:    opts.Mode,

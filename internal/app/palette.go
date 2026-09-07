@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // The syntax palette both highlighters draw from. It lives here rather than in either of
@@ -23,28 +24,9 @@ import (
 // defaultSyntaxColors is the palette a fresh config.yml is written with, and the
 // fallback for any slot whose configured value does not parse.
 //
-// Three constraints pick these indices, and the third is the one worth stating because
-// leaving it out is what made the first attempt at this palette unreadable:
-//
-//  1. Contrast at least 3:1 against both a white and a near-black ground. Unlike 0-15
-//     these are absolute colors, so no terminal scheme adjusts them for the user.
-//  2. Each degrades into the hue family of the basic color it replaces — that color or
-//     its bright variant, per ansi256To16 (x/ansi), which is a fixed lookup table rather
-//     than a guess. So a 16-color terminal still sees a green string and a red error, and
-//     BasicColors is a matter of taste rather than compatibility. Comment is pinned to 8
-//     exactly: its bright variant is 7, which is body-text white.
-//  3. The slots are maximally separated FROM EACH OTHER, in CIELAB. Constraints 1 and 2
-//     applied per slot leave only a handful of candidates each, and the obvious pick from
-//     each is a mid-tone that neighbors every other mid-tone: type and func first landed
-//     32 dE apart when the basic colors they replaced (6 and 4) are 101 apart, which read
-//     as one color. These sit 103 apart, and the closest pair in the whole palette is 32.
-//
-// Operator and error are exempt from the third rule: they share a target color and are
-// told apart by weight, as they were when both were plain color 1.
-//
-// Number is an olive rather than an amber because constraint 1 rules out every bright
-// yellow — #ffd700 is 1.5:1 on white. A user who is never on a light background can say
-// so with `number: "179"`.
+// These colors are used on 256-color and true-color terminals. A terminal
+// reporting only 16 colors uses basicSyntaxColors directly; the rich palette
+// does not need to quantize into the same hues as that separate palette.
 func defaultSyntaxColors() SyntaxColors {
 	return SyntaxColors{
 		Keyword:  "176",
@@ -283,10 +265,18 @@ func slotStylePtr(key string) (*lipgloss.Style, bool) {
 	return st, ok
 }
 
-// applySyntaxPalette installs sc as the process's syntax palette. Ctx.New calls it once,
-// before any screen exists and so before any document is parsed — which is the only
-// timing that matters, since a Highlighter bakes these styles into its spans at Parse
-// and nothing re-parses to pick up a later change.
+// syntaxColorsForProfile selects the runtime palette without modifying the saved
+// configuration. Colorless output is left to the renderer; Unknown lets callers
+// without a terminal profile retain the configured palette.
+func syntaxColorsForProfile(sc SyntaxColors, profile colorprofile.Profile) SyntaxColors {
+	if profile == colorprofile.ANSI {
+		sc.BasicColors = true
+	}
+	return sc
+}
+
+// applySyntaxPalette installs styles before documents are parsed. Highlighters
+// bake styles into their spans, so terminal capability must be resolved at startup.
 func applySyntaxPalette(sc SyntaxColors) {
 	p := resolveSyntaxColors(sc)
 	applyChromaPalette(p)

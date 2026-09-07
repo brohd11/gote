@@ -37,7 +37,7 @@ var colorsCmd = &cobra.Command{
 		// and without it this would print 256-color swatches on a terminal where the
 		// editor renders 16 — the report would misreport the one thing it exists to show.
 		out := colorprofile.NewWriter(cmd.OutOrStdout(), os.Environ())
-		return app.RenderPalette(out, cfg, app.RenderOptions{Path: path, Basic: colorsBasic})
+		return app.RenderPalette(out, cfg, app.RenderOptions{Path: path, Basic: colorsBasic, Profile: out.Profile})
 	},
 }
 
