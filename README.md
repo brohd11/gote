@@ -69,7 +69,8 @@ worktrees are supported. Colors refresh in the background every two seconds whil
 sidebar is visible, and after saves, folder navigation, or Actions → Refresh. Git is
 optional; unavailable status leaves the normal file/directory colors. File listings
 retain their existing refresh behavior; deleted files affect parent colors without
-adding deleted-file rows. The `?` page includes a color legend.
+adding deleted-file rows. The `?` page includes a color legend. The selected row keeps its
+Git color rather than taking the highlight color; the panel's left rule marks the cursor.
 
 
 `gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.

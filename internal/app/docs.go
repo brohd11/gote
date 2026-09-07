@@ -220,6 +220,13 @@ func (i docItem) TitleColor() color.Color {
 	}
 	return nil
 }
+
+// KeepColor implements core.KeepColorItem: on a list that carries git state, the cursor row
+// is exactly where "is this modified?" is being asked, so the row keeps its color and the
+// panel's tinted left rule is left to mark the selection on its own. Gated on the hook
+// rather than a field of its own, so the Docs panel (docRows sets it) opts in and the Open
+// panel (openDocItems, no git color to protect) keeps the accent.
+func (i docItem) KeepColor() bool     { return i.titleColor != nil }
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
 
