@@ -38,6 +38,7 @@ func (s *homeScreen) installScratch(c *Ctx) {
 	opts := s.editorOpts()
 	opts.Title, opts.Crumb = name, name
 	s.currentID, s.currentPath, s.currentName = id, "", name
+	c.SetActive(id)
 	s.editor = editor.New(opts)
 }
 
@@ -174,6 +175,7 @@ func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	forgetSniffedLanguage(s.currentPath)
 	forgetSniffedLanguage(path)
 	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
+	c.SetActive(path)
 	if c.lsp != nil {
 		c.lsp.DidSave(path)
 		s.formatOnSave(sh)
@@ -220,12 +222,15 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 // layout is rebuilt around the new buffer (openDoc's ordering); the returned cmd is the
 // child's Init and has to reach bubbletea.
 //
-// No seeding here, unlike openDoc: every doc this can be handed is already in the open
-// set and therefore already loaded, and the "" case is a scratch buffer with no file.
+// Seeding is narrower than openDoc's: a doc this can be handed is already in the open
+// set, and the "" case is a scratch buffer with no file. The one exception is a restored
+// buffer that has never been switched to — in the open set, but its file still unread.
 func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
 	if doc, ok := c.bufferInfo(id); ok {
 		s.currentID, s.currentPath, s.currentName = doc.ID, doc.Path, doc.Name
+		c.SetActive(doc.ID)
 		s.editor, _ = c.buffer(id)
+		s.seedForPreview(s.editor, doc.Path, doc.Path != "" && c.unread(doc.Path))
 	} else {
 		s.installScratch(c)
 	}

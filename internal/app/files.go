@@ -89,8 +89,9 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	// async load reaches nothing (seedForPreview).
 	_, was := c.Doc(path)
 	ed := c.OpenDoc(path, s.editorOpts())
-	s.seedForPreview(ed, path, !was)
+	s.seedForPreview(ed, path, !was || c.unread(path))
 	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
+	c.SetActive(s.currentID)
 	s.editor = ed
 	s.configureSignColumns()
 	s.openPanel.SetItems(openDocItems(c, s.currentID))
@@ -112,6 +113,7 @@ func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 	}
 	ed, _ := c.buffer(id)
 	s.currentID, s.currentPath, s.currentName = doc.ID, doc.Path, doc.Name
+	c.SetActive(s.currentID)
 	s.editor = ed
 	s.configureSignColumns()
 	s.openPanel.SetItems(openDocItems(c, s.currentID))
@@ -202,6 +204,7 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 		c.RekeyDoc(doc.Path, path, ed)
 		if s.currentPath == doc.Path {
 			s.currentID, s.currentPath, s.currentName = path, path, docName(path)
+			c.SetActive(path)
 			// A rename can take a file out of markdown under a live preview.
 			act = core.Async(s.enforcePreview())
 		}

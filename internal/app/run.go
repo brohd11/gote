@@ -25,7 +25,7 @@ func Run(version string, cfg Config, opts Options) error {
 	profile := colorprofile.Detect(os.Stdout, os.Environ())
 	c := newWithColorProfile(version, cfg, opts, profile)
 	defer c.close()
-	return bubblestack.Run(bubblestack.Config{
+	err := bubblestack.Run(bubblestack.Config{
 		App:    c,
 		Status: components.NewStatusLine(),
 		// Theme left unset — bubblestack.Run applies the shared ~/.bubblestack theme.
@@ -33,4 +33,13 @@ func Run(version string, cfg Config, opts Options) error {
 			{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
 		},
 	})
+	if err != nil {
+		return err // a run that fell over has no buffer state worth keeping
+	}
+	// Here rather than in homeScreen.QuitGate because this is the only point EVERY exit
+	// passes through: the gate is bypassed by the force-quit and by minimal mode's
+	// ctrl+x. The context is still standing, which is what makes the open set readable.
+	// Failing to write it is not a reason to fail the program.
+	_ = c.saveSession()
+	return nil
 }

@@ -1711,7 +1711,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(vault, "vault.md"), []byte("vault"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c.Config.Vaults["notes"] = VaultConfig{Path: vault, Open: []string{}}
+	c.Config.Vaults["notes"] = VaultConfig{Path: vault}
 
 	oldPath := filepath.Join(t.TempDir(), "old.md")
 	s.openDoc(sh, oldPath)
@@ -1754,7 +1754,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 func TestVaultSwitchRejectsMissingFolderWithoutClosing(t *testing.T) {
 	s, sh := newHome(t)
 	c := Of(sh)
-	c.Config.Vaults["gone"] = VaultConfig{Path: filepath.Join(t.TempDir(), "gone"), Open: []string{}}
+	c.Config.Vaults["gone"] = VaultConfig{Path: filepath.Join(t.TempDir(), "gone")}
 	oldEditor := s.editor
 
 	if act := s.requestVaultSwitch(sh, "gone"); msgType(act) != "core.pushMsg" {

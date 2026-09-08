@@ -269,7 +269,7 @@ func TestConfigVaultRoundTrip(t *testing.T) {
 	}
 	want := DefaultConfig()
 	want.Default = "notes"
-	want.Vaults["notes"] = VaultConfig{Path: vault, Open: []string{}}
+	want.Vaults["notes"] = VaultConfig{Path: vault}
 	if err := SaveConfig(want); err != nil {
 		t.Fatal(err)
 	}
@@ -278,8 +278,11 @@ func TestConfigVaultRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "open: []") {
-		t.Fatalf("new vault schema must preserve the reserved empty open list:\n%s", raw)
+	// The inverse of what this used to assert: session state is StateDir's, and a vault
+	// entry carrying an open list again would put it back in a file the user edits and
+	// may well commit.
+	if strings.Contains(string(raw), "open:") {
+		t.Fatalf("config.yml must carry no session state:\n%s", raw)
 	}
 	got, err := LoadConfig()
 	if err != nil {

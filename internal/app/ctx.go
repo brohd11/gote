@@ -44,7 +44,20 @@ type Ctx struct {
 	// display names, origin roots, editors and order; see openset.go.
 	open openSet
 	lsp  *lspManager
+
+	// activeID is the buffer holding the editor pane, mirrored off homeScreen because
+	// the session save runs after the TUI is gone — by then there is no screen left to
+	// ask. See session.go.
+	activeID string
+	// restore holds positions read from the session file and not yet applied. An entry
+	// survives for a buffer the user never switched to, whose editor therefore never
+	// read its file and reports a meaningless caret at the origin; saveSession writes
+	// the surviving entry back instead of that.
+	restore map[string]SessionFile
 }
+
+// SetActive records which buffer holds the editor pane, for the session save.
+func (c *Ctx) SetActive(id string) { c.activeID = id }
 
 var _ core.Receiver = (*Ctx)(nil)
 
@@ -290,7 +303,7 @@ func (c *Ctx) AddVault(name, rawPath string) error {
 	for k, v := range c.Config.Vaults {
 		next.Vaults[k] = v
 	}
-	next.Vaults[name] = VaultConfig{Path: path, Open: []string{}}
+	next.Vaults[name] = VaultConfig{Path: path}
 	if err := SaveConfig(next); err != nil {
 		return err
 	}
@@ -305,7 +318,13 @@ func (c *Ctx) SwitchVault(name string) error {
 	if err != nil {
 		return err
 	}
+	// Banked before the buffers go: the outgoing vault's session is only knowable while
+	// its open set is still standing. Best-effort, like every other session write.
+	_ = c.saveSession()
 	c.open.reset()
+	// The incoming vault gets a clean slate rather than the old root's leftovers, which
+	// would otherwise be written back under ITS key on quit.
+	c.activeID, c.restore = "", nil
 	c.Mode, c.VaultName, c.ScanDir = ModeVault, name, path
 	c.FilePath = ""
 	c.Seed()
@@ -324,6 +343,15 @@ func (c *Ctx) OpenDoc(path string, opts editor.Opts) *editor.Screen {
 	ed := editor.New(opts)
 	c.open.addFile(path, c.rootForPath(path), ed)
 	return ed
+}
+
+// unread reports whether path is registered but has never read its file — a restored
+// buffer the user has not switched to yet. Membership in the open set used to imply
+// having been loaded, and the preview seeding was entitled to assume it; session restore
+// is what separated the two.
+func (c *Ctx) unread(path string) bool {
+	_, pending := c.restore[path]
+	return pending
 }
 
 // Doc returns the editor open for path, if there is one.
@@ -396,6 +424,14 @@ func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 	}
 	if cur, ok := c.open.getPath(newPath); oldID == newPath && ok && cur.editor == ed {
 		return
+	}
+	// A restored buffer can be renamed before it is ever switched to, and its pending
+	// position has to travel with it — stranded under the old path, saveSession would
+	// fall through to an editor that never read anything and record a caret at 0,0.
+	if rec, ok := c.restore[oldID]; ok {
+		delete(c.restore, oldID)
+		rec.Path = newPath
+		c.restore[newPath] = rec
 	}
 	c.open.rekey(oldID, newPath, ed)
 }

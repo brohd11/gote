@@ -67,7 +67,7 @@ func TestConfiguredDefaultVaultAndCLIOverride(t *testing.T) {
 	}
 	cfg := DefaultConfig()
 	cfg.Default = "notes"
-	cfg.Vaults["notes"] = VaultConfig{Path: vault, Open: []string{}}
+	cfg.Vaults["notes"] = VaultConfig{Path: vault}
 
 	c := New("dev", cfg, Options{})
 	if c.Mode != ModeVault || c.VaultName != "notes" || c.ScanDir != vault {
@@ -206,7 +206,7 @@ func TestAddAndSwitchVault(t *testing.T) {
 	if err := c.AddVault("notes", vault); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Config.Vaults["notes"]; got.Path != vault || got.Open == nil || len(got.Open) != 0 {
+	if got := c.Config.Vaults["notes"]; got.Path != vault {
 		t.Fatalf("saved vault = %#v", got)
 	}
 	if err := c.AddVault("notes", vault); err == nil {

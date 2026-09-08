@@ -139,11 +139,11 @@ const (
 // which Ctx.New applies.
 func (c Config) Filter() DocFilter { return NewDocFilter(c.Extensions) }
 
-// VaultConfig is one named document root. Open is reserved now so the persisted
-// shape can grow session restoration later without another schema change.
+// VaultConfig is one named document root. Session state deliberately does NOT live
+// here: config.yml is a file the user edits and may commit to a dotfiles repo, so what
+// gote writes for itself between runs goes to StateDir instead (see session.go).
 type VaultConfig struct {
-	Path string   `yaml:"path"`
-	Open []string `yaml:"open"`
+	Path string `yaml:"path"`
 }
 
 // DefaultConfig is what a missing ~/.gote/config.yml means, and — since EnsureConfig
@@ -234,6 +234,19 @@ func DocsDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "docs"), nil
+}
+
+// StateDir is ~/.gote/state, where gote keeps what it writes for ITSELF between runs
+// rather than for the user to edit. It is a subdirectory, not a file beside config.yml,
+// so a ~/.gote that gets checked into a dotfiles repo can exclude the volatile half with
+// a single ignore line — and so home-mode discovery, which lists ~/.gote/docs, never has
+// a reason to walk it.
+func StateDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "state"), nil
 }
 
 // ConfigPath is ~/.gote/config.yml — what LoadConfig reads, SaveConfig writes, and

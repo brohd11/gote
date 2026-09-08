@@ -227,9 +227,10 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		s.currentPath = c.FilePath
 		s.currentName = docName(c.FilePath)
 		s.editor = c.OpenDoc(c.FilePath, s.editorOpts())
-	} else {
+	} else if !s.restoreSession(c) {
 		s.installScratch(c)
 	}
+	c.SetActive(s.currentID)
 	s.configureSignColumns()
 	// --preview needs a document to read, and ModeFile is the only launch that opens one
 	// here — so a vault or scan launch never sets this, which is how the flag comes to be
@@ -531,6 +532,9 @@ func clickModifierMatches(setting string, mod tea.KeyMod) bool {
 func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Action {
 	defer s.refreshDiagnostics()
 	s.applyPendingJump()
+	// Alongside the jump and for the same reason: both are a caret aimed at a buffer
+	// whose file may still be loading, and both get another try on the next message.
+	s.applyRestore(Of(sh))
 	// After the jump, so a caret that has just landed somewhere else is judged on where it
 	// landed. Here rather than in the typing hook because this is the exit every path that
 	// can move the caret shares — including the two that return before the hook runs.

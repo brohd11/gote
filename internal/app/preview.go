@@ -165,10 +165,11 @@ func (s *homeScreen) paneChild() tea.Cmd {
 // aimed at a file that is not empty, which the first save would truncate. SetText marks the
 // editor loaded, so the Init that follows dispatches no read at all.
 //
-// Only for a buffer that is NEW to the open set: an already-open one may hold unsaved
-// edits, and seeding those away is the very loss this exists to prevent.
-func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, fresh bool) {
-	if fresh && s.fullPreview != nil {
+// Only for a buffer that has never READ its file — a fresh open, or one restored from
+// the session file and not yet switched to. A buffer that has been in the pane may hold
+// unsaved edits, and seeding those away is the very loss this exists to prevent.
+func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, unread bool) {
+	if unread && s.fullPreview != nil {
 		ed.SetText(fileText(path))
 	}
 }

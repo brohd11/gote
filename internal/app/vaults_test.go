@@ -12,8 +12,8 @@ import (
 func TestVaultItemsSortedAndActive(t *testing.T) {
 	_, sh := newHome(t)
 	c := Of(sh)
-	c.Config.Vaults["zeta"] = VaultConfig{Path: "/zeta", Open: []string{}}
-	c.Config.Vaults["alpha"] = VaultConfig{Path: "/alpha", Open: []string{}}
+	c.Config.Vaults["zeta"] = VaultConfig{Path: "/zeta"}
+	c.Config.Vaults["alpha"] = VaultConfig{Path: "/alpha"}
 	c.Mode, c.VaultName = ModeVault, "alpha"
 
 	items := vaultItems(sh)
@@ -79,7 +79,7 @@ func TestSubmitNewVaultPersistsBeforeSwitch(t *testing.T) {
 		t.Fatal("saving the vault entry must not discard before switch confirmation")
 	}
 	got := Of(sh).Config.Vaults["notes"]
-	if got.Path != vault || got.Open == nil || len(got.Open) != 0 {
+	if got.Path != vault {
 		t.Fatalf("persisted vault = %#v", got)
 	}
 	loaded, err := LoadConfig()
