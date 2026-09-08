@@ -33,9 +33,9 @@ func TestBottomTogglePreservesEditorAndSplit(t *testing.T) {
 		t.Fatal("fixture must contain unsaved edits")
 	}
 	before := ed.CursorPosition()
-	s.Update(sh, tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
+	s.Update(sh, tea.KeyPressMsg{Code: '\\', Mod: tea.ModAlt})
 	if !s.bottomVisible || !s.editorPanel.Focused() || ed.CursorPosition() != before || ed.Text() != text {
-		t.Fatal("Alt+B changed editor state or focus")
+		t.Fatal(`alt+\ changed editor state or focus`)
 	}
 	if !strings.Contains(s.View(sh), "Diagnostics") {
 		t.Fatal("bottom missing from view")
@@ -263,7 +263,7 @@ func TestBottomActionsMenuReturnsToHome(t *testing.T) {
 	model, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
 	// Theme, Vaults, Open view, Diagnostics: exercise the real picker and router Pop,
-	// including the capture gate when Alt+B is subsequently pressed in editor.
+	// including the capture gate when alt+\ is subsequently pressed in editor.
 	for _, k := range []string{"a", "down", "down", "down", "enter"} {
 		var cmd tea.Cmd
 		model, cmd = model.Update(keyMsg(k))
@@ -273,8 +273,8 @@ func TestBottomActionsMenuReturnsToHome(t *testing.T) {
 		t.Fatal("diagnostics action did not toggle panel and dismiss menu")
 	}
 	s.modular.FocusSlot(s.editorSlot())
-	model, _ = model.Update(keyMsg("alt+b"))
+	model, _ = model.Update(keyMsg(`alt+\`))
 	if s.bottomVisible || !s.editorPanel.Focused() {
-		t.Fatal("router capture gate swallowed Alt+B")
+		t.Fatal(`router capture gate swallowed alt+\`)
 	}
 }

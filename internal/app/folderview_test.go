@@ -240,7 +240,7 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 			case "flat":
 				model, _ = model.Update(altKey('t'))
 			case "hidden":
-				model, _ = model.Update(keyMsg("ctrl+b"))
+				model, _ = model.Update(keyMsg(`alt+|`))
 			case "resizing":
 				s.modular.SetResizing(true)
 			}

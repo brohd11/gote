@@ -137,24 +137,25 @@ with no project root above it means the directory it sits in; narrow that with a
 Diagnostics and Find in Files share a full-width bottom panel beneath the sidebar,
 editor, and preview. Its top edge keeps the active view's full title and count, while
 the bottom edge carries compact `Diag` and `Search` tabs. Click those tabs or use
-Left/Right while the panel is focused. `alt+b` toggles the whole panel without taking
+Left/Right while the panel is focused. `alt+\` toggles the whole panel without taking
 focus from the editor; Actions → Diagnostics reveals the diagnostic tab. Drag the top
 divider to resize it; the split is remembered during the session.
 
-Use `alt+shift+f` or Actions → Find in Files to open a modal with Search and optional
+Use `ctrl+alt+f` or Actions → Find in Files to open a modal with Search and optional
 Path fields. A blank path searches the active document root; relative paths start there,
 and absolute directories are also accepted. Search is literal and smart-case: lowercase
 queries ignore case, while a query containing uppercase is case-sensitive. It searches
 text files recursively, including unsaved content from open path-backed buffers, while
 skipping hidden, dependency, and build directories. Results appear asynchronously in
-the Search tab. Use `alt+f` for the current editor buffer; word-forward remains available
-on `alt+right` and `ctrl+right`.
+the Search tab. Use `ctrl+f` to search the current editor buffer instead.
 
 In either bottom view, Up/Down selects entries and Enter or a click jumps to the
 location; `ctrl+o` returns. Messages wrap in full, Page Up/Down and the mouse wheel
 scroll, and Escape returns focus to the editor while leaving the panel open. Diagnostics
-cover all open files, current file first. `alt+left` and `ctrl+left` still move backward
-by word; gote reserves `alt+b` for the panel.
+cover all open files, current file first. The panel toggles sit on punctuation (`alt+\`
+and `alt+|`) precisely so they stay clear of the editor's word motions: `alt+b` and
+`alt+f` are what a terminal sends for `alt+left` and `alt+right`, and both keep moving
+the cursor by a word.
 
 The Actions
 and editor context menus independently toggle the diagnostics and git gutters and can
@@ -214,7 +215,7 @@ get a hint for.
 `gote <my/file.md>`
 
 Open the editor with a single document. Useful if you have your terminal default editor set to gote.
-This launch still starts with only the editor, but `alt+o` may add the outline and `alt+b`
+This launch still starts with only the editor, but `alt+o` may add the outline and `alt+\`
 may add the diagnostics panel without restoring the normal breadcrumb or help bar.
 
 `gote -P <my/file.md>`

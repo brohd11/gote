@@ -48,7 +48,7 @@ func (s *homeScreen) newOutlinePanel() *components.TreePanel {
 }
 
 // toggleOutline changes only session state. In a normal workspace turning it on also
-// restores the sidebar if ctrl+b had hidden it; ModeFile instead gets an outline-only
+// restores the sidebar if alt+| had hidden it; ModeFile instead gets an outline-only
 // side column and keeps its chrome mask.
 func (s *homeScreen) toggleOutline(sh *core.Shared) core.Action {
 	s.closeCompletion()

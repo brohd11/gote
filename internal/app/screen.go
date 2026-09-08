@@ -18,14 +18,22 @@ import (
 // sidebarWidth is the fixed cell width of the docs/open column; the editor flexes.
 const sidebarWidth = 30
 
-// The home screen's own keys. ctrl+b carries a modifier, so it passes the router's
-// capture gate and toggles even while typing in the editor; "a" and "?" are
+// The home screen's own keys. The panel toggles carry a modifier, so they pass the
+// router's capture gate and fire even while typing in the editor; "a" and "?" are
 // intercepted only when nothing is capturing, so typed text and /-filters never
 // lose the letter (alt+? is the modified alias that summons help from anywhere,
 // the editor included).
+//
+// alt+\ and alt+|, not alt+b/ctrl+b: a terminal sends ESC-prefixed letters for the
+// editor's word motions (alt+b IS alt+left, alt+f IS alt+right), so claiming either
+// letter here breaks word nav in every buffer — which is exactly what alt+b did until
+// this pair took over. The punctuation keys are on no readline motion, sit next to each
+// other on one physical key, and read as the two panel edges they toggle. Freeing
+// ctrl+b also returns character-backward to the line edits and form fields, which this
+// screen used to steal from them through the modifier bypass.
 var (
-	bottomKey  = key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "bottom panel"))
-	sidebarKey = key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "sidebar"))
+	bottomKey  = key.NewBinding(key.WithKeys("alt+\\"), key.WithHelp("alt+\\", "bottom panel"))
+	sidebarKey = key.NewBinding(key.WithKeys("alt+|"), key.WithHelp("alt+|", "sidebar"))
 	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
 	// The reader gets its own key rather than a third rung on ctrl+p: reading the whole
@@ -64,7 +72,7 @@ var (
 	// gate and fire while the editor is typing — which is the only place they mean
 	// anything. alt+g/h/o/n/m are the free alt letters left after the editor's word and
 	// clipboard chords (alt+b/c/d/f/i/v/x), core's alt+wasd arrows and alt+u, and gote's
-	// own alt+p/r/t/z. ctrl+o remains vim's jump-back; alt+o now toggles the persistent
+	// own alt+p/r/t/z/\/|. ctrl+o remains vim's jump-back; alt+o now toggles the persistent
 	// outline panel rather than pushing a picker.
 	definitionKey = key.NewBinding(key.WithKeys("alt+g"), key.WithHelp("alt+g", "go to definition"))
 	jumpBackKey   = key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back"))
@@ -893,7 +901,7 @@ func (s *homeScreen) editorSlot() int {
 // editor) gets the current size.
 //
 // Minimal mode returns here: this is the single door the sidebar can come back through
-// (ctrl+b, and the unhide branches of editorExit/editorRelease), so refusing it here is
+// (alt+|, and the unhide branches of editorExit/editorRelease), so refusing it here is
 // what makes "the editor alone" hold without a guard at every call site.
 func (s *homeScreen) setSidebar(visible bool) {
 	if s.minimal {

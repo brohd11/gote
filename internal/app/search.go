@@ -25,7 +25,11 @@ import (
 
 const searchResultLimit = 10_000
 
-var findFilesKey = key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+shift+f", "find in files"))
+// ctrl+alt+f, not alt+shift+f: shift+f is where the editor's word-forward alt+f lives one
+// modifier over, and the pair reads better as ctrl+f (this buffer) / ctrl+alt+f (every
+// file). It arrives as an ESC-prefixed control byte, so it needs the terminal's option-as-meta
+// setting — the same requirement every other alt chord here already has.
+var findFilesKey = key.NewBinding(key.WithKeys("ctrl+alt+f"), key.WithHelp("ctrl+alt+f", "find in files"))
 
 type searchEntry struct {
 	path       string

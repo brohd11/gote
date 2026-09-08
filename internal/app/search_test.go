@@ -173,11 +173,11 @@ func TestFindFilesShortcutRunsIntoFocusedBottomPanel(t *testing.T) {
 	defer Of(sh).close()
 
 	var cmd tea.Cmd
-	model, cmd = model.Update(keyMsg("ctrl+shift+f"))
-	if _, ok := model.(core.Router).Top().(*components.FormScreen); ok {
-		t.Fatal("ctrl+shift+f should no longer open Find in Files")
-	}
 	model, cmd = model.Update(keyMsg("alt+shift+f"))
+	if _, ok := model.(core.Router).Top().(*components.FormScreen); ok {
+		t.Fatal("alt+shift+f should no longer open Find in Files")
+	}
+	model, cmd = model.Update(keyMsg("ctrl+alt+f"))
 	model = pumpModel(model, cmd)
 	if _, ok := model.(core.Router).Top().(*components.FormScreen); !ok {
 		t.Fatalf("shortcut top = %T, want modal form", model.(core.Router).Top())

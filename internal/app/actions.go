@@ -25,7 +25,7 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 			},
 		},
 		components.Item{
-			Name: "⌕ Find in Files", Desc: "search text beneath a folder (alt+shift+f)",
+			Name: "⌕ Find in Files", Desc: "search text beneath a folder (ctrl+alt+f)",
 			Pick: func(sh *core.Shared) core.Action {
 				return core.Seq(core.Pop(), core.Push(s.findFilesForm(sh)))
 			},
