@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -71,12 +72,17 @@ func (p *diagnosticsPanel) refresh(c *Ctx, current string) {
 	p.reflow()
 }
 
+// collectDiagnostics gathers what the panel lists. Which files that is IS the
+// diagnostic_open_only setting: the open buffers, or every file the servers have reported
+// on — which, with the whole project handed over, is the project. Either way the file
+// showing in the editor sorts first, since it is the one being asked about.
 func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 	if c == nil || c.lsp == nil {
 		return nil, "Language-server support is disabled (auto-lsp: false)."
 	}
-	paths := make([]string, 0, len(c.open.byPath))
-	for path := range c.open.byPath {
+	byPath := c.lsp.AllDiagnostics()
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
 		paths = append(paths, path)
 	}
 	sort.Slice(paths, func(i, j int) bool {
@@ -90,7 +96,7 @@ func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 	})
 	var entries []diagnosticEntry
 	for _, path := range paths {
-		diagnostics := c.lsp.Diagnostics(path)
+		diagnostics := byPath[filepath.Clean(path)]
 		sort.SliceStable(diagnostics, func(i, j int) bool {
 			a, b := diagnostics[i], diagnostics[j]
 			if a.Line != b.Line {
@@ -106,9 +112,31 @@ func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 		}
 	}
 	if len(entries) == 0 {
-		return nil, "No diagnostics for open files."
+		return nil, "No diagnostics."
 	}
 	return entries, ""
+}
+
+// projectPath is how a diagnostic's file is headed in the list. Absolute paths are what
+// the manager keys on, but a whole project's worth of them is a column of identical
+// prefixes; against a live session root the same list reads as the project's own layout.
+// A path under no root — a buffer opened from somewhere else entirely — stays absolute,
+// which is the honest answer for a file that is not part of the project.
+func projectPath(roots []string, path string) string {
+	best := ""
+	for _, root := range roots {
+		if len(root) > len(best) && strings.HasPrefix(path, root+string(filepath.Separator)) {
+			best = root
+		}
+	}
+	if best == "" {
+		return path
+	}
+	rel, err := filepath.Rel(best, path)
+	if err != nil {
+		return path
+	}
+	return rel
 }
 
 func (p *diagnosticsPanel) SetSize(width, height int) {
@@ -133,13 +161,17 @@ func (p *diagnosticsPanel) reflow() {
 	if p.status != "" {
 		appendText(p.status, -1)
 	}
+	var roots []string
+	if p.manager != nil {
+		roots = p.manager.Roots()
+	}
 	last := ""
 	for i, entry := range p.entries {
 		if entry.path != last {
 			if i > 0 {
 				appendText("", -1)
 			}
-			appendText(entry.path, -1)
+			appendText(projectPath(roots, entry.path), -1)
 			last = entry.path
 		}
 		d := entry.diagnostic

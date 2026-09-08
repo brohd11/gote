@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,6 +20,61 @@ func setTestDiagnostics(c *Ctx, path string, entries ...lspDiagnostic) {
 	c.lsp.diagnostics[path] = entries
 	c.lsp.diagnosticsRevision++
 	c.lsp.mu.Unlock()
+}
+
+// The panel is the whole point of diagnostic_open_only: false. It has to list files that
+// are not open at all, head them by their place in the project rather than by an absolute
+// path, and still float the file being edited to the top.
+func TestDiagnosticsPanelListsTheWholeProject(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.OpenDocsView = "list"
+	s, sh := newHomeCfg(t, cfg, Options{})
+	c := Of(sh)
+	defer c.close()
+	open, _ := seedDoc(t, s, sh, "main.py", "first\nsecond")
+	s.openDoc(sh, open)
+
+	root := filepath.Dir(open)
+	unopened := filepath.Join(root, "pkg", "other.py")
+	setTestDiagnostics(c, unopened, lspDiagnostic{Line: 3, Message: "unopened file"})
+	setTestDiagnostics(c, open, lspDiagnostic{Line: 0, Message: "open file"})
+	c.lsp.mu.Lock()
+	c.lsp.roots = []string{root}
+	c.lsp.mu.Unlock()
+
+	s.toggleBottom(sh)
+	p := s.diagnostics
+	if len(p.entries) != 2 {
+		t.Fatalf("entries = %#v, want the open file and the unopened one", p.entries)
+	}
+	if p.entries[0].path != open {
+		t.Fatalf("entries[0] = %s, want the file in the editor first", p.entries[0].path)
+	}
+	if p.entries[1].path != unopened {
+		t.Fatalf("entries[1] = %s, want the unopened project file", p.entries[1].path)
+	}
+	rendered := strings.Join(p.lines, "\n")
+	if !strings.Contains(rendered, filepath.Join("pkg", "other.py")) {
+		t.Fatalf("panel rendered %q, want the project-relative heading", rendered)
+	}
+	if strings.Contains(rendered, root) {
+		t.Fatalf("panel rendered %q, want no absolute path under a live root", rendered)
+	}
+
+	// Nothing is open-set gated any more: closing the buffer leaves both files listed.
+	c.CloseDoc(open)
+	c.lsp.Reconcile(c)
+	p.refresh(c, s.currentPath)
+	if len(p.entries) != 2 {
+		t.Fatalf("closing a buffer changed the project list: %#v", p.entries)
+	}
+
+	setTestDiagnostics(c, open)
+	setTestDiagnostics(c, unopened)
+	p.refresh(c, s.currentPath)
+	if p.status != "No diagnostics." {
+		t.Fatalf("empty status = %q, want the whole-project wording", p.status)
+	}
 }
 
 func TestBottomTogglePreservesEditorAndSplit(t *testing.T) {
@@ -87,6 +143,9 @@ func TestDiagnosticsRefreshCacheSelectionAndClear(t *testing.T) {
 	c := Of(sh)
 	defer c.close()
 	path, _ := seedDoc(t, s, sh, "main.py", "first\nsecond")
+	// Reconcile is what makes the manager aware the buffer is open, and therefore what
+	// lets the later close retire its diagnostics.
+	c.lsp.Reconcile(c)
 	a := lspDiagnostic{Line: 0, Message: "first warning"}
 	b := lspDiagnostic{Line: 1, Message: "second warning"}
 	setTestDiagnostics(c, path, a, b)
@@ -106,7 +165,12 @@ func TestDiagnosticsRefreshCacheSelectionAndClear(t *testing.T) {
 	if p.entries[p.selected].diagnostic != b {
 		t.Fatal("refresh lost selected diagnostic identity")
 	}
+	// Closing retires the diagnostics in Reconcile, not in the panel: the panel lists
+	// whatever the servers have said, and only a server that speaks for a whole project
+	// keeps speaking for a file whose tab is gone. Reconcile is what the app runs on every
+	// update, so the test runs it too.
 	c.CloseDoc(path)
+	c.lsp.Reconcile(c)
 	p.refresh(c, s.currentPath)
 	if len(p.entries) != 0 || p.selected != -1 || !strings.Contains(p.status, "No diagnostics") {
 		t.Fatal("closed-file diagnostics remain")

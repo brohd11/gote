@@ -202,6 +202,23 @@ menu's Hover info row — which acts on the cell you right-clicked — cover it 
 Set `format_on_save: true` to format on every `ctrl+s`. The reformat lands just after the
 write rather than blocking it, so the buffer is left dirty and the next save settles it.
 
+Diagnostics cover whatever the language server reports on, which is the server's decision
+and not a setting. There are three answers and gote takes all of them:
+
+- A server that supports **`workspace/diagnostic`** (LSP 3.17 pull diagnostics) is asked
+  directly, once per session and again whenever it says the answer changed.
+- A server that **volunteers** more than it was given — Godot's `gdscript-lsp` diagnoses
+  its whole project on startup and pushes the result unasked; rust-analyzer does the same
+  across a crate — simply has that kept. On a 422-file Godot project this is 197
+  diagnostics across 36 files, with one file open and nothing else read.
+- gopls does neither, and reports on the packages holding a file you have opened. In
+  practice that still includes compile errors elsewhere in the workspace once it has
+  loaded one.
+
+Nothing walks the project and nothing is opened on your behalf. A file's diagnostics
+survive closing its tab when the server speaks for the whole project, and are retired with
+the tab when it does not.
+
 Set `auto-lsp: false`, disable an individual entry,
 or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
 Server-specific `initialization_options` can also be overridden; Python's built-in

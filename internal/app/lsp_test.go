@@ -21,6 +21,7 @@ import (
 
 type recordedLSPCall struct {
 	method, text string
+	path         string
 	version      int32
 	position     protocol.Position
 	trigger      protocol.CompletionTriggerKind
@@ -49,6 +50,13 @@ type recordingLSPServer struct {
 	// data it will answer with; the capability appears only when the legend is set.
 	semanticLegend []string
 	semanticData   []uint32
+	// workspaceDiagnostics arms the pull lane: diagnosticProvider is advertised with
+	// workspaceDiagnostics only when it is set, which is what lets a test assert that an
+	// unadvertised pull is never requested. workspaceReports are handed out one per
+	// request, the last repeating once they run out.
+	workspaceDiagnostics bool
+	workspaceReports     []*protocol.WorkspaceDiagnosticReport
+	workspacePulls       []*protocol.WorkspaceDiagnosticParams
 }
 
 func newRecordingLSPServer() *recordingLSPServer {
@@ -90,6 +98,12 @@ func (s *recordingLSPServer) Initialize(_ context.Context, params *protocol.Init
 	}
 	if s.signatureResult != nil {
 		result.Capabilities.SignatureHelpProvider = &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}}
+	}
+	if s.workspaceDiagnostics {
+		identifier := "recording"
+		result.Capabilities.DiagnosticProvider = &protocol.DiagnosticOptions{
+			Identifier: &identifier, InterFileDependencies: true, WorkspaceDiagnostics: true,
+		}
 	}
 	s.mu.Unlock()
 	return result, nil
@@ -161,7 +175,8 @@ func (s *recordingLSPServer) Initialized(context.Context, *protocol.InitializedP
 }
 
 func (s *recordingLSPServer) DidOpen(_ context.Context, params *protocol.DidOpenTextDocumentParams) error {
-	s.calls <- recordedLSPCall{method: "open", text: params.TextDocument.Text, version: params.TextDocument.Version}
+	s.calls <- recordedLSPCall{method: "open", path: uriPath(params.TextDocument.URI),
+		text: params.TextDocument.Text, version: params.TextDocument.Version}
 	return nil
 }
 
@@ -172,7 +187,8 @@ func (s *recordingLSPServer) DidChange(_ context.Context, params *protocol.DidCh
 			text = whole.Text
 		}
 	}
-	s.calls <- recordedLSPCall{method: "change", text: text, version: params.TextDocument.Version}
+	s.calls <- recordedLSPCall{method: "change", path: uriPath(params.TextDocument.URI),
+		text: text, version: params.TextDocument.Version}
 	return nil
 }
 
@@ -181,8 +197,8 @@ func (s *recordingLSPServer) DidSave(context.Context, *protocol.DidSaveTextDocum
 	return nil
 }
 
-func (s *recordingLSPServer) DidClose(context.Context, *protocol.DidCloseTextDocumentParams) error {
-	s.calls <- recordedLSPCall{method: "close"}
+func (s *recordingLSPServer) DidClose(_ context.Context, params *protocol.DidCloseTextDocumentParams) error {
+	s.calls <- recordedLSPCall{method: "close", path: uriPath(params.TextDocument.URI)}
 	return nil
 }
 
@@ -195,6 +211,23 @@ func (s *recordingLSPServer) Completion(_ context.Context, params *protocol.Comp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.completionResult, nil
+}
+
+func (s *recordingLSPServer) DiagnosticWorkspace(_ context.Context, params *protocol.WorkspaceDiagnosticParams) (*protocol.WorkspaceDiagnosticReport, error) {
+	s.mu.Lock()
+	s.workspacePulls = append(s.workspacePulls, params)
+	var report *protocol.WorkspaceDiagnosticReport
+	switch len(s.workspaceReports) {
+	case 0:
+		report = &protocol.WorkspaceDiagnosticReport{}
+	case 1:
+		report = s.workspaceReports[0]
+	default:
+		report, s.workspaceReports = s.workspaceReports[0], s.workspaceReports[1:]
+	}
+	s.mu.Unlock()
+	s.calls <- recordedLSPCall{method: "workspaceDiagnostic"}
+	return report, nil
 }
 
 func (s *recordingLSPServer) Shutdown(context.Context) error { return nil }
@@ -638,12 +671,15 @@ func TestLSPTCPDocumentLifecycle(t *testing.T) {
 	if got := c.lsp.Diagnostics(path); len(got) != 0 {
 		t.Fatalf("rekeyed document retained old-path diagnostics: %#v", got)
 	}
+	// A publish for a URI that is not an open buffer is now KEPT, and marks this root as
+	// one whose server speaks for more than the open tabs. That is the whole mechanism
+	// behind a server like gdscript-lsp, which diagnoses its entire project unasked and
+	// never has most of those files opened. Discarding these was the old behaviour.
 	if err := server.publish(path, "closed", 2); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(30 * time.Millisecond)
-	if got := c.lsp.Diagnostics(path); len(got) != 0 {
-		t.Fatalf("closed URI accepted diagnostics: %#v", got)
+	if got := waitDiagnostics(t, c.lsp, path); got[0].Message != "closed" {
+		t.Fatalf("a volunteered report for an unopened URI was dropped: %#v", got)
 	}
 
 	c.CloseDoc(newPath)

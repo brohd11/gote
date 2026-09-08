@@ -27,12 +27,24 @@ import (
 )
 
 const (
-	lspRetryDelay      = 15 * time.Second
-	lspDialLimit       = 1500 * time.Millisecond
-	lspInitLimit       = 5 * time.Second
+	lspRetryDelay = 15 * time.Second
+	lspDialLimit  = 1500 * time.Millisecond
+	// Generous on purpose. A server may index the whole project inside its initialize
+	// handler before answering — gdscript-lsp takes ~10s over a 422-file Godot project —
+	// and a client that gives up first does not merely wait longer for that session: the
+	// timeout is an error, failSession calls it a dead server, and the 15s backoff
+	// respawns it to time out again, forever. That loop cost this project every LSP
+	// feature, not just diagnostics.
+	lspInitLimit       = 60 * time.Second
 	lspCompletionLimit = 2 * time.Second
 	lspChangeDebounce  = 500 * time.Millisecond
 )
+
+// How often a project-wide diagnostic report reaches the UI. The panel reflows every entry
+// it holds whenever the revision moves, and a server that answers for a whole project
+// reports on dozens of files at once. The file in the editor is exempt — that one still
+// emits the moment it arrives.
+const lspDiagnosticsSettle = 300 * time.Millisecond
 
 // lspDocument is the manager's desired view of one live editor buffer. Version is an
 // LSP version, independent of EditorScreen.EditSeq: it begins at one on didOpen and
@@ -123,6 +135,17 @@ type lspManager struct {
 	nextRequest       uint64
 	signatureTriggers map[string]map[string]bool
 	capabilities      map[string]*protocol.ServerCapabilities
+	roots             []string
+	// refreshPulls carries workspace/diagnostic/refresh from the jsonrpc goroutine to
+	// the actor, by session root.
+	refreshPulls map[string]bool
+	// projectRoots are the roots whose server has shown it reports beyond the documents
+	// it was handed — by answering a workspace pull, or by volunteering a file gote never
+	// opened. Under such a root a closed buffer keeps its diagnostics, because the report
+	// is about the project and not about the tab. Everywhere else a closed file's
+	// diagnostics are stale the moment it closes: the server was told didClose and will
+	// never correct them.
+	projectRoots map[string]bool
 	// The semantic-token lane (lsp_semantic.go): its own slot and counter for the same
 	// reason the on-demand lane has its own — a background refresh must never evict the
 	// definition the user just asked for. semanticLegends is per session because a token's
@@ -137,13 +160,17 @@ type lspManager struct {
 	restart     bool
 	closed      bool
 
-	wake    chan struct{}
-	stop    chan struct{}
-	done    chan struct{}
-	events  chan lspEvent
-	dead    chan deadSession
-	once    sync.Once
-	workers sync.WaitGroup
+	wake   chan struct{}
+	stop   chan struct{}
+	done   chan struct{}
+	events chan lspEvent
+	dead   chan deadSession
+	// diagWake coalesces volunteered and pulled diagnostics into the settle timer instead
+	// of waking a converge for each report.
+	diagWake chan struct{}
+	pulls    chan lspPullResult
+	once     sync.Once
+	workers  sync.WaitGroup
 }
 
 type deadSession struct {
@@ -162,6 +189,14 @@ type lspSession struct {
 	// caps is the whole initialize answer, not just the completion options: every
 	// on-demand request is gated on what this server said it can do.
 	caps *protocol.ServerCapabilities
+	// The workspace-diagnostic lane (lsp_diagnostic_pull.go). Actor-owned, like the
+	// session itself: only converge and the loop's result handling touch these.
+	pullWorkspace  bool
+	pullIdentifier *string
+	pullResultIDs  map[string]string
+	pullActive     bool
+	pullCancel     context.CancelFunc
+	pullAgainAt    time.Time
 }
 
 func newLSPManager(cfg Config, version string) *lspManager {
@@ -174,6 +209,7 @@ func newLSPManager(cfg Config, version string) *lspManager {
 		semanticLegends:   map[string][]string{},
 		wake:              make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		events: make(chan lspEvent, 64), dead: make(chan deadSession, 8),
+		diagWake: make(chan struct{}, 1), pulls: make(chan lspPullResult, 8),
 	}
 }
 
@@ -228,10 +264,15 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 	})
 	for path := range m.desired {
 		if _, ok := next[path]; !ok {
-			if _, ok := m.diagnostics[path]; ok {
-				m.diagnosticsRevision++
+			// A project-wide server keeps reporting on a file long after its tab closes,
+			// so those diagnostics stay; anywhere else they are stale the moment the
+			// server is told didClose. See projectRoots.
+			if !m.projectScopedLocked(path) {
+				if _, ok := m.diagnostics[path]; ok {
+					m.diagnosticsRevision++
+				}
+				delete(m.diagnostics, path)
 			}
-			delete(m.diagnostics, path)
 			if m.completion != nil && m.completion.path == path {
 				m.completion = nil
 			}
@@ -327,6 +368,12 @@ func (m *lspManager) Restart() {
 		m.nextComplete++
 		m.request = nil
 		m.nextRequest++
+		// Every session is about to be rebuilt; leaving the old answers up would show a
+		// list that no live session stands behind.
+		if len(m.diagnostics) > 0 {
+			m.diagnostics = map[string][]lspDiagnostic{}
+			m.diagnosticsRevision++
+		}
 	}
 	m.mu.Unlock()
 	m.signal()
@@ -374,6 +421,8 @@ func (m *lspManager) loop() {
 	}
 	var changeTimer *time.Timer
 	var changeTimerC <-chan time.Time
+	var diagTimer *time.Timer
+	var diagTimerC <-chan time.Time
 	var cancelCompletion context.CancelFunc
 	var cancelRequest context.CancelFunc
 	var cancelSemantic context.CancelFunc
@@ -398,6 +447,20 @@ func (m *lspManager) loop() {
 			changeTimer.Reset(debounce)
 		}
 		changeTimerC = changeTimer.C
+	}
+	// armDiagnostics is the same shape and for the same reason: under a stream of project
+	// publishes this fires on a fixed cadence, where a restarting debounce would never
+	// fire at all until the stream stopped.
+	armDiagnostics := func() {
+		if diagTimerC != nil {
+			return
+		}
+		if diagTimer == nil {
+			diagTimer = time.NewTimer(lspDiagnosticsSettle)
+		} else {
+			diagTimer.Reset(lspDiagnosticsSettle)
+		}
+		diagTimerC = diagTimer.C
 	}
 	for {
 		select {
@@ -439,6 +502,13 @@ func (m *lspManager) loop() {
 			if len(pending) > 0 {
 				resetChangeTimer()
 			}
+		case result := <-m.pulls:
+			m.applyWorkspacePull(sessions, result)
+		case <-m.diagWake:
+			armDiagnostics()
+		case <-diagTimerC:
+			diagTimerC = nil
+			m.emit(lspEvent{})
 		case dead := <-m.dead:
 			if session := sessions[dead.key]; session != nil && session.conn == dead.conn {
 				if dead.err == nil {
@@ -487,8 +557,8 @@ func (m *lspManager) desiredSnapshot() (map[string]lspDocument, map[string]bool,
 
 // converge applies document lifecycle work immediately. Ordinary content changes are
 // retained in pending until a quiet period; saves and reconnects always use the latest
-// snapshot without waiting. The return value reports whether a newer pending version
-// was observed and therefore needs a fresh debounce window.
+// snapshot without waiting. The return value reports whether a newer pending version was
+// observed and therefore needs a fresh debounce window.
 func (m *lspManager) converge(sessions map[string]*lspSession, pending map[string]lspDocument, flushChanges bool) bool {
 	docs, saves, restart := m.desiredSnapshot()
 	queuedChange := false
@@ -556,6 +626,9 @@ func (m *lspManager) converge(sessions map[string]*lspSession, pending map[strin
 				continue
 			}
 		}
+		// A session's root is only known once it is up, which is where the workspace
+		// diagnostic lane hangs off (lsp_diagnostic_pull.go).
+		m.beginWorkspacePull(session)
 		for _, doc := range group {
 			version, opened := session.sent[doc.path]
 			var err error
@@ -606,7 +679,32 @@ func (m *lspManager) converge(sessions map[string]*lspSession, pending map[strin
 			}
 		}
 	}
+	m.publishRoots(sessions)
 	return queuedChange
+}
+
+// publishRoots hands the live session roots to the UI side, which uses them to print a
+// diagnostic's file as a project-relative path instead of a full absolute one. It is the
+// only thing about a session the UI goroutine ever gets to see.
+func (m *lspManager) publishRoots(sessions map[string]*lspSession) {
+	roots := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		roots = append(roots, session.root)
+	}
+	sort.Strings(roots)
+	m.mu.Lock()
+	m.roots = roots
+	m.mu.Unlock()
+}
+
+// Roots is the project root of every live session, sorted.
+func (m *lspManager) Roots() []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.roots...)
 }
 
 func clearPendingSession(pending map[string]lspDocument, key string) {
@@ -838,9 +936,18 @@ func (m *lspManager) startSession(session *lspSession) error {
 			}}),
 		},
 		Capabilities: protocol.ClientCapabilities{
-			Workspace: &protocol.WorkspaceClientCapabilities{WorkspaceFolders: &yes},
+			Workspace: &protocol.WorkspaceClientCapabilities{
+				WorkspaceFolders: &yes,
+				// refreshSupport is the server's way to say "ask me again"; without it a
+				// pulled project would only refresh on its own cadence.
+				Diagnostics: &protocol.DiagnosticWorkspaceClientCapabilities{RefreshSupport: &yes},
+			},
 			TextDocument: &protocol.TextDocumentClientCapabilities{
 				PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{VersionSupport: &yes},
+				// Declaring the pull capability is what lets a server advertise
+				// diagnosticProvider back; without it gote would never learn that
+				// workspace/diagnostic is on offer. See lsp_diagnostic_pull.go.
+				Diagnostic: &protocol.DiagnosticClientCapabilities{},
 				Completion: &protocol.CompletionClientCapabilities{
 					ContextSupport: &yes,
 					CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &yes},
@@ -910,6 +1017,7 @@ func (m *lspManager) startSession(session *lspSession) error {
 	session.server, session.conn = server, conn
 	if initialized != nil {
 		session.caps = &initialized.Capabilities
+		session.pullWorkspace, session.pullIdentifier = workspaceDiagnosticOptions(initialized.Capabilities.DiagnosticProvider)
 	}
 	m.mu.Lock()
 	m.forgetCapabilitiesLocked(session.key)
@@ -962,6 +1070,7 @@ func (m *lspManager) forgetCapabilitiesLocked(key string) {
 }
 
 func (m *lspManager) failSession(session *lspSession, err error) {
+	session.cancelPull()
 	if session.conn != nil {
 		_ = session.conn.Close()
 	}
@@ -983,6 +1092,7 @@ func (m *lspManager) closeSession(session *lspSession) {
 	if session == nil || session.conn == nil {
 		return
 	}
+	session.cancelPull()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	_ = session.server.Shutdown(ctx)
 	_ = session.server.Exit(ctx)
@@ -1022,6 +1132,15 @@ func (*lspClient) WorkDoneProgressCreate(context.Context, *protocol.WorkDoneProg
 	return nil
 }
 
+// DiagnosticRefresh is the server saying that everything it has answered may now be wrong.
+// UnimplementedClient replies with an error, which a server is entitled to read as "this
+// client cannot refresh"; answering it properly is what keeps a pulled project in step
+// after a change the server noticed on its own.
+func (c *lspClient) DiagnosticRefresh(context.Context) error {
+	c.manager.requestPullRefresh(c.root)
+	return nil
+}
+
 func (c *lspClient) Configuration(_ context.Context, params *protocol.ConfigurationParams) ([]protocol.LSPAny, error) {
 	if params == nil {
 		return nil, nil
@@ -1051,10 +1170,16 @@ func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.Publi
 		}
 	}
 	if !open {
-		c.manager.mu.Unlock()
-		return nil
-	}
-	if version, ok := params.Version.Get(); ok && version < doc.version {
+		// Anything a server volunteers about a file gote never opened is kept, and saying
+		// so marks the root as project-scoped. That is not generosity, it is the whole
+		// diagnostics story for the servers that have one:
+		// gdscript-lsp diagnoses its entire project on `initialized` and pushes the result
+		// unasked, and rust-analyzer does the same across a crate. Discarding these was
+		// what used to leave the panel empty for files nobody had a tab for. There is no
+		// client version to check against — gote holds no document for this path at all.
+		path = filepath.Clean(path)
+		c.manager.markProjectRootLocked(c.root)
+	} else if version, ok := params.Version.Get(); ok && version < doc.version {
 		c.manager.mu.Unlock()
 		return nil
 	}
@@ -1062,13 +1187,35 @@ func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.Publi
 	for _, item := range params.Diagnostics {
 		diagnostics = append(diagnostics, projectDiagnostic(item))
 	}
-	if !slices.Equal(c.manager.diagnostics[path], diagnostics) {
+	changed := !slices.Equal(c.manager.diagnostics[path], diagnostics)
+	if changed {
 		c.manager.diagnosticsRevision++
 		c.manager.diagnostics[path] = diagnostics
 	}
 	c.manager.mu.Unlock()
-	c.manager.emit(lspEvent{})
+	if !changed {
+		return nil
+	}
+	if open {
+		// The file in the editor answers at once: its gutter and its rows are what the
+		// reader is looking at.
+		c.manager.emit(lspEvent{})
+		return nil
+	}
+	// A project file goes through the settle timer instead. The panel reflows every row
+	// it holds on each revision, and a project publishes hundreds of times.
+	c.manager.wakeDiagnostics()
 	return nil
+}
+
+// wakeDiagnostics nudges the actor to start (or keep) the settle timer. It coalesces:
+// a full channel already means the actor has been told.
+func (m *lspManager) wakeDiagnostics() {
+	m.start()
+	select {
+	case m.diagWake <- struct{}{}:
+	default:
+	}
 }
 
 func projectDiagnostic(item protocol.Diagnostic) lspDiagnostic {
@@ -1104,6 +1251,24 @@ func (m *lspManager) Diagnostics(path string) []lspDiagnostic {
 	return append([]lspDiagnostic(nil), m.diagnostics[filepath.Clean(path)]...)
 }
 
+// AllDiagnostics is every file the servers have reported on, for the panel that lists a
+// whole project. Diagnostics(path) answers one file and is what the gutter asks.
+func (m *lspManager) AllDiagnostics() map[string][]lspDiagnostic {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	all := make(map[string][]lspDiagnostic, len(m.diagnostics))
+	for path, diagnostics := range m.diagnostics {
+		if len(diagnostics) == 0 {
+			continue
+		}
+		all[path] = append([]lspDiagnostic(nil), diagnostics...)
+	}
+	return all
+}
+
 // stdioTransport joins a child's stdout and stdin into the bidirectional shape the LSP
 // framer expects. Closing it tears down only the process Gote created.
 type stdioTransport struct {
@@ -1137,4 +1302,38 @@ func (m *lspManager) DiagnosticsRevision() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.diagnosticsRevision
+}
+
+// cancelPull stops an in-flight workspace/diagnostic. That request has no timeout of its
+// own — a server may hold it open indefinitely by design — so teardown is the only thing
+// that ends it.
+func (s *lspSession) cancelPull() {
+	if s.pullCancel != nil {
+		s.pullCancel()
+		s.pullCancel = nil
+	}
+	s.pullActive, s.pullWorkspace = false, false
+}
+
+// markProjectRootLocked records that root's server reports beyond the documents it was
+// given. Callers hold mu.
+func (m *lspManager) markProjectRootLocked(root string) {
+	if root == "" {
+		return
+	}
+	if m.projectRoots == nil {
+		m.projectRoots = map[string]bool{}
+	}
+	m.projectRoots[root] = true
+}
+
+// projectScopedLocked reports whether path belongs to a root whose server answers for the
+// whole project. Callers hold mu.
+func (m *lspManager) projectScopedLocked(path string) bool {
+	for root := range m.projectRoots {
+		if underPath(path, root) {
+			return true
+		}
+	}
+	return false
 }
