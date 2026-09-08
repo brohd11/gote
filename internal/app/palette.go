@@ -40,13 +40,13 @@ func defaultSyntaxColors() SyntaxColors {
 		Deleted:  "132",
 		Error:    "196",
 
-		MdHeading:  "124",
+		MdHeading:  "167",
 		MdEmphasis: "24",
-		MdStrong:   "27",
+		MdStrong:   "39",
 		MdCode:     "100",
 		MdQuote:    "102",
 		MdLink:     "38",
-		MdList:     "88",
+		MdList:     "136",
 	}
 }
 
