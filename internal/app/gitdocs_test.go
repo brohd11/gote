@@ -218,14 +218,15 @@ func TestDocsGitRefreshThroughRouter(t *testing.T) {
 	if got := s.docTitleColor(path); got != gitStateColor(gitModified) {
 		t.Fatalf("background result under help = %v", got)
 	}
+	// Nothing has happened inside gote, so each idle repoll waits one rung longer.
 	gitRun(t, root, "add", "notes.md")
-	next(2 * time.Second)
+	next(docsGitPoll[0])
 	next(250 * time.Millisecond)
 	if got := s.docTitleColor(path); got != gitStateColor(gitStaged) {
 		t.Fatal("poll missed external staging")
 	}
 	gitRun(t, root, "commit", "-qm", "save")
-	next(2 * time.Second)
+	next(docsGitPoll[1])
 	next(250 * time.Millisecond)
 	if s.docTitleColor(path) != nil {
 		t.Fatal("poll missed external commit")
@@ -233,15 +234,54 @@ func TestDocsGitRefreshThroughRouter(t *testing.T) {
 	// The lifecycle has exactly one next poll, and a hidden sidebar consumes it silently.
 	s.setSidebar(false)
 	s.syncDocsGit()
-	next(2 * time.Second)
+	next(docsGitPoll[2])
 	if len(wakes) != 0 {
 		t.Fatal("hidden sidebar kept polling")
 	}
+	// Showing it again is an event, so the ladder starts over rather than resuming at
+	// the rung the idle editor had walked out to.
 	s.setSidebar(true)
 	s.syncDocsGit()
 	next(250 * time.Millisecond)
 	if len(wakes) != 1 {
 		t.Fatal("showing sidebar did not restart one polling loop")
+	}
+	if wakes[0].delay != docsGitPoll[0] {
+		t.Fatalf("re-shown sidebar polled at %v, want %v", wakes[0].delay, docsGitPoll[0])
+	}
+}
+
+// The backoff is only safe because everything that can change the answer resets it.
+// Blur is the one input that pushes the other way, and it must not stop the poll: a
+// terminal (or a tmux without focus-events) can report blur and never report focus.
+func TestDocsGitBackoffResets(t *testing.T) {
+	root := docsGitRepo(t)
+	_, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
+	s.gitDocs.timer = noDocsGitTimer
+
+	for range len(docsGitPoll) + 2 {
+		s.gitDocs.advance()
+	}
+	if got := s.gitDocs.pollDelay(); got != docsGitPoll[len(docsGitPoll)-1] {
+		t.Fatalf("ladder walked past its cap to %v", got)
+	}
+
+	for name, reset := range map[string]func(){
+		"refresh": func() { s.refreshDocsGit() },
+		"reseed":  func() { s.Receive(s.sh, ReseedMsg{}) },
+		"focus":   func() { s.Receive(s.sh, tea.FocusMsg{}) },
+	} {
+		s.gitDocs.step = len(docsGitPoll) - 1
+		reset()
+		if got := s.gitDocs.pollDelay(); got != docsGitPoll[0] {
+			t.Fatalf("%s left the poll at %v, want %v", name, got, docsGitPoll[0])
+		}
+	}
+
+	s.gitDocs.step = 0
+	s.Receive(s.sh, tea.BlurMsg{})
+	if got := s.gitDocs.pollDelay(); got != docsGitPoll[len(docsGitPoll)-1] {
+		t.Fatalf("blur left the poll at %v, want the last rung", got)
 	}
 }
 

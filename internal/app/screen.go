@@ -714,7 +714,18 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		return act
 	}
 	if _, ok := payload.(ReseedMsg); ok {
-		defer func() { result.Cmd = tea.Batch(result.Cmd, s.requestDocsGit()) }()
+		defer func() { result.Cmd = tea.Batch(result.Cmd, s.refreshDocsGit()) }()
+	}
+	// Focus and blur pace the sidebar's git poll, and are handled here rather than in
+	// receiveDocsGit because that reports the message as consumed — blur also drives the
+	// mouse-gesture resets in modularscreen and the editor, which must still see it.
+	// Returning to the window is the one moment an external commit is most likely to have
+	// landed, so it both refreshes and puts the interval back on its shortest rung.
+	if _, ok := payload.(tea.FocusMsg); ok {
+		defer func() { result.Cmd = tea.Batch(result.Cmd, s.refreshDocsGit()) }()
+	}
+	if _, ok := payload.(tea.BlurMsg); ok {
+		s.idleDocsGit()
 	}
 	defer s.refreshDiagnostics()
 	if request, ok := payload.(findFilesRequest); ok {

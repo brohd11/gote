@@ -223,10 +223,28 @@ type docsGit struct {
 	snapshot                        *docsGitSnapshot
 	epoch, generation               uint64
 	visible, busy, pending, polling bool
+	step                            int // rung of docsGitPoll the next idle repoll waits
 	cancel                          context.CancelFunc
 	// Tests drive refresh messages explicitly rather than waiting for wall time.
 	timer func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 }
+
+// docsGitPoll is what an IDLE editor costs. The poll exists only to notice work done
+// outside gote — a commit in another terminal — because everything done inside it
+// already refreshes on the event (see refreshDocsGit). So the interval walks out when
+// nothing is happening and snaps back to the first rung when something is.
+//
+// It is not free to leave at two seconds. Each pass spawns `rev-parse` and `status` per
+// discovered repo root, and a terminal names its tab after the processes on its tty, so
+// every probe flickers the tab through `git` and back. Spawning less often is the whole
+// mitigation. Taking those children off the tty was tried (a new session does remove
+// them from that list) and abandoned: it did not stop the flicker, and is not worth
+// orphaning a language server for.
+var docsGitPoll = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second, 60 * time.Second}
+
+func (g *docsGit) pollDelay() time.Duration { return docsGitPoll[min(g.step, len(docsGitPoll)-1)] }
+func (g *docsGit) advance()                 { g.step = min(g.step+1, len(docsGitPoll)-1) }
+
 type docsGitTick struct {
 	target            *homeScreen
 	epoch, generation uint64
@@ -265,7 +283,25 @@ func (s *homeScreen) syncDocsGit() tea.Cmd {
 		return nil
 	}
 	s.gitDocs.visible = true
+	return s.refreshDocsGit()
+}
+
+// refreshDocsGit is the entry point for everything that could have CHANGED the answer —
+// a save, a rename, a delete, a folder change, the sidebar coming back, the terminal
+// regaining focus. requestDocsGit is the entry point for the poll and for a stale result
+// re-requesting itself. The split is the whole backoff: resetting the ladder inside
+// requestDocsGit would mean the poll re-arming itself at two seconds forever.
+func (s *homeScreen) refreshDocsGit() tea.Cmd {
+	s.gitDocs.step = 0
 	return s.requestDocsGit()
+}
+
+// idleDocsGit is blur: the terminal is not on screen, so nothing the user does can be
+// waiting on the sidebar. It stretches the interval to the last rung rather than stopping,
+// because focus reporting is not guaranteed to come back — tmux forwards it only with
+// focus-events on, and a terminal that reports blur but never focus must still recover.
+func (s *homeScreen) idleDocsGit() {
+	s.gitDocs.step = len(docsGitPoll) - 1
 }
 func (s *homeScreen) requestDocsGit() tea.Cmd {
 	if !s.sidebar || s.minimal {
@@ -318,7 +354,9 @@ func (s *homeScreen) receiveDocsGit(payload any) (core.Action, bool) {
 		}
 		if !s.gitDocs.polling {
 			s.gitDocs.polling = true
-			return core.Async(s.gitDocsTimer(2*time.Second, docsGitTick{target: s, epoch: s.gitDocs.epoch, poll: true})), true
+			delay := s.gitDocs.pollDelay()
+			s.gitDocs.advance()
+			return core.Async(s.gitDocsTimer(delay, docsGitTick{target: s, epoch: s.gitDocs.epoch, poll: true})), true
 		}
 		return core.Action{}, true
 	}
