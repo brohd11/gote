@@ -44,6 +44,13 @@ Click a tab to open it; overflow arrows scroll the bar without changing document
 Tab mode omits the duplicate filename header in the editor and full preview.
 The bar remains visible with the sidebar hidden. Single-file mode starts minimal.
 
+`esc` toggles between the editor and the pane you were last in. Leaving the editor hands
+the keys back to the docs list, the Open list, the outline, the preview column or the
+bottom panel — whichever held them last — and `esc` there returns to the editor. With
+nothing yet to remember, and when the remembered pane has since been closed, it falls back
+to the docs list; with the sidebar hidden and nowhere else to go, it brings the sidebar
+back first. `shift+tab` still cycles through every pane in turn.
+
 Default mode shows a sidebar with docs in a location folder and open documents in tabs.
 `gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.

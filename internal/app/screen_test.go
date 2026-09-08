@@ -2474,3 +2474,157 @@ func TestOpenListFlagClearsWhenBufferGoesClean(t *testing.T) {
 // where v1's TTY-less Ascii profile dropped them, so a substring like "Docs › Getting
 // started" now has escape sequences between its words.
 func view(tm tea.Model) string { return ansi.Strip(tm.View().Content) }
+
+// paneName labels a pane for a failure message. focusedPane (the bar-reading helper
+// above) only separates "a list" from "the editor", and the esc toggle is about WHICH
+// list — so these tests read the pointer the layout actually focused instead.
+func paneName(s *homeScreen) string {
+	switch s.focusedPane() {
+	case s.editorPanel:
+		return "editor"
+	case s.docsPanel:
+		return "docs"
+	case s.filePanel:
+		return "files"
+	case s.openPanel:
+		return "open"
+	case s.outlinePanel:
+		return "outline"
+	case s.previewPanel:
+		return "preview"
+	case components.Panel(s.bottom):
+		return "bottom"
+	}
+	return "unknown"
+}
+
+// TestEscTogglesEditorAndLastPane is the whole gesture: esc leaves the editor for the
+// pane the keys came from — not slot 0 — and esc there comes straight back.
+func TestEscTogglesEditorAndLastPane(t *testing.T) {
+	s, sh := newHome(t)
+
+	s.Update(sh, keyMsg("shift+tab")) // docs → open
+	if got := paneName(s); got != "open" {
+		t.Fatalf("the cycle should reach the Open list, got %s", got)
+	}
+	s.Update(sh, keyMsg("shift+tab")) // open → editor
+	if got := paneName(s); got != "editor" {
+		t.Fatalf("the cycle should reach the editor, got %s", got)
+	}
+
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "open" {
+		t.Fatalf("esc should hand the keys back to Open, the pane they came from, got %s", got)
+	}
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "editor" {
+		t.Fatalf("esc should toggle back to the editor, got %s", got)
+	}
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "open" {
+		t.Fatalf("the toggle should keep alternating, got %s", got)
+	}
+}
+
+// TestEscFromAPaneFocusesTheEditor: the return leg on its own. Before it, esc in a
+// sidebar list fell through to ModularScreen's Pop, which the router clamps at the root.
+func TestEscFromAPaneFocusesTheEditor(t *testing.T) {
+	s, sh := newHome(t)
+	if got := paneName(s); got != "docs" {
+		t.Fatalf("focus should start on the docs list, got %s", got)
+	}
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "editor" {
+		t.Fatalf("esc in a pane should focus the editor, got %s", got)
+	}
+}
+
+// TestEscClearsAnAppliedFilterBeforeLeaving: ListPanel answers esc with a ResetFilter
+// while a /-filter is up, and a pane the user cannot get out of a filter is worse than
+// one esc does not leave — so the toggle stands down until the filter is gone.
+func TestEscClearsAnAppliedFilterBeforeLeaving(t *testing.T) {
+	s, sh := newScanHome(t, scanTree(t))
+
+	s.Update(sh, keyMsg("/"))
+	s.Update(sh, keyMsg("notes"))
+	s.Update(sh, keyMsg("enter"))
+	if got := s.docsPanel.List().FilterState(); got != list.FilterApplied {
+		t.Fatalf("the docs list should be holding an applied filter, got %v", got)
+	}
+
+	s.Update(sh, keyMsg("esc"))
+	if got := s.docsPanel.List().FilterState(); got != list.Unfiltered {
+		t.Fatalf("esc should have cleared the filter, got %v", got)
+	}
+	if got := paneName(s); got != "docs" {
+		t.Fatalf("the filter's esc must not also leave the pane, got %s", got)
+	}
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "editor" {
+		t.Fatalf("the next esc should reach the editor, got %s", got)
+	}
+}
+
+// TestEscFallsBackWhenTheRememberedPaneIsGone: the outline can be closed while the
+// editor holds the keys, leaving lastPane pointing at a pane the layout no longer has.
+func TestEscFallsBackWhenTheRememberedPaneIsGone(t *testing.T) {
+	s, sh := newHome(t)
+
+	s.Update(sh, altKey('o')) // outline on; flat order [docs, open, outline, editor]
+	if !s.outlineVisible {
+		t.Fatal("alt+o should have shown the outline")
+	}
+	for i := 0; i < 2 && paneName(s) != "outline"; i++ {
+		s.Update(sh, keyMsg("shift+tab"))
+	}
+	if got := paneName(s); got != "outline" {
+		t.Fatalf("the cycle should reach the outline, got %s", got)
+	}
+	s.Update(sh, keyMsg("esc")) // outline → editor, remembering the outline
+	if got := paneName(s); got != "editor" {
+		t.Fatalf("esc should have reached the editor, got %s", got)
+	}
+	s.Update(sh, altKey('o')) // and now the remembered pane is gone
+	if s.outlineVisible {
+		t.Fatal("alt+o should have hidden the outline")
+	}
+
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "docs" {
+		t.Fatalf("esc should fall back to the docs list when the remembered pane left, got %s", got)
+	}
+}
+
+// TestEscReturnsToTheDockWithoutOpeningTheSidebar: the unhide in editorRelease exists
+// because a hidden sidebar leaves nowhere to hand the keys. The dock is somewhere, so
+// esc must not answer with a sidebar nobody asked for.
+func TestEscReturnsToTheDockWithoutOpeningTheSidebar(t *testing.T) {
+	s, sh := newHome(t)
+
+	s.Update(sh, keyMsg(`alt+\`)) // the bottom dock, last in flat order
+	if !s.bottomVisible {
+		t.Fatal(`alt+\ should have shown the bottom panel`)
+	}
+	for i := 0; i < 4 && paneName(s) != "bottom"; i++ {
+		s.Update(sh, keyMsg("shift+tab"))
+	}
+	if got := paneName(s); got != "bottom" {
+		t.Fatalf("the cycle should reach the bottom dock, got %s", got)
+	}
+	s.Update(sh, keyMsg("esc")) // dock → editor
+	if got := paneName(s); got != "editor" {
+		t.Fatalf("esc should have reached the editor, got %s", got)
+	}
+	s.Update(sh, keyMsg(`alt+|`))
+	if s.sidebar {
+		t.Fatal(`alt+| should have hidden the sidebar`)
+	}
+
+	s.Update(sh, keyMsg("esc"))
+	if got := paneName(s); got != "bottom" {
+		t.Fatalf("esc should return to the dock, got %s", got)
+	}
+	if s.sidebar {
+		t.Fatal("the dock was a pane to hand the keys to; esc should not have reopened the sidebar")
+	}
+}

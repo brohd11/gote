@@ -235,15 +235,32 @@ func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
 	return tea.Batch(cmd, s.enforcePreview())
 }
 
-// editorRelease is the editor pane's OnRelease hook (esc): hand the keys back to the
-// docs list without touching the buffer. The editor captures every printable key, so
+// editorRelease is the editor pane's OnRelease hook (esc): hand the keys back to the pane
+// they came from without touching the buffer. The editor captures every printable key, so
 // leaving it otherwise costs the shift+tab pane chord or ctrl+x — and ctrl+x CLOSES the
-// doc, which is not what "let me go back to the list" should mean. The sidebar is
-// unhidden first for the same reason ctrl+x does it: with it hidden there is no other
-// pane to hand focus to.
+// doc, which is not what "let me go back to the list" should mean. Screen.Update claims esc
+// in the other direction, so the pair is one toggle: esc leaves the editor for the outline,
+// the dock or whichever pane last had the keys, and esc there comes straight back.
+//
+// The sidebar is unhidden for the same reason ctrl+x does it — with it hidden there is no
+// other pane to hand focus to — but only when the remembered pane is not one of the panes
+// still on screen. A dock or a preview column is somewhere to go, and opening the sidebar
+// over it would be answering a key nobody pressed.
 func (s *homeScreen) editorRelease(*core.Shared) core.Action {
-	if !s.sidebar {
+	if s.panelSlot(s.lastPane) == noFocus && !s.sidebar {
 		s.setSidebar(true)
 	}
-	return core.Async(s.modular.FocusSlot(0))
+	return core.Async(s.modular.FocusSlot(s.releaseSlot()))
+}
+
+// releaseSlot is where esc hands the keys: back to the pane that last held them, or the
+// layout's first slot when that pane is not in the current layout — the outline was closed,
+// the dock was hidden, a vault swapped the sidebar out from under it. Slot 0 is the docs
+// pane whenever the sidebar is up (buildModular emits the side column first), which is what
+// esc always did and is still the right answer with nothing to remember.
+func (s *homeScreen) releaseSlot() int {
+	if slot := s.panelSlot(s.lastPane); slot != noFocus {
+		return slot
+	}
+	return 0
 }

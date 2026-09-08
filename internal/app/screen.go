@@ -122,6 +122,7 @@ type homeScreen struct {
 	openTabs             *documentTabBar
 	openDocsTabs         bool
 	panelSlots           map[components.Panel]int
+	lastPane             components.Panel // the non-editor pane esc hands the keys back to
 	editorPanel          *components.ScreenPanel
 	previewPanel         *components.ScrollContainer // the live preview pane
 	editor               *editor.Screen              // the editor pane's live buffer (ScreenPanel exposes none)
@@ -299,11 +300,35 @@ func fileText(path string) string {
 	return string(b)
 }
 
+// notePane records the pane the keys are in BEFORE the message is dispatched, so esc in
+// the editor has somewhere to hand them back to (editorRelease). Before rather than after,
+// because by the time a picked row or a click has moved focus to the editor the pane it
+// came from is already blurred — and this is the one point every route into the editor
+// passes through, key, mouse and the shift+tab cycle alike, so no individual FocusSlot
+// call site has to remember to record anything.
+func (s *homeScreen) notePane() {
+	if pane := s.focusedPane(); pane != s.editorPanel {
+		s.lastPane = pane
+	}
+}
+
+// paneFiltering reports whether the focused pane is a list holding a /-filter — being
+// typed, or applied. ModularScreen.Filtering() covers only the typed half (it asks
+// ListPanel.Capturing), and an applied filter is the one thing esc must clear before it
+// means anything else.
+func (s *homeScreen) paneFiltering() bool {
+	if l, ok := s.focusedPane().(interface{ List() *list.Model }); ok {
+		return l.List().FilterState() != list.Unfiltered
+	}
+	return false
+}
+
 // Update intercepts the wrapper's own keys, then delegates to the current modular
 // screen. The returned screen is always the wrapper — the modular swap happens in
 // place, never as a screen replacement.
 func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, result core.Action) {
 	defer func() { result.Cmd = tea.Batch(result.Cmd, s.syncDocsGit()) }()
+	s.notePane()
 	if act, handled := s.documentTabInput(sh, msg); handled {
 		return s, s.finishHomeUpdate(sh, act)
 	}
@@ -388,6 +413,18 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 		if s.fullPreview != nil && core.MatchKey(k, core.Keys.Back) && !s.modular.Filtering() {
 			s.closeCompletion()
 			return s, s.closeFullPreview()
+		}
+		// The return leg of editorRelease: esc hands the keys back to the editor from
+		// whatever pane holds them, so the two are one toggle rather than a walk around
+		// the shift+tab cycle. Bound to esc alone rather than core.Keys.Back — backspace
+		// is the folder view's walk to the parent directory and c is a filter character,
+		// and claiming either here would take it before the pane ever saw it. A list with
+		// a live /-filter keeps its esc for the same reason: ListPanel answers it with a
+		// ResetFilter, and a pane the user cannot get out of a filter is worse than one
+		// esc does not leave.
+		if k == "esc" && !s.editorPanel.Focused() && !s.modular.Filtering() &&
+			!s.modular.Resizing() && !s.paneFiltering() {
+			return s, core.Async(s.modular.FocusSlot(s.editorSlot()))
 		}
 		if core.MatchKey(k, wrapKey) {
 			s.closeCompletion()
