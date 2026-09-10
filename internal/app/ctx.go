@@ -402,11 +402,19 @@ func (c *Ctx) trackUnsaved(id, name string, ed *editor.Screen) {
 	c.open.addUnsaved(id, name, ed)
 }
 
-// EachDoc visits every saved open buffer in opening order. Pathless buffers are retained
-// by the context but deliberately excluded from file-backed consumers such as LSP.
+// EachDoc visits every open buffer whose text speaks for a file, in opening order. Two
+// kinds are held back, for the same reason: they have no authoritative text to offer.
+// Pathless buffers are retained by the context but name no file. Restored buffers name
+// one they have not read yet — their editor is empty until the user switches to them,
+// and handing that emptiness to a consumer is worse than handing it nothing, because
+// every consumer here already falls back to the file on disk. Telling gopls that an
+// unvisited foo.go is empty is what made a restored foo_test.go report every symbol in
+// its package undefined.
+//
+// Callers that want every retained buffer regardless have open.each and OpenDocs.
 func (c *Ctx) EachDoc(fn func(path string, ed *editor.Screen)) {
 	c.open.each(func(entry *openEntry) {
-		if entry.path != "" {
+		if entry.path != "" && !c.unread(entry.path) {
 			fn(entry.path, entry.editor)
 		}
 	})

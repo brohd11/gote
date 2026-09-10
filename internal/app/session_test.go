@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -486,5 +487,107 @@ func TestRestoredBufferIsSeededUnderTheReader(t *testing.T) {
 	if got := s.editor.Text(); got != string(want) {
 		t.Fatalf("restored buffer opened under the reader holds %q, want the file's %d bytes",
 			got, len(want))
+	}
+}
+
+// A restored buffer is in the open set without having read its file, which is a state
+// nothing but session restore can produce. EachDoc holds it back until its text is real,
+// because every consumer downstream falls back to the file on disk — and the disk is
+// exactly what an unread buffer contains.
+func TestEachDocSkipsUnreadRestoredBuffers(t *testing.T) {
+	sessionHome(t)
+	dir := t.TempDir()
+	read := writeDoc(t, dir, "read.md", 5)
+	unread := writeDoc(t, dir, "unread.md", 5)
+
+	c := New("test", DefaultConfig(), Options{Mode: ModeScan, Dir: dir})
+	loadedEditor(t, c, read)
+	c.OpenDoc(unread, editor.Opts{})
+	c.restore = map[string]SessionFile{unread: {Path: unread}}
+
+	var got []string
+	c.EachDoc(func(path string, _ *editor.Screen) { got = append(got, path) })
+	if len(got) != 1 || got[0] != read {
+		t.Fatalf("EachDoc yielded %v, want only the buffer that has read its file", got)
+	}
+
+	// Switching to it drains the restore entry, which is what makes its text speak for
+	// the file from then on.
+	delete(c.restore, unread)
+	got = nil
+	c.EachDoc(func(path string, _ *editor.Screen) { got = append(got, path) })
+	if len(got) != 2 {
+		t.Fatalf("EachDoc yielded %v once the read landed, want both buffers", got)
+	}
+}
+
+// The reported bug: relaunching onto a test file reported every symbol in its package
+// undefined, because the restored implementation file went to gopls as an empty
+// document. An unread buffer must never be published — with no didOpen, the server reads
+// the real file itself.
+func TestReconcileOmitsUnreadRestoredBuffer(t *testing.T) {
+	sessionHome(t)
+	dir := t.TempDir()
+	impl := filepath.Join(dir, "impl.py")
+	if err := os.WriteFile(impl, []byte("def helper():\n    return 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(dir, "main.py")
+	if err := os.WriteFile(active, []byte("helper()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := DefaultConfig()
+	// An address nothing answers on: Reconcile does no IO, and the actor's failure to
+	// dial is beside the point of the assertion.
+	cfg.LanguageServers["python"] = LanguageServerConfig{Address: "127.0.0.1:1"}
+	c := New("test", cfg, Options{Mode: ModeScan, Dir: dir})
+	t.Cleanup(c.close)
+
+	// The state a restore leaves behind: both registered, only the active one read.
+	c.OpenDoc(impl, editor.Opts{})
+	ed := c.OpenDoc(active, editor.Opts{})
+	c.restore = map[string]SessionFile{impl: {Path: impl}, active: {Path: active}}
+	ed.SetText("helper()\n")
+	delete(c.restore, active) // what applyRestore does once the read lands
+
+	c.lsp.Reconcile(c)
+	c.lsp.mu.Lock()
+	defer c.lsp.mu.Unlock()
+	if _, published := c.lsp.desired[filepath.Clean(impl)]; published {
+		t.Fatal("an unread restored buffer was published: the server would take the empty " +
+			"editor as the file's contents and call every symbol in it undefined")
+	}
+	doc, ok := c.lsp.desired[filepath.Clean(active)]
+	if !ok || doc.text != "helper()\n" {
+		t.Fatalf("the buffer that HAS read its file must still be published, got %#v (ok=%v)", doc, ok)
+	}
+}
+
+// The same bug's second symptom: the project search takes open buffers as content
+// overrides, so an unread restored buffer used to make its file search as empty.
+func TestSearchFindsUnreadRestoredBufferOnDisk(t *testing.T) {
+	sessionHome(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(path, []byte("a needle in here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := New("test", DefaultConfig(), Options{Mode: ModeScan, Dir: dir})
+	c.OpenDoc(path, editor.Opts{})
+	c.restore = map[string]SessionFile{path: {Path: path}}
+
+	// The snapshot map beginFindFiles builds.
+	snapshots := map[string]string{}
+	c.EachDoc(func(p string, ed *editor.Screen) { snapshots[filepath.Clean(p)] = ed.Text() })
+
+	got, _, err := searchFiles(context.Background(), dir, "needle", snapshots, searchResultLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("search returned %#v, want the match read from disk — an unread buffer "+
+			"must not override the file with its empty text", got)
 	}
 }
