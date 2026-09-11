@@ -252,7 +252,7 @@ func (s *homeScreen) restoreSession(c *Ctx) bool {
 	}
 	c.restore = make(map[string]SessionFile, len(session.Files))
 	for _, f := range session.Files {
-		c.OpenDoc(f.Path, s.editorOpts())
+		c.OpenDoc(f.Path, s.editorOpts(c))
 		c.restore[f.Path] = f
 	}
 	active := session.Active

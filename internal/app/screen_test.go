@@ -741,10 +741,10 @@ func TestHomeEditorSearch(t *testing.T) {
 	a := filepath.Join(t.TempDir(), "a.txt")
 	b := filepath.Join(t.TempDir(), "b.txt")
 
-	if !s.editorOpts().Search {
+	if !s.editorOpts(Of(sh)).Search {
 		t.Fatal("every editor built by gote should enable shared editor search")
 	}
-	if opts := s.editorOpts(); !opts.ContextMenu || opts.ContextItems == nil {
+	if opts := s.editorOpts(Of(sh)); !opts.ContextMenu || opts.ContextItems == nil {
 		t.Fatalf("every editor built by gote should enable the right-click menu and contribute rows: %+v", opts)
 	}
 	s.openDoc(sh, a)
@@ -781,8 +781,8 @@ func TestHomeEditorSearch(t *testing.T) {
 func TestHomeEditorIndentGuidesFromConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.IndentGuides = true
-	s, _ := newHomeCfg(t, cfg, Options{})
-	if !s.editorOpts().IndentGuides {
+	s, sh := newHomeCfg(t, cfg, Options{})
+	if !s.editorOpts(Of(sh)).IndentGuides {
 		t.Fatal("indent_guides config was not propagated to editor options")
 	}
 }
@@ -2032,6 +2032,68 @@ func TestSaveUnsavedBufferBecomesNormalDocument(t *testing.T) {
 	if s.currentName != "unsaved_1" {
 		t.Fatalf("saving should release the suffix for reuse, got %q", s.currentName)
 	}
+}
+
+// TestSaveRelativeNameUsesTheLaunchRoot: a bare name typed into the save box belongs to
+// the directory gote OPENED in, not to the shell it was launched from. The two are
+// deliberately different here — the test chdirs somewhere else first — because that is
+// the whole bug: cmd.resolveOptions makes every launch path absolute precisely so the
+// running editor never depends on the cwd, and the save box was the one place that still
+// did. Driven through the real stack, since what carries the root in is editorOpts.
+func TestSaveRelativeNameUsesTheLaunchRoot(t *testing.T) {
+	save := func(t *testing.T, model tea.Model, name string) tea.Model {
+		t.Helper()
+		model, cmd := model.Update(keyMsg("ctrl+n"))
+		model = pumpModel(model, cmd)
+		model, cmd = model.Update(keyMsg("draft body"))
+		model = pumpModel(model, cmd)
+		model, _ = model.Update(keyMsg("ctrl+s"))
+		edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
+		if edit == nil {
+			t.Fatal("ctrl+s on an unsaved buffer should raise the filename box")
+		}
+		edit.SetValue(name)
+		model, cmd = model.Update(keyMsg("enter"))
+		return pumpModel(model, cmd)
+	}
+
+	t.Run("a scan launch saves into the scan root", func(t *testing.T) {
+		root, elsewhere := t.TempDir(), t.TempDir()
+		t.Chdir(elsewhere) // the launching shell, deliberately not the scan root
+		model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root})
+		model = save(t, model, "note.md")
+
+		want := filepath.Join(root, "note.md")
+		if b, err := os.ReadFile(want); err != nil || string(b) != "draft body" {
+			t.Fatalf("the file should be in the scan root: %q, err = %v", b, err)
+		}
+		if _, err := os.Stat(filepath.Join(elsewhere, "note.md")); err == nil {
+			t.Fatal("nothing should have been written relative to the process cwd")
+		}
+		// The rekey has to follow the RESOLVED path: a relative string left here would
+		// key the open set by something that means nothing to the rest of gote.
+		if s.currentID != want || s.currentPath != want || s.currentName != "note.md" {
+			t.Fatalf("the buffer should take the resolved path: id=%q path=%q name=%q", s.currentID, s.currentPath, s.currentName)
+		}
+	})
+
+	t.Run("a default launch saves into the doc store", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		model, s, _ := newHomeRouter(t, Options{}) // ModeHome: ~/.gote/docs
+		model = save(t, model, "note.md")
+
+		dir, err := DocsDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(dir, "note.md")
+		if b, err := os.ReadFile(want); err != nil || string(b) != "draft body" {
+			t.Fatalf("the file should be in the doc store: %q, err = %v", b, err)
+		}
+		if s.currentPath != want {
+			t.Fatalf("the buffer should take the resolved path, got %q", s.currentPath)
+		}
+	})
 }
 
 // pressDelete sends ctrl+d and returns the confirm it pushed, if any.

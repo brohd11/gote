@@ -88,7 +88,7 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	// to the open set has to be seeded by hand while the reader holds the pane, or its
 	// async load reaches nothing (seedForPreview).
 	_, was := c.Doc(path)
-	ed := c.OpenDoc(path, s.editorOpts())
+	ed := c.OpenDoc(path, s.editorOpts(c))
 	s.seedForPreview(ed, path, !was || c.unread(path))
 	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 	c.SetActive(s.currentID)

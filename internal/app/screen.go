@@ -226,7 +226,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		s.currentID = c.FilePath
 		s.currentPath = c.FilePath
 		s.currentName = docName(c.FilePath)
-		s.editor = c.OpenDoc(c.FilePath, s.editorOpts())
+		s.editor = c.OpenDoc(c.FilePath, s.editorOpts(c))
 	} else if !s.restoreSession(c) {
 		s.installScratch(c)
 	}

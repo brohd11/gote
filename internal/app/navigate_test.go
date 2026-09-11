@@ -21,7 +21,7 @@ func seedDoc(t *testing.T, s *homeScreen, sh *core.Shared, name, text string) (s
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ed := Of(sh).OpenDoc(path, s.editorOpts())
+	ed := Of(sh).OpenDoc(path, s.editorOpts(Of(sh)))
 	ed.SetText(text)
 	ed.SetSize(sh, 80, 20)
 	return path, ed

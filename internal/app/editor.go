@@ -16,8 +16,16 @@ import (
 // three ways out and back: ctrl+x closes the buffer, esc hands the keys back, ctrl+s
 // writes it and stays. Path is filled in by whoever constructs the editor (Ctx.OpenDoc
 // for a doc, left empty for the scratch buffer).
-func (s *homeScreen) editorOpts() editor.Opts {
+//
+// BaseDir is what a relative name typed into the save box resolves against, and it is
+// docsRoot's directory rather than the process cwd for the reason cmd.resolveOptions
+// already makes absolute paths of its arguments: once gote is running, the shell it was
+// launched from is not where the user thinks they are. It is read from the ctx on every
+// call rather than cached on the screen because a vault switch moves the root — and it
+// can be, since SwitchVault resets the open set, so every editor is rebuilt after one.
+func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
 	return editor.Opts{
+		BaseDir:         docsRoot(c),
 		HideTitle:       s.tabsVisible(),
 		OnExit:          s.editorExit,
 		OnRelease:       s.editorRelease,
@@ -35,7 +43,7 @@ func (s *homeScreen) editorOpts() editor.Opts {
 // the Open row itself is deferred until that edit or ctrl+n.
 func (s *homeScreen) installScratch(c *Ctx) {
 	id, name := c.newUnsavedIdentity()
-	opts := s.editorOpts()
+	opts := s.editorOpts(c)
 	opts.Title, opts.Crumb = name, name
 	s.currentID, s.currentPath, s.currentName = id, "", name
 	c.SetActive(id)
