@@ -268,10 +268,11 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 			// so those diagnostics stay; anywhere else they are stale the moment the
 			// server is told didClose. See projectRoots.
 			if !m.projectScopedLocked(path) {
-				if _, ok := m.diagnostics[path]; ok {
+				key := diagnosticsKey(path)
+				if _, ok := m.diagnostics[key]; ok {
 					m.diagnosticsRevision++
 				}
-				delete(m.diagnostics, path)
+				delete(m.diagnostics, key)
 			}
 			if m.completion != nil && m.completion.path == path {
 				m.completion = nil
@@ -1177,7 +1178,6 @@ func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.Publi
 		// unasked, and rust-analyzer does the same across a crate. Discarding these was
 		// what used to leave the panel empty for files nobody had a tab for. There is no
 		// client version to check against — gote holds no document for this path at all.
-		path = filepath.Clean(path)
 		c.manager.markProjectRootLocked(c.root)
 	} else if version, ok := params.Version.Get(); ok && version < doc.version {
 		c.manager.mu.Unlock()
@@ -1187,10 +1187,11 @@ func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.Publi
 	for _, item := range params.Diagnostics {
 		diagnostics = append(diagnostics, projectDiagnostic(item))
 	}
-	changed := !slices.Equal(c.manager.diagnostics[path], diagnostics)
+	key := diagnosticsKey(path)
+	changed := !slices.Equal(c.manager.diagnostics[key], diagnostics)
 	if changed {
 		c.manager.diagnosticsRevision++
-		c.manager.diagnostics[path] = diagnostics
+		c.manager.diagnostics[key] = diagnostics
 	}
 	c.manager.mu.Unlock()
 	if !changed {
@@ -1248,7 +1249,7 @@ func (m *lspManager) Diagnostics(path string) []lspDiagnostic {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]lspDiagnostic(nil), m.diagnostics[filepath.Clean(path)]...)
+	return append([]lspDiagnostic(nil), m.diagnostics[diagnosticsKey(path)]...)
 }
 
 // AllDiagnostics is every file the servers have reported on, for the panel that lists a

@@ -33,10 +33,10 @@ func TestDiagnosticsPanelCurrentFirst(t *testing.T) {
 	}
 	for _, path := range paths {
 		c.OpenDoc(path, editor.Opts{})
-		c.lsp.diagnostics[path] = []lspDiagnostic{{
+		setTestDiagnostics(c, path, lspDiagnostic{
 			Line: 1, Character: 2, Severity: protocol.DiagnosticSeverityWarning,
 			Message: "a useful warning", Source: "fake", Code: "W1",
-		}}
+		})
 	}
 
 	panel := newDiagnosticsPanel(nil)
@@ -62,7 +62,7 @@ func TestDiagnosticsGutterIndependentFromGit(t *testing.T) {
 	s, sh := newHome(t)
 	s.currentPath = filepath.Join(t.TempDir(), "main.py")
 	s.editor.SetText("one\ntwo")
-	Of(sh).lsp.diagnostics[s.currentPath] = []lspDiagnostic{{Line: 1, Severity: protocol.DiagnosticSeverityError}}
+	setTestDiagnostics(Of(sh), s.currentPath, lspDiagnostic{Line: 1, Severity: protocol.DiagnosticSeverityError})
 	s.configureSignColumns()
 
 	if !s.editor.SignColumnMode(gitSignColumn) || !s.editor.SignColumnMode(diagnosticSignColumn) {

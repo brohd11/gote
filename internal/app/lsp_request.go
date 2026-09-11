@@ -443,6 +443,21 @@ func sameFilePath(left, right string) bool {
 	return left == right
 }
 
+// diagnosticsKey is the spelling the diagnostics map is keyed on. Paths reach that map
+// from two sources that disagree on Windows: the OS, which spells a drive letter (or a
+// UNC authority) however the user did, and file URIs, which canonicalize both to
+// lowercase. Storing under one spelling and reading with the other loses every diagnostic
+// for the file, so both sides come through here. Only the volume is folded — the rest of
+// the path is what the panel shows.
+func diagnosticsKey(path string) string {
+	path = filepath.Clean(path)
+	if runtime.GOOS != "windows" {
+		return path
+	}
+	volume := filepath.VolumeName(path)
+	return strings.ToLower(volume) + path[len(volume):]
+}
+
 // projectSymbols preserves the hierarchy of DocumentSymbol results. The legacy
 // SymbolInformation shape has no reliable parent relation, so it stays flat and is
 // sorted into document order, which that response shape does not guarantee.

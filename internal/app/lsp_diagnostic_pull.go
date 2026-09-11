@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"path/filepath"
 	"slices"
 	"sort"
 	"time"
@@ -137,7 +136,7 @@ func (m *lspManager) foldWorkspacePull(session *lspSession, report *protocol.Wor
 			if !entry.URI.IsFile() {
 				continue
 			}
-			path := filepath.Clean(uriPath(entry.URI))
+			path := diagnosticsKey(uriPath(entry.URI))
 			diagnostics := make([]lspDiagnostic, 0, len(entry.Items))
 			for _, diagnostic := range entry.Items {
 				diagnostics = append(diagnostics, projectDiagnostic(diagnostic))
@@ -157,7 +156,7 @@ func (m *lspManager) foldWorkspacePull(session *lspSession, report *protocol.Wor
 				continue
 			}
 			// Unchanged means what is stored still stands; only the handle is refreshed.
-			session.setPullResultID(filepath.Clean(uriPath(entry.URI)), entry.ResultID)
+			session.setPullResultID(diagnosticsKey(uriPath(entry.URI)), entry.ResultID)
 		}
 	}
 	m.mu.Unlock()

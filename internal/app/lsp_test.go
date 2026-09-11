@@ -663,8 +663,12 @@ func TestLSPTCPDocumentLifecycle(t *testing.T) {
 	newPath := filepath.Join(root, "renamed.py")
 	c.RekeyDoc(path, newPath, ed)
 	c.lsp.Reconcile(c)
-	waitLSPCall(t, server.calls, "close")
-	reopened := waitLSPCall(t, server.calls, "open")
+	// One converge pass sends didClose then didOpen, and the wire keeps that order — but
+	// the test server is served through jsonrpc2's AsyncHandler, which dispatches in wire
+	// order and then runs the handlers concurrently. Which of the two reaches the recorder
+	// first is a race, and waiting for them one at a time throws the other away: a loaded
+	// CI machine loses it. Wait for the pair instead.
+	reopened := waitLSPCallSet(t, server.calls, "close", "open")["open"]
 	if reopened.version != 1 || reopened.text != "print('two')\n" {
 		t.Fatalf("save-as didOpen = version %d text %q", reopened.version, reopened.text)
 	}
@@ -722,8 +726,8 @@ func TestLSPDebouncesDocumentChanges(t *testing.T) {
 	newPath := filepath.Join(root, "renamed.py")
 	c.RekeyDoc(path, newPath, ed)
 	c.lsp.Reconcile(c)
-	waitLSPCall(t, server.calls, "close")
-	reopened := waitLSPCall(t, server.calls, "open")
+	// The close and the open race to the recorder; see the pair wait in the lifecycle test.
+	reopened := waitLSPCallSet(t, server.calls, "close", "open")["open"]
 	if reopened.version != 1 || reopened.text != "renamed\n" {
 		t.Fatalf("rekeyed didOpen = version %d text %q", reopened.version, reopened.text)
 	}

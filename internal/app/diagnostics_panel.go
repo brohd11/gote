@@ -86,17 +86,30 @@ func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 		paths = append(paths, path)
 	}
 	sort.Slice(paths, func(i, j int) bool {
-		if paths[i] == current {
-			return paths[j] != current
+		if sameFilePath(paths[i], current) {
+			return !sameFilePath(paths[j], current)
 		}
-		if paths[j] == current {
+		if sameFilePath(paths[j], current) {
 			return false
 		}
 		return paths[i] < paths[j]
 	})
+	// The map is keyed for lookup, not for display: diagnosticsKey folds the drive letter
+	// a file URI hands back on Windows. An entry has to name its file the way the rest of
+	// gote spells it, or activating one opens a second buffer for a file that already has
+	// a tab.
+	spelled := map[string]string{}
+	for _, doc := range c.OpenDocs() {
+		if doc.Path != "" {
+			spelled[diagnosticsKey(doc.Path)] = doc.Path
+		}
+	}
 	var entries []diagnosticEntry
 	for _, path := range paths {
-		diagnostics := byPath[filepath.Clean(path)]
+		diagnostics := byPath[path]
+		if open, ok := spelled[path]; ok {
+			path = open
+		}
 		sort.SliceStable(diagnostics, func(i, j int) bool {
 			a, b := diagnostics[i], diagnostics[j]
 			if a.Line != b.Line {
@@ -123,20 +136,24 @@ func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 // A path under no root — a buffer opened from somewhere else entirely — stays absolute,
 // which is the honest answer for a file that is not part of the project.
 func projectPath(roots []string, path string) string {
-	best := ""
+	best, relative := "", ""
 	for _, root := range roots {
-		if len(root) > len(best) && strings.HasPrefix(path, root+string(filepath.Separator)) {
-			best = root
+		if len(root) <= len(best) {
+			continue
 		}
+		// Rel, not a prefix test: on Windows it compares case-insensitively, and the two
+		// spellings of a path there routinely differ in the drive letter alone. See
+		// diagnosticsKey.
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		best, relative = root, rel
 	}
 	if best == "" {
 		return path
 	}
-	rel, err := filepath.Rel(best, path)
-	if err != nil {
-		return path
-	}
-	return rel
+	return relative
 }
 
 func (p *diagnosticsPanel) SetSize(width, height int) {

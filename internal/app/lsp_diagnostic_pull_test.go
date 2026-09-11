@@ -274,3 +274,20 @@ func TestWorkspaceDiagnosticOptionsReadsBothShapes(t *testing.T) {
 		}
 	}
 }
+
+// Everything that stores a diagnostic learns the path from a file URI; everything that
+// reads one back — the gutter, the panel, these tests — spells it the way the OS does.
+// On Windows those two spellings differ, because a file URI lowercases the drive letter
+// and a UNC authority, and keying the map on one while looking it up with the other lost
+// every diagnostic for a file gote had not opened. This runs everywhere and only has
+// something to catch on Windows, which is precisely where it was not caught.
+func TestDiagnosticsKeySurvivesTheURIRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.py")
+	roundTripped := uriPath(uri.File(path))
+	if !sameFilePath(roundTripped, path) {
+		t.Fatalf("%q round-tripped through a file URI as %q", path, roundTripped)
+	}
+	if got, want := diagnosticsKey(roundTripped), diagnosticsKey(path); got != want {
+		t.Fatalf("diagnostics key for %q = %q via its URI, %q from the OS", path, got, want)
+	}
+}

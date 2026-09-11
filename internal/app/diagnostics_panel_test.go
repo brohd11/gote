@@ -15,9 +15,11 @@ import (
 	"go.lsp.dev/uri"
 )
 
+// Stands in for a server publish, so it has to key the map the way one does — through
+// diagnosticsKey, or on Windows nothing that reads the map back would find these.
 func setTestDiagnostics(c *Ctx, path string, entries ...lspDiagnostic) {
 	c.lsp.mu.Lock()
-	c.lsp.diagnostics[path] = entries
+	c.lsp.diagnostics[diagnosticsKey(path)] = entries
 	c.lsp.diagnosticsRevision++
 	c.lsp.mu.Unlock()
 }
@@ -50,7 +52,7 @@ func TestDiagnosticsPanelListsTheWholeProject(t *testing.T) {
 	if p.entries[0].path != open {
 		t.Fatalf("entries[0] = %s, want the file in the editor first", p.entries[0].path)
 	}
-	if p.entries[1].path != unopened {
+	if !sameFilePath(p.entries[1].path, unopened) {
 		t.Fatalf("entries[1] = %s, want the unopened project file", p.entries[1].path)
 	}
 	rendered := strings.Join(p.lines, "\n")
