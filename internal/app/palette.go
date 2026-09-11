@@ -29,6 +29,7 @@ import (
 // does not need to quantize into the same hues as that separate palette.
 func defaultSyntaxColors() SyntaxColors {
 	return SyntaxColors{
+		Brackets: []string{"178", "176", "32"},
 		Keyword:  "176",
 		Type:     "41",
 		Func:     "32",
@@ -56,6 +57,7 @@ func defaultSyntaxColors() SyntaxColors {
 // and the whole reason the opt-out is here.
 func basicSyntaxColors() SyntaxColors {
 	return SyntaxColors{
+		Brackets: []string{"3", "5", "4"},
 		Keyword:  "5",
 		Type:     "6",
 		Func:     "4",
@@ -82,6 +84,7 @@ func basicSyntaxColors() SyntaxColors {
 // from it, which is how the two files stay in agreement without importing each other's
 // vars.
 type syntaxPalette struct {
+	brackets []color.Color
 	keyword  color.Color
 	typ      color.Color
 	fn       color.Color
@@ -155,6 +158,14 @@ func normalizeSyntaxColors(sc *SyntaxColors) {
 			*got[i] = *want[i]
 		}
 	}
+	if sc.Brackets == nil {
+		sc.Brackets = append([]string(nil), def.Brackets...)
+	}
+	for i := range sc.Brackets {
+		if _, ok := parseSyntaxColor(sc.Brackets[i]); !ok {
+			sc.Brackets[i] = def.Brackets[i%len(def.Brackets)]
+		}
+	}
 }
 
 // resolveSyntaxColors turns the configured strings into colors. BasicColors discards the
@@ -162,9 +173,16 @@ func normalizeSyntaxColors(sc *SyntaxColors) {
 // into, because a user asking for their terminal's own colors means all of them.
 func resolveSyntaxColors(sc SyntaxColors) syntaxPalette {
 	def := defaultSyntaxColors()
+	bracketsEnabled := sc.Brackets == nil || len(sc.Brackets) > 0
+	if sc.Brackets == nil {
+		sc.Brackets = append([]string(nil), def.Brackets...)
+	}
 	if sc.BasicColors {
 		def = basicSyntaxColors()
 		sc = def
+		if !bracketsEnabled {
+			sc.Brackets = []string{}
+		}
 	}
 	// Every slot still resolves through its default: applySyntaxPalette is reachable
 	// without LoadConfig's normalization (init below, and tests), so the guard belongs
@@ -176,7 +194,12 @@ func resolveSyntaxColors(sc SyntaxColors) syntaxPalette {
 		c, _ := parseSyntaxColor(fallback)
 		return c
 	}
+	brackets := make([]color.Color, len(sc.Brackets))
+	for i, value := range sc.Brackets {
+		brackets[i] = col(value, def.Brackets[i%len(def.Brackets)])
+	}
 	return syntaxPalette{
+		brackets: brackets,
 		keyword:  col(sc.Keyword, def.Keyword),
 		typ:      col(sc.Type, def.Type),
 		fn:       col(sc.Func, def.Func),

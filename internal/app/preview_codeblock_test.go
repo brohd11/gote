@@ -25,6 +25,19 @@ func TestChromaCodeBlockColors(t *testing.T) {
 	}
 }
 
+func TestChromaCodeBlockInheritsRainbowBrackets(t *testing.T) {
+	t.Cleanup(func() { applySyntaxPalette(defaultSyntaxColors()) })
+	applySyntaxPalette(defaultSyntaxColors())
+	rows := chromaCodeBlock("go", []string{"func f() { g() }"}, 40)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if !strings.Contains(rows[0], chBracketStyles[0].Render("(")) ||
+		!strings.Contains(rows[0], chBracketStyles[1].Render("(")) {
+		t.Errorf("fenced Go block did not inherit rainbow depths: %q", rows[0])
+	}
+}
+
 func TestGDScriptCodeBlockUsesChroma(t *testing.T) {
 	code := []string{"func ready():", "\tpass"}
 	rows := chromaCodeBlock("gdscript", code, 40)

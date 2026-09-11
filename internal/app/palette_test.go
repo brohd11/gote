@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestSyntaxPaletteForColorProfile(t *testing.T) {
 				want := sample()
 				c := newWithColorProfile("test", cfg, Options{}, profile)
 				defer c.close()
-				if c.Config.SyntaxColors != configured {
+				if !reflect.DeepEqual(c.Config.SyntaxColors, configured) {
 					t.Fatal("runtime detection changed saved color settings")
 				}
 				for slot, got := range sample() {
@@ -84,7 +85,7 @@ func TestPaletteReportUsesDetectedProfile(t *testing.T) {
 			t.Fatal("colorless output regained terminal colors")
 		}
 	}
-	if cfg.SyntaxColors != configured {
+	if !reflect.DeepEqual(cfg.SyntaxColors, configured) {
 		t.Fatal("palette report modified config")
 	}
 }
@@ -119,7 +120,10 @@ func TestSyntaxColorTolerance(t *testing.T) {
 
 	// Unparseable slots fall back to their default; valid ones and the flag are left as
 	// the user wrote them, so toggling basic_colors off restores the file's own palette.
-	sc := SyntaxColors{BasicColors: true, Keyword: "nonsense", Type: "", Func: "#a5f", String: "300"}
+	sc := SyntaxColors{
+		BasicColors: true, Keyword: "nonsense", Type: "", Func: "#a5f", String: "300",
+		Brackets: []string{"1", "bad", "2", "bad"},
+	}
 	normalizeSyntaxColors(&sc)
 	if sc.Keyword != def.Keyword || sc.Type != def.Type || sc.String != def.String {
 		t.Errorf("bad slots not repaired: %+v", sc)
@@ -129,5 +133,20 @@ func TestSyntaxColorTolerance(t *testing.T) {
 	}
 	if !sc.BasicColors {
 		t.Error("normalizeSyntaxColors cleared BasicColors")
+	}
+	wantBrackets := []string{"1", def.Brackets[1], "2", def.Brackets[0]}
+	if !reflect.DeepEqual(sc.Brackets, wantBrackets) {
+		t.Errorf("bracket cycle = %v, want %v", sc.Brackets, wantBrackets)
+	}
+
+	disabled := def
+	disabled.Brackets = []string{}
+	normalizeSyntaxColors(&disabled)
+	if disabled.Brackets == nil || len(disabled.Brackets) != 0 {
+		t.Errorf("explicit bracket opt-out was normalized away: %#v", disabled.Brackets)
+	}
+	disabled.BasicColors = true
+	if got := resolveSyntaxColors(disabled).brackets; len(got) != 0 {
+		t.Errorf("basic palette re-enabled disabled brackets: %v", got)
 	}
 }

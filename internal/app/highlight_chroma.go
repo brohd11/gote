@@ -41,6 +41,8 @@ var (
 	chInsertedStyle lipgloss.Style
 	chDeletedStyle  lipgloss.Style
 	chErrorStyle    lipgloss.Style
+	chBracketStyles []*lipgloss.Style
+	chErrorStylePtr *lipgloss.Style
 )
 
 // NameBuiltin is deliberately a function and not a type: it is what chroma tags Go's
@@ -72,6 +74,10 @@ func applyChromaPalette(p syntaxPalette) {
 	chInsertedStyle = lipgloss.NewStyle().Foreground(p.inserted)
 	chDeletedStyle = lipgloss.NewStyle().Foreground(p.deleted)
 	chErrorStyle = lipgloss.NewStyle().Foreground(p.err).Bold(true)
+	chBracketStyles = make([]*lipgloss.Style, len(p.brackets))
+	for i, color := range p.brackets {
+		chBracketStyles[i] = styleRef(lipgloss.NewStyle().Foreground(color))
+	}
 
 	chKeywordStyleRef := styleRef(chKeywordStyle)
 	chTypeStyleRef := styleRef(chTypeStyle)
@@ -83,6 +89,7 @@ func applyChromaPalette(p syntaxPalette) {
 	chInsertedStyleRef := styleRef(chInsertedStyle)
 	chDeletedStyleRef := styleRef(chDeletedStyle)
 	chErrorStyleRef := styleRef(chErrorStyle)
+	chErrorStylePtr = chErrorStyleRef
 
 	chromaStyles = map[chroma.TokenType]*lipgloss.Style{
 		chroma.Keyword:         chKeywordStyleRef,
@@ -130,17 +137,48 @@ func styleFor(tt chroma.TokenType) *lipgloss.Style {
 // whole document and bakes per-line spans; HighlightLine is then a lookup. The lexer is
 // fixed at construction (the language profile chooses it), so no per-parse detection.
 type chromaHighlighter struct {
-	lexer   chroma.Lexer
-	lines   [][]editor.Span
-	restart []int // per row, a nearby root-like opener for provisional fragment parses
+	lexer       chroma.Lexer
+	lines       [][]editor.Span
+	restart     []int // per row, a nearby root-like opener for provisional fragment parses
+	bracketSeed *bracketFrame
+	bracketAt   []*bracketFrame // immutable stack at the beginning of each parsed row
+	fragment    bool            // a bounded preview: EOF cannot prove an opener unmatched
 }
 
 var _ editor.Highlighter = (*chromaHighlighter)(nil)
 var _ editor.HighlightRestartProvider = (*chromaHighlighter)(nil)
+var _ editor.HighlightPreviewProvider = (*chromaHighlighter)(nil)
+
+type bracketPos struct {
+	row, span int
+}
+
+// bracketFrame is a persistent stack node. Per-row checkpoints can all point into the
+// same immutable chain, so a large document pays one node per opener rather than copying
+// its whole nesting stack on every line.
+type bracketFrame struct {
+	close  rune
+	depth  int
+	prev   *bracketFrame
+	opener bracketPos
+	local  bool // opener belongs to this parse rather than a preview seed
+}
 
 func chromaHighlighterFactory(lexer chroma.Lexer) func() editor.Highlighter {
 	lexer = chroma.Coalesce(lexer)
 	return func() editor.Highlighter { return &chromaHighlighter{lexer: lexer} }
+}
+
+// NewHighlightPreview returns an independent Chroma adapter carrying the exact bracket
+// stack at snapshotLine. Lexical state still comes from parsing at the restart row the
+// editor selected; this seed supplies the orthogonal nesting state without replaying from
+// the outermost bracket.
+func (h *chromaHighlighter) NewHighlightPreview(snapshotLine int) editor.Highlighter {
+	var seed *bracketFrame
+	if snapshotLine >= 0 && snapshotLine < len(h.bracketAt) {
+		seed = h.bracketAt[snapshotLine]
+	}
+	return &chromaHighlighter{lexer: h.lexer, bracketSeed: seed, fragment: true}
 }
 
 // registerPatchedGDScript repairs a defect in Chroma's own GDScript lexer, in place, by
@@ -221,6 +259,7 @@ func registerPatchedGDScript() {
 func (h *chromaHighlighter) Parse(doc string) {
 	h.lines = nil
 	h.restart = nil
+	h.bracketAt = nil
 	if h.lexer == nil {
 		return
 	}
@@ -232,10 +271,13 @@ func (h *chromaHighlighter) Parse(doc string) {
 	// whose stream ends early) still leaves the rows addressable.
 	h.lines = make([][]editor.Span, strings.Count(doc, "\n")+1)
 	h.restart = make([]int, len(h.lines))
+	h.bracketAt = make([]*bracketFrame, len(h.lines))
 	for row := range h.restart {
 		h.restart[row] = row
 	}
 	row := 0
+	stack := h.bracketSeed
+	h.bracketAt[0] = stack
 	family, familyStart := 0, 0
 	for _, tok := range iter.Tokens() {
 		nextFamily := chromaRestartFamily(tok.Type)
@@ -251,6 +293,9 @@ func (h *chromaHighlighter) Parse(doc string) {
 				// trailing newline of their own (Config.EnsureNL), so this can walk one
 				// row past the buffer — the append below is guarded for it.
 				row++
+				if row < len(h.bracketAt) {
+					h.bracketAt[row] = stack
+				}
 				if family != 0 && row < len(h.restart) {
 					h.restart[row] = familyStart
 				}
@@ -258,8 +303,69 @@ func (h *chromaHighlighter) Parse(doc string) {
 			if part == "" || row >= len(h.lines) {
 				continue
 			}
-			h.lines[row] = append(h.lines[row], editor.Span{Text: part, Style: style})
+			if tok.Type == chroma.Punctuation && len(chBracketStyles) > 0 {
+				h.appendRainbowPart(row, part, style, &stack)
+			} else {
+				h.lines[row] = append(h.lines[row], editor.Span{Text: part, Style: style})
+			}
 		}
+	}
+	if !h.fragment {
+		for frame := stack; frame != nil; frame = frame.prev {
+			pos := frame.opener
+			if frame.local && pos.row >= 0 && pos.row < len(h.lines) &&
+				pos.span >= 0 && pos.span < len(h.lines[pos.row]) {
+				h.lines[pos.row][pos.span].Style = chErrorStylePtr
+			}
+		}
+	}
+}
+
+func (h *chromaHighlighter) appendRainbowPart(row int, part string, base *lipgloss.Style, stack **bracketFrame) {
+	from := 0
+	for at, r := range part {
+		close, opens := rainbowCloser(r)
+		closes := r == ')' || r == ']' || r == '}'
+		if !opens && !closes {
+			continue
+		}
+		if at > from {
+			h.lines[row] = append(h.lines[row], editor.Span{Text: part[from:at], Style: base})
+		}
+		style := chErrorStylePtr
+		if opens {
+			depth := 0
+			if *stack != nil {
+				depth = (*stack).depth + 1
+			}
+			style = chBracketStyles[depth%len(chBracketStyles)]
+			span := len(h.lines[row])
+			*stack = &bracketFrame{
+				close: close, depth: depth, prev: *stack,
+				opener: bracketPos{row: row, span: span}, local: true,
+			}
+		} else if *stack != nil && (*stack).close == r {
+			style = chBracketStyles[(*stack).depth%len(chBracketStyles)]
+			*stack = (*stack).prev
+		}
+		h.lines[row] = append(h.lines[row], editor.Span{Text: string(r), Style: style})
+		from = at + 1 // rainbow delimiters are ASCII, so one byte advances past r
+	}
+	if from < len(part) {
+		h.lines[row] = append(h.lines[row], editor.Span{Text: part[from:], Style: base})
+	}
+}
+
+func rainbowCloser(r rune) (rune, bool) {
+	switch r {
+	case '(':
+		return ')', true
+	case '[':
+		return ']', true
+	case '{':
+		return '}', true
+	default:
+		return 0, false
 	}
 }
 
@@ -283,6 +389,14 @@ func (h *chromaHighlighter) HighlightLine(row int) []editor.Span {
 		return nil
 	}
 	return h.lines[row]
+}
+
+func spansPlainText(spans []editor.Span) string {
+	var b strings.Builder
+	for _, span := range spans {
+		b.WriteString(span.Text)
+	}
+	return b.String()
 }
 
 func (h *chromaHighlighter) HighlightRestartLine(row int) int {

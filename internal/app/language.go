@@ -440,22 +440,15 @@ func shebangExt(path string) string {
 	return extByInterpreter[strings.ToLower(filepath.Base(fields[0]))]
 }
 
-// editorLanguageForPath is the editor's LanguageResolver. Besides answering with the
-// profile, it binds the path into the highlighter factory: the resolver is the editor's
-// only path-derived seam, and the semantic overlay needs to know which file's tokens to
-// read. The config is copied before that is written, because profiles are shared across
-// every editor that resolves to the same language.
+// editorLanguageForPath is the editor's LanguageResolver. Semantic tokens are installed
+// directly on a retained editor's host overlay, so lexical highlighter factories remain
+// path-independent and profiles can be shared unchanged.
 func editorLanguageForPath(path string) *editor.LanguageConfig {
 	profile := languageForPath(path)
 	if profile == nil {
 		return nil
 	}
-	if path == "" || profile.editor.NewHighlighter == nil {
-		return &profile.editor
-	}
-	cfg := profile.editor
-	cfg.NewHighlighter = semanticHighlighterFactory(profile.editor.NewHighlighter, path)
-	return &cfg
+	return &profile.editor
 }
 
 func afterLeadingIndent(ctx editor.EnterContext) bool {

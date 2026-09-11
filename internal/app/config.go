@@ -87,6 +87,9 @@ const (
 // alone while it is set, so turning it off returns the palette the file names.
 type SyntaxColors struct {
 	BasicColors bool `yaml:"basic_colors"`
+	// Brackets is the rainbow-bracket cycle. A missing key inherits the defaults because
+	// LoadConfig unmarshals over DefaultConfig; an explicit [] disables the feature.
+	Brackets []string `yaml:"brackets"`
 
 	Keyword  string `yaml:"keyword"`
 	Type     string `yaml:"type"`

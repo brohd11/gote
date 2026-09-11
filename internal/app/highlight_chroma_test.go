@@ -178,6 +178,126 @@ func TestChromaFactoryParsesIndependentSnapshotsConcurrently(t *testing.T) {
 	wg.Wait()
 }
 
+type delimiterSpan struct {
+	r     rune
+	style *lipgloss.Style
+}
+
+func delimiterSpans(h editor.Highlighter, rows int) []delimiterSpan {
+	var out []delimiterSpan
+	for row := 0; row < rows; row++ {
+		for _, span := range h.HighlightLine(row) {
+			for _, r := range span.Text {
+				if _, opens := rainbowCloser(r); opens || r == ')' || r == ']' || r == '}' {
+					out = append(out, delimiterSpan{r: r, style: span.Style})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func TestChromaRainbowBracketsNestAndCycle(t *testing.T) {
+	t.Cleanup(func() { applySyntaxPalette(defaultSyntaxColors()) })
+	sc := defaultSyntaxColors()
+	sc.Brackets = []string{"1", "2"}
+	applySyntaxPalette(sc)
+	h := highlighterFor(t, ".go")
+	h.Parse("func f() { return a[b(c)] }")
+	got := delimiterSpans(h, 1)
+	wantRunes := []rune{'(', ')', '{', '[', '(', ')', ']', '}'}
+	wantIndexes := []int{0, 0, 0, 1, 0, 0, 1, 0}
+	if len(got) != len(wantRunes) {
+		t.Fatalf("got %d delimiters, want %d: %+v", len(got), len(wantRunes), got)
+	}
+	for i := range wantRunes {
+		if got[i].r != wantRunes[i] || got[i].style != chBracketStyles[wantIndexes[i]] {
+			t.Errorf("delimiter %d = %q/%p, want %q/cycle index %d (%p)",
+				i, got[i].r, got[i].style, wantRunes[i], wantIndexes[i], chBracketStyles[wantIndexes[i]])
+		}
+	}
+}
+
+func TestChromaRainbowBracketsIgnoreStringsAndComments(t *testing.T) {
+	t.Cleanup(func() { applySyntaxPalette(defaultSyntaxColors()) })
+	applySyntaxPalette(defaultSyntaxColors())
+	h := highlighterFor(t, ".go")
+	h.Parse("var s = \"([{}])\" // ([{}])\nvar x = (1)")
+	got := delimiterSpans(h, 2)
+	if len(got) != 14 {
+		t.Fatalf("got %d delimiters, want 14: %+v", len(got), got)
+	}
+	for i := 0; i < 6; i++ {
+		if got[i].style == nil || got[i].style.Render("x") != chStringStyle.Render("x") {
+			t.Errorf("string delimiter %d received rainbow style", i)
+		}
+	}
+	for i := 6; i < 12; i++ {
+		if got[i].style == nil || got[i].style.Render("x") != chCommentStyle.Render("x") {
+			t.Errorf("comment delimiter %d received rainbow style", i)
+		}
+	}
+	for i := 12; i < 14; i++ {
+		if got[i].style != chBracketStyles[0] {
+			t.Errorf("source delimiter %d did not receive depth-zero style", i)
+		}
+	}
+}
+
+func TestChromaRainbowBracketsMarkMismatches(t *testing.T) {
+	t.Cleanup(func() { applySyntaxPalette(defaultSyntaxColors()) })
+	applySyntaxPalette(defaultSyntaxColors())
+	h := highlighterFor(t, ".go")
+	h.Parse("var _ = ([)]")
+	got := delimiterSpans(h, 1)
+	// The assignment contains only these four delimiters: ')' mismatches '[', ']' still
+	// closes it, and the outer '(' is proven unmatched at exact-parse EOF.
+	if len(got) != 4 {
+		t.Fatalf("got %d delimiters, want 4: %+v", len(got), got)
+	}
+	want := []*lipgloss.Style{chErrorStylePtr, chBracketStyles[1], chErrorStylePtr, chBracketStyles[1]}
+	for i := range want {
+		if got[i].style != want[i] {
+			t.Errorf("delimiter %d %q style = %p, want %p", i, got[i].r, got[i].style, want[i])
+		}
+	}
+}
+
+func TestChromaRainbowPreviewCarriesDeepNestingSeed(t *testing.T) {
+	t.Cleanup(func() { applySyntaxPalette(defaultSyntaxColors()) })
+	applySyntaxPalette(defaultSyntaxColors())
+	deep := 140 // deliberately beyond bubblestack's 128-line preview budget
+	lines := make([]string, deep+2)
+	lines[0] = "func f() {"
+	for row := 1; row < deep; row++ {
+		lines[row] = "var x = 1"
+	}
+	lines[deep] = "g()"
+	lines[deep+1] = "}"
+	exact := highlighterFor(t, ".go").(*chromaHighlighter)
+	exact.Parse(strings.Join(lines, "\n"))
+	preview := exact.NewHighlightPreview(deep)
+	preview.Parse("g()")
+	got := delimiterSpans(preview, 1)
+	if len(got) != 2 || got[0].style != chBracketStyles[1] || got[1].style != chBracketStyles[1] {
+		t.Fatalf("deep seeded delimiters = %+v, want depth one", got)
+	}
+}
+
+func TestChromaRainbowBracketsCanBeDisabled(t *testing.T) {
+	t.Cleanup(func() { applySyntaxPalette(defaultSyntaxColors()) })
+	sc := defaultSyntaxColors()
+	sc.Brackets = []string{}
+	applySyntaxPalette(sc)
+	h := highlighterFor(t, ".go")
+	h.Parse("func f() {}")
+	for i, got := range delimiterSpans(h, 1) {
+		if got.style != nil {
+			t.Errorf("disabled delimiter %d %q still has style %p", i, got.r, got.style)
+		}
+	}
+}
+
 var benchmarkHighlightSpans []editor.Span
 
 func BenchmarkChromaHighlighterLargeDocument(b *testing.B) {

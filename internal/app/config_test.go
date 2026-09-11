@@ -114,7 +114,7 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "indent_guides:", "git_gutter:", "language_servers:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "indent_guides:", "git_gutter:", "language_servers:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}
@@ -129,6 +129,28 @@ func TestEnsureConfig(t *testing.T) {
 	raw, err = os.ReadFile(path)
 	if err != nil || string(raw) != "scan_depth: 9\n" {
 		t.Fatalf("an existing config must not be rewritten, got %q (%v)", raw, err)
+	}
+}
+
+func TestLoadConfigRainbowBracketsDefaultAndOptOut(t *testing.T) {
+	missing := writeConfig(t, "scan_depth: 2\n")
+	if !reflect.DeepEqual(missing.SyntaxColors.Brackets, defaultSyntaxColors().Brackets) {
+		t.Fatalf("omitted brackets = %v, want defaults", missing.SyntaxColors.Brackets)
+	}
+	partial := writeConfig(t, "syntax_colors:\n  keyword: '1'\n")
+	if !reflect.DeepEqual(partial.SyntaxColors.Brackets, defaultSyntaxColors().Brackets) {
+		t.Fatalf("brackets omitted from syntax_colors = %v, want defaults", partial.SyntaxColors.Brackets)
+	}
+
+	disabled := writeConfig(t, "syntax_colors:\n  brackets: []\n")
+	if disabled.SyntaxColors.Brackets == nil || len(disabled.SyntaxColors.Brackets) != 0 {
+		t.Fatalf("explicit empty brackets = %#v, want a non-nil empty opt-out", disabled.SyntaxColors.Brackets)
+	}
+
+	custom := writeConfig(t, "syntax_colors:\n  brackets: ['1', bad, '2', bad]\n")
+	want := []string{"1", defaultSyntaxColors().Brackets[1], "2", defaultSyntaxColors().Brackets[0]}
+	if !reflect.DeepEqual(custom.SyntaxColors.Brackets, want) {
+		t.Fatalf("normalized custom brackets = %v, want %v", custom.SyntaxColors.Brackets, want)
 	}
 }
 

@@ -36,7 +36,8 @@ type RenderOptions struct {
 func RenderPalette(w io.Writer, cfg Config, opts RenderOptions) error {
 	sc := syntaxColorsForProfile(cfg.SyntaxColors, opts.Profile)
 	if opts.Basic {
-		sc = SyntaxColors{BasicColors: true}
+		sc = cfg.SyntaxColors
+		sc.BasicColors = true
 	}
 	applySyntaxPalette(sc)
 	// Restore the configured palette on the way out: the process may be short-lived, but a
@@ -45,7 +46,11 @@ func RenderPalette(w io.Writer, cfg Config, opts RenderOptions) error {
 
 	resolved := sc
 	if resolved.BasicColors {
+		bracketsEnabled := resolved.Brackets == nil || len(resolved.Brackets) > 0
 		resolved = basicSyntaxColors()
+		if !bracketsEnabled {
+			resolved.Brackets = []string{}
+		}
 	} else {
 		normalizeSyntaxColors(&resolved)
 	}
@@ -80,6 +85,19 @@ func renderSlots(w io.Writer, sc SyntaxColors, basic bool) error {
 			slot.key, value, describeColor(value), slot.style.Render(slot.key))
 		if err != nil {
 			return err
+		}
+	}
+	if len(sc.Brackets) == 0 && sc.Brackets != nil {
+		if _, err := fmt.Fprintln(w, "  brackets    []     disabled"); err != nil {
+			return err
+		}
+	} else {
+		for i, value := range sc.Brackets {
+			style := chBracketStyles[i%len(chBracketStyles)]
+			if _, err := fmt.Fprintf(w, "  bracket_%-3d %-6s %-9s %s\n",
+				i+1, value, describeColor(value), style.Render("bracket")); err != nil {
+				return err
+			}
 		}
 	}
 	_, err := fmt.Fprintln(w)

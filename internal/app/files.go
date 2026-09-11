@@ -200,13 +200,14 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 	}
 	act := core.Action{}
 	if ed, open := c.Doc(doc.Path); open && ed != nil {
-		ed.SetPath(path)
+		highlight := ed.SetPath(path)
 		c.RekeyDoc(doc.Path, path, ed)
+		act.Cmd = tea.Batch(act.Cmd, highlight)
 		if s.currentPath == doc.Path {
 			s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 			c.SetActive(path)
 			// A rename can take a file out of markdown under a live preview.
-			act = core.Async(s.enforcePreview())
+			act.Cmd = tea.Batch(act.Cmd, s.enforcePreview())
 		}
 	}
 	return core.Seq(core.Pop(), act, core.PropagateAll(ReseedMsg{}))

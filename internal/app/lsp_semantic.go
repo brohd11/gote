@@ -2,9 +2,7 @@ package app
 
 import (
 	"context"
-	"hash/fnv"
 	"path/filepath"
-	"strings"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -41,31 +39,7 @@ type lspSemanticResult struct {
 	path    string
 	editSeq int
 	tokens  []semanticToken
-	// lineHashes fingerprints the document the tokens were decoded from, one entry per
-	// row. It is what lets the overlay stay useful after the buffer moves on: a row whose
-	// text still hashes the same is a row these tokens still describe. Without it the
-	// overlay is all-or-nothing against a document that has already changed.
-	lineHashes []uint64
-	err        error
-}
-
-// hashLine keys one line of source. FNV-1a because this is a lookup key and not a security
-// boundary — a collision costs one row wearing another row's colors until the next answer.
-func hashLine(line string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(line))
-	return h.Sum64()
-}
-
-// hashLines fingerprints each row of a document, so a token's row can be turned into the
-// key for the text that row held when the server scored it.
-func hashLines(text string) []uint64 {
-	lines := strings.Split(text, "\n")
-	out := make([]uint64, len(lines))
-	for i, line := range lines {
-		out[i] = hashLine(line)
-	}
-	return out
+	err     error
 }
 
 // semanticLegend unwraps the server's capability union and returns its token type list.
@@ -209,9 +183,7 @@ func (m *lspManager) startSemantic(sessions map[string]*lspSession,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), lspRequestLimit)
-	// The text is captured here, on the actor goroutine and after the flush above, so the
-	// fingerprints describe exactly what the server was asked about.
-	server, path, text := session.server, doc.path, doc.text
+	server, path := session.server, doc.path
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
@@ -227,8 +199,7 @@ func (m *lspManager) startSemantic(sessions map[string]*lspSession,
 			return
 		}
 		m.emitSemantic(request, lspSemanticResult{
-			tokens:     decodeSemanticTokens(answer.Data, legend, slots),
-			lineHashes: hashLines(text),
+			tokens: decodeSemanticTokens(answer.Data, legend, slots),
 		})
 	}()
 	return cancel

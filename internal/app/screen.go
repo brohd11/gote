@@ -557,9 +557,9 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 	return act
 }
 
-// semanticDebounce matches the editor's own highlight debounce. The two are deliberately
-// the same number: the fetch exists to feed the exact parse, so asking on a different
-// cadence only widens the window where the overlay describes text that has moved.
+// semanticDebounce matches the editor's own highlight debounce. Keeping the lexical and
+// server refreshes on one cadence avoids extra whole-document work during a typing burst
+// and narrows the window where the overlay describes an older generation.
 const semanticDebounce = 250 * time.Millisecond
 
 type semanticTick struct {
@@ -785,7 +785,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 			act = s.applyRequestResult(sh, event.request)
 		}
 		if event.semantic != nil {
-			s.applySemanticTokens(event.semantic)
+			s.applySemanticTokens(sh, event.semantic)
 		}
 		if event.outline != nil {
 			s.applyOutlineResult(event.outline)
