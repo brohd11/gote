@@ -28,6 +28,11 @@ syntax palette directly; 256-color and true-color terminals use your configured
 Run `gote colors` to see the detected profile and effective palette (`--basic` previews
 the basic palette explicitly).
 
+**a** opens the Actions menu, and **ctrl+alt+a** does the same from inside the editor —
+where a bare letter is text, not a shortcut. In single-file mode the editor is usually the
+only pane, so the modified form is the way in. Like every other alt chord it needs the
+terminal's option-as-meta setting.
+
 ## gote works in 2 modes:
 
 ### Multi Document
@@ -166,7 +171,24 @@ the cursor by a word.
 
 The Actions
 and editor context menus independently toggle the diagnostics and git gutters and can
-restart failed server connections.
+restart failed server connections. Which of the two columns a launch *starts* with is
+`default_git_gutter` and `default_diagnostics_gutter` in the config section for its mode:
+
+```yaml
+project_mode:            # gote, gote here, gote --vault <name>
+  default_git_gutter: true
+  default_diagnostics_gutter: true
+  default_allow_lsp: true
+single_file_mode:        # gote <file> — see Single Document
+  default_git_gutter: true
+  default_diagnostics_gutter: false
+  default_allow_lsp: true
+  allow_panel_toggle: false
+```
+
+These replace the old `git_gutter: on|off|auto` key, whose `auto` encoded exactly this
+per-mode split in code. A config still carrying `git_gutter` loads fine and ignores it;
+`gote config` drops it on the next rewrite.
 
 The rest of the language-server features are caret-driven, and every one of them is on a
 modified key so it fires while you are typing in the editor:
@@ -228,6 +250,8 @@ the tab when it does not.
 
 Set `auto-lsp: false`, disable an individual entry,
 or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
+`auto-lsp` is the master switch — never start a server — while each launch mode's
+`default_allow_lsp` narrows it to one kind of launch; the two are ANDed.
 Server-specific `initialization_options` can also be overridden; Python's built-in
 options enable pylsp's parameter snippets for callable completions, while Go's have gopls
 complete a function to its name alone. That is deliberate: the parameter hint fires on the
@@ -239,8 +263,30 @@ get a hint for.
 `gote <my/file.md>`
 
 Open the editor with a single document. Useful if you have your terminal default editor set to gote.
-This launch still starts with only the editor, but `alt+o` may add the outline and `alt+\`
-may add the diagnostics panel without restoring the normal breadcrumb or help bar.
+This launch starts with only the editor, no breadcrumb and no help bar.
+
+What it starts with, and how far it can be opened up, is the `single_file_mode` section of
+`~/.gote/config.yml`:
+
+```yaml
+single_file_mode:
+  default_git_gutter: true
+  default_diagnostics_gutter: false
+  default_allow_lsp: true
+  allow_panel_toggle: false
+```
+
+With `allow_panel_toggle: false` (the default) the launch is taken at its word: `alt+\`,
+`alt+o` and `ctrl+alt+f` do nothing, and the panel rows leave the Actions and right-click
+menus. Find in files is locked with them because a result opens the bottom panel whether
+or not it was asked for. The `?` overlay still lists every locked key, marked off and
+naming the setting — a binding that silently vanished would read as a bug rather than a
+choice. Set it to `true` and `alt+o` adds the outline and `alt+\` the diagnostics panel,
+still without restoring the breadcrumb or help bar.
+
+`default_allow_lsp: false` denies this launch a language server, which takes every
+LSP-derived row and key with it. `Actions ▸ Vaults` is the way out of the minimal launch,
+and going through it re-asks all four questions against `project_mode` below.
 
 `gote -P <my/file.md>`
 

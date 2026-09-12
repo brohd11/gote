@@ -46,6 +46,28 @@ func clickHelp(sh *core.Shared) string {
 	return "mouse: " + strings.Join(parts, " · ") + "\n"
 }
 
+// disabledKey restates a binding with the setting that turned it off. A locked key is
+// LISTED here rather than dropped: this overlay is the complete reference, and a binding
+// that silently vanished would read as a gote bug rather than as a configuration the user
+// chose — while one left unmarked would promise a key that does nothing.
+//
+// The keycodes are carried over so the entry still matches, which is what lets a caller
+// pass the result anywhere the live binding would have gone.
+func disabledKey(b key.Binding, why string) key.Binding {
+	h := b.Help()
+	return key.NewBinding(key.WithKeys(b.Keys()...),
+		key.WithHelp(h.Key, h.Desc+" — off ("+why+")"))
+}
+
+// disabledKeys is disabledKey over a group, for a whole section that one setting silences.
+func disabledKeys(why string, binds ...key.Binding) []key.Binding {
+	out := make([]key.Binding, 0, len(binds))
+	for _, b := range binds {
+		out = append(out, disabledKey(b, why))
+	}
+	return out
+}
+
 // helpText renders the overlay's body. This is the COMPLETE reference, not the overflow
 // from the deliberately four-entry contextual bar, so anything omitted there must live
 // here. The editor section comes from the live editor's own
@@ -83,8 +105,27 @@ func (s *homeScreen) helpText() string {
 	// here alongside. The description is gote's own: quitting dirty prompts first.
 	quitKey := core.Hint("quit (confirms unsaved changes)",
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
-	general := []key.Binding{quitKey, sidebarKey, bottomKey, findFilesKey, flatKey, actionsKey, previewKey, fullPreviewKey,
-		wrapKey, lineNumsKey, helpKey}
+	// The panel lock and a missing language server silence keys rather than remove them,
+	// so the entries are marked with the setting responsible (disabledKey) instead of being
+	// dropped from the page.
+	panelLock, lspOff := "", ""
+	if !s.panelToggles {
+		panelLock = "single_file_mode.allow_panel_toggle"
+	}
+	if s.sh != nil && !lspEnabled(s.sh) {
+		lspOff = lspDisabledReason(Of(s.sh))
+	}
+	mark := func(b key.Binding, why string) key.Binding {
+		if why == "" {
+			return b
+		}
+		return disabledKey(b, why)
+	}
+	// FullHint rather than Hint on the picker: it is the one general key with an alias, and
+	// ctrl+alt+a is the only way to reach it from the editor, so the page must name both.
+	general := []key.Binding{quitKey, sidebarKey, mark(bottomKey, panelLock),
+		mark(findFilesKey, panelLock), flatKey, core.FullHint("actions", core.Keys.Actions),
+		previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
 		general = append(general, previousDocumentKey, nextDocumentKey)
@@ -98,9 +139,26 @@ func (s *homeScreen) helpText() string {
 	// The language-server section. These fire from the editor (they all carry a
 	// modifier, so they reach this screen ahead of the pane) and do nothing anywhere
 	// else, which is why they are their own group rather than more "general" rows.
+	// Two gates over one section. symbolsKey is listed here because alt+o is one of the
+	// editor's modified chords, but what it opens is a panel, so the lock is its nearer
+	// cause and takes precedence. jumpBackKey is marked by NEITHER: find-in-files pushes
+	// onto the same stack (jumpToLocation), so ctrl+o outlives the language server.
+	outlineOff := lspOff
+	if panelLock != "" {
+		outlineOff = panelLock
+	}
 	writeSection("language server", []key.Binding{
-		completionKey, definitionKey, jumpBackKey, hoverKey, symbolsKey, referencesKey, formatKey,
+		mark(completionKey, lspOff), mark(definitionKey, lspOff), jumpBackKey,
+		mark(hoverKey, lspOff), mark(symbolsKey, outlineOff), mark(referencesKey, lspOff),
+		mark(formatKey, lspOff),
 	})
+	// One prose line rather than a mark on each of the ~15 rows in the three sections
+	// below: they describe keys INSIDE panels this launch cannot summon, so the fact worth
+	// stating once is that the panels are unreachable, not that each of their keys is.
+	if panelLock != "" {
+		b.WriteString("The outline, bottom panel and find-in-files sections below are off for this launch\n" +
+			"(" + panelLock + "); their keys are kept here for reference.\n\n")
+	}
 	writeSection("outline panel", []key.Binding{
 		core.Hint("jump", core.Keys.Select),
 		core.Hint("collapse/expand", core.Keys.Left, core.Keys.Right),
@@ -132,7 +190,7 @@ func (s *homeScreen) helpText() string {
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "focus editor")),
 	})
 	writeSection("find in files", []key.Binding{
-		findFilesKey,
+		mark(findFilesKey, panelLock),
 		key.NewBinding(key.WithKeys("tab", "shift+tab"), key.WithHelp("tab/shift+tab", "move form field")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "search / jump to result")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel form")),

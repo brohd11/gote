@@ -78,7 +78,7 @@ func (p *diagnosticsPanel) refresh(c *Ctx, current string) {
 // showing in the editor sorts first, since it is the one being asked about.
 func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 	if c == nil || c.lsp == nil {
-		return nil, "Language-server support is disabled (auto-lsp: false)."
+		return nil, "Language-server support is disabled (" + lspDisabledReason(c) + ")."
 	}
 	byPath := c.lsp.AllDiagnostics()
 	paths := make([]string, 0, len(byPath))

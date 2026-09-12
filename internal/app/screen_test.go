@@ -47,16 +47,19 @@ func newHome(t *testing.T) (*homeScreen, *core.Shared) {
 // newHomeWith is newHome for a specific launch mode (see TestMinimalMode).
 func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	cfg := DefaultConfig()
 	cfg.OpenDocsView = "list"
-	sh := core.NewShared(New("test", cfg, opts))
-	s := NewHomeScreen(sh).(*homeScreen)
-	s.gitDocs.timer = noDocsGitTimer
-	s.Init(sh)
-	s.SetSize(sh, 100, 30)
-	return s, sh
+	return newHomeCfg(t, cfg, opts)
+}
+
+// minimalCfg is the single-file launch with the panels reachable — the shipped default
+// locks them, and most tests that open a minimal screen are about the layout rather than
+// about the lock.
+func minimalCfg() Config {
+	cfg := DefaultConfig()
+	cfg.OpenDocsView = "list"
+	cfg.SingleFile.AllowPanelToggle = true
+	return cfg
 }
 
 // newHomeRouter builds the same screen through the real router. Tests that exercise

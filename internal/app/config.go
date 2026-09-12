@@ -29,12 +29,19 @@ type Config struct {
 	// IndentGuides makes the editor visualize complete leading indent levels. It is
 	// off by default so existing configs retain the uncluttered rendering.
 	IndentGuides bool `yaml:"indent_guides"`
-	// GitGutter decides whether the editor draws change markers against HEAD:
-	// gutterOn, gutterOff, or gutterAuto (the default) to let the launch decide —
-	// see gutterDefault. Auto exists because the two launches want opposite answers
-	// and neither is wrong: `gote <file>` is the chrome-less editor, and a git column
-	// is the kind of thing that launch exists to leave out.
-	GitGutter string `yaml:"git_gutter"`
+	// Project and SingleFile are the per-launch startup toggles. They are two sections
+	// rather than one set of keys because the two launches want opposite answers and
+	// neither is wrong: `gote <file>` is the chrome-less editor and a git column or a
+	// diagnostics gutter is the kind of thing that launch exists to leave out, while the
+	// full editor is where you are working through a project's files and the question
+	// "what have I changed here" is actually being asked.
+	//
+	// They replace the old `git_gutter: on|off|auto` key, whose auto encoded exactly this
+	// per-mode rule in code — somewhere the config file could neither state it nor let it
+	// be changed. A file still carrying that key loads clean; the key is simply ignored,
+	// and `gote config` drops it on the next rewrite.
+	Project    ModeDefaults     `yaml:"project_mode"`     // ModeHome, ModeScan, ModeVault
+	SingleFile SingleFileConfig `yaml:"single_file_mode"` // ModeFile
 	// LanguageServers owns transport configuration, while language.go owns which files
 	// use which server. A missing entry receives its built-in transport; Disabled is the
 	// explicit way to suppress one without copying the rest of its defaults.
@@ -129,13 +136,47 @@ type LanguageServerConfig struct {
 	SemanticTokens map[string]string `yaml:"semantic_tokens,omitempty"`
 }
 
-// The values Config.GitGutter takes. Anything else reads as gutterAuto rather than
-// failing the load — a typo in one key should not cost the user their whole config.
-const (
-	gutterAuto = "auto"
-	gutterOn   = "on"
-	gutterOff  = "off"
-)
+// ModeDefaults are the startup toggles a launch resolves from its mode — what the editor
+// is showing before anything is toggled by hand. Every one of them remains a runtime
+// toggle; these keys decide only where each starts.
+//
+// Booleans rather than a tri-state, because there is nothing left for an "auto" to defer
+// to: the mode question IS which of the two sections is read. They need no unset state
+// either — LoadConfig unmarshals the file OVER DefaultConfig, so a section naming one key
+// keeps the defaults for the rest.
+type ModeDefaults struct {
+	GitGutter         bool `yaml:"default_git_gutter"`         // draw change markers against HEAD
+	DiagnosticsGutter bool `yaml:"default_diagnostics_gutter"` // draw the LSP severity column
+	// AllowLSP narrows AutoLSP for this launch; the two are ANDed. AutoLSP is the master
+	// switch — "never start a language server" — and this says "not from this kind of
+	// launch". Off means no manager is created at all, which is the same state
+	// `auto-lsp: false` produces, so every LSP-derived row and key falls away with it.
+	AllowLSP bool `yaml:"default_allow_lsp"`
+}
+
+// SingleFileConfig is ModeDefaults plus the one lock only the chrome-less launch has.
+// AllowPanelToggle is not in ModeDefaults because there is no version of the full editor
+// that wants it: the panels are most of what that launch IS.
+type SingleFileConfig struct {
+	ModeDefaults `yaml:",inline"`
+	// AllowPanelToggle keeps the bottom panel and the outline reachable. False is the
+	// minimal launch taken at its word — nano's shape, and no way out of it — so the
+	// panel rows leave the Actions and right-click menus and alt+\, alt+o and ctrl+alt+f
+	// stop firing. The ? overlay still lists them, marked off and naming this key: a
+	// binding that silently vanished would read as a gote bug rather than as a setting.
+	// Find in files is locked with them because a result forces the bottom panel open.
+	AllowPanelToggle bool `yaml:"allow_panel_toggle"`
+}
+
+// modeDefaults picks the section a launch reads. It is the single place the mode-to-section
+// mapping lives, so a new consumer cannot disagree with the existing ones about which
+// launches count as "project".
+func (c Config) modeDefaults(mode Mode) ModeDefaults {
+	if mode == ModeFile {
+		return c.SingleFile.ModeDefaults
+	}
+	return c.Project
+}
 
 // Filter is the discovery filter the config asks for: the configured extensions, or
 // the zero DocFilter (any text file) when none are set. The --ext flag overrides it,
@@ -162,10 +203,14 @@ type VaultConfig struct {
 // to show the user the key exists and what shape its value takes.
 func DefaultConfig() Config {
 	return Config{
-		ScanDepth:       5,
-		OpenDocsView:    "tabs",
-		AutoLSP:         true,
-		GitGutter:       gutterAuto,
+		ScanDepth:    5,
+		OpenDocsView: "tabs",
+		AutoLSP:      true,
+		Project:      ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
+		SingleFile: SingleFileConfig{
+			ModeDefaults:     ModeDefaults{GitGutter: true, DiagnosticsGutter: false, AllowLSP: true},
+			AllowPanelToggle: false,
+		},
 		LanguageServers: defaultLanguageServers(),
 		ClickDefinition: clickAlt,
 		ClickContext:    clickCtrl,
@@ -337,11 +382,6 @@ func LoadConfig() (Config, error) {
 			server.InitializationOptions = fallback.InitializationOptions
 			cfg.LanguageServers[id] = server
 		}
-	}
-	// An unset or misspelled value is auto, the default: the key is a preference, and
-	// getting it wrong should change what the gutter does, not whether gote starts.
-	if cfg.GitGutter != gutterOn && cfg.GitGutter != gutterOff {
-		cfg.GitGutter = gutterAuto
 	}
 	normalizeSyntaxColors(&cfg.SyntaxColors)
 	return cfg, nil

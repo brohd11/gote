@@ -155,33 +155,54 @@ func TestSignGlyphsAreOneCell(t *testing.T) {
 	}
 }
 
-// TestGutterDefault: the config decides, and its default defers to the launch. A bare
-// `gote <file>` is the chrome-less editor, which is exactly the launch a git column
-// should stay out of.
+// TestGutterDefault: the launch picks a config section and the section answers. The point
+// of the table is that the three project modes read project_mode and ModeFile alone reads
+// single_file_mode — so an opposite pair of settings must come out opposite per mode.
 func TestGutterDefault(t *testing.T) {
+	cfg := Config{
+		Project:    ModeDefaults{GitGutter: true},
+		SingleFile: SingleFileConfig{ModeDefaults: ModeDefaults{GitGutter: false}},
+	}
+	flipped := Config{
+		Project:    ModeDefaults{GitGutter: false},
+		SingleFile: SingleFileConfig{ModeDefaults: ModeDefaults{GitGutter: true}},
+	}
 	cases := []struct {
-		setting string
-		mode    Mode
-		want    bool
+		name string
+		cfg  Config
+		mode Mode
+		want bool
 	}{
-		{gutterAuto, ModeHome, true},
-		{gutterAuto, ModeScan, true},
-		{gutterAuto, ModeVault, true},
-		{gutterAuto, ModeFile, false},
-		{gutterOn, ModeFile, true},
-		{gutterOff, ModeHome, false},
-		{"", ModeFile, false}, // an unset value reads as auto
+		{"project on/home", cfg, ModeHome, true},
+		{"project on/scan", cfg, ModeScan, true},
+		{"project on/vault", cfg, ModeVault, true},
+		{"single off/file", cfg, ModeFile, false},
+		{"project off/home", flipped, ModeHome, false},
+		{"single on/file", flipped, ModeFile, true},
 	}
 	for _, c := range cases {
-		if got := gutterDefault(Config{GitGutter: c.setting}, c.mode); got != c.want {
-			t.Errorf("gutterDefault(%q, mode %d) = %v, want %v", c.setting, c.mode, got, c.want)
+		if got := gutterDefault(c.cfg, c.mode); got != c.want {
+			t.Errorf("%s: gutterDefault = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
 
-// TestHomeGutterDefaults checks the two launches end up with the column the config's
-// auto promises, and that the editor itself was told — the screen flag alone would draw
-// nothing.
+// TestGutterDefaultShipped pins what a stock install draws, which the table above cannot
+// say: both sections ask for the column, so `gote <file>` now gets one where the old
+// git_gutter: auto left it out.
+func TestGutterDefaultShipped(t *testing.T) {
+	cfg := DefaultConfig()
+	for _, mode := range []Mode{ModeHome, ModeScan, ModeVault, ModeFile} {
+		if !gutterDefault(cfg, mode) {
+			t.Errorf("gutterDefault(DefaultConfig(), mode %d) = false, want true", mode)
+		}
+	}
+}
+
+// TestHomeGutterDefaults checks both launches end up with the column their config section
+// asks for, and that the editor itself was told — the screen flag alone would draw nothing.
+// The shipped default is on for both; the single-file half is then re-launched with its
+// section turned off, which is the only thing that proves the section is what was read.
 func TestHomeGutterDefaults(t *testing.T) {
 	s, _ := newHome(t)
 	if !s.gitGutter || !s.editor.SignColumnMode(gitSignColumn) {
@@ -194,8 +215,20 @@ func TestHomeGutterDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, _ := newHomeWith(t, Options{Mode: ModeFile, File: file})
-	if m.gitGutter || m.editor.SignColumnMode(gitSignColumn) {
-		t.Error("a single-file launch should open without the gutter")
+	if !m.gitGutter || !m.editor.SignColumnMode(gitSignColumn) {
+		t.Errorf("a single-file launch should open with the gutter the default asks for, screen=%v editor=%v",
+			m.gitGutter, m.editor.SignColumnMode(gitSignColumn))
+	}
+
+	cfg := DefaultConfig()
+	cfg.SingleFile.GitGutter = false
+	off, _ := newHomeCfg(t, cfg, Options{Mode: ModeFile, File: file})
+	if off.gitGutter || off.editor.SignColumnMode(gitSignColumn) {
+		t.Error("single_file_mode.default_git_gutter: false should open without the gutter")
+	}
+	// The project section must not be the one answering for a single-file launch.
+	if !gutterDefault(cfg, ModeHome) {
+		t.Error("turning the single-file gutter off should leave project_mode alone")
 	}
 }
 

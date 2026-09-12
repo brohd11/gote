@@ -54,7 +54,10 @@ func TestOutlinePanelLayoutModesAndMinimal(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	minimal, msh := newHomeWith(t, Options{Mode: ModeFile, File: path})
+	// The panels have to be unlocked for this half: the shipped single_file_mode locks
+	// them, and what is under test here is the layout the outline takes when it is the
+	// only side column, not the lock.
+	minimal, msh := newHomeCfg(t, minimalCfg(), Options{Mode: ModeFile, File: path})
 	Of(msh).close()
 	Of(msh).lsp = nil
 	minimal.Update(msh, keyMsg("alt+o"))

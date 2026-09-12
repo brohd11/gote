@@ -382,3 +382,85 @@ func TestEnsureVaultDir(t *testing.T) {
 		t.Fatalf("rejected file = %q, %v; want it untouched", got, err)
 	}
 }
+
+// TestLoadConfigModeSections: the two per-launch sections load, and a section naming ONE
+// key keeps the defaults for the rest. That partial-merge behaviour is what makes plain
+// booleans safe here — they have no unset state of their own, so the only thing standing
+// between a one-key section and three false fields is LoadConfig unmarshalling over
+// DefaultConfig.
+func TestLoadConfigModeSections(t *testing.T) {
+	cfg := writeConfig(t, "single_file_mode:\n  default_diagnostics_gutter: true\n")
+	want := DefaultConfig().SingleFile
+	want.DiagnosticsGutter = true
+	if cfg.SingleFile != want {
+		t.Fatalf("single_file_mode = %+v, want %+v", cfg.SingleFile, want)
+	}
+	if cfg.Project != DefaultConfig().Project {
+		t.Fatalf("project_mode = %+v, want the untouched defaults %+v", cfg.Project, DefaultConfig().Project)
+	}
+
+	// The inline embed has to read as four sibling keys, not a nested mapping.
+	full := writeConfig(t, `project_mode:
+  default_git_gutter: false
+  default_diagnostics_gutter: false
+  default_allow_lsp: false
+single_file_mode:
+  default_git_gutter: false
+  default_diagnostics_gutter: true
+  default_allow_lsp: false
+  allow_panel_toggle: true
+`)
+	if full.Project != (ModeDefaults{}) {
+		t.Errorf("project_mode = %+v, want every key false", full.Project)
+	}
+	wantSingle := SingleFileConfig{
+		ModeDefaults:     ModeDefaults{DiagnosticsGutter: true},
+		AllowPanelToggle: true,
+	}
+	if full.SingleFile != wantSingle {
+		t.Errorf("single_file_mode = %+v, want %+v", full.SingleFile, wantSingle)
+	}
+}
+
+// TestSaveConfigWritesModeSections: SaveConfig must emit the embedded keys as siblings of
+// allow_panel_toggle. The written file is the only place the schema is visible, so a
+// section that marshalled as a nested "modedefaults" mapping would be unreadable AND
+// would not load back.
+func TestSaveConfigWritesModeSections(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".gote", "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, key := range []string{
+		"project_mode:", "single_file_mode:",
+		"default_git_gutter:", "default_diagnostics_gutter:", "default_allow_lsp:",
+		"allow_panel_toggle:",
+	} {
+		if !strings.Contains(text, key) {
+			t.Errorf("written config is missing %q:\n%s", key, text)
+		}
+	}
+	if strings.Contains(strings.ToLower(text), "modedefaults") {
+		t.Errorf("the embed marshalled as a nested mapping rather than inline:\n%s", text)
+	}
+}
+
+// TestLoadConfigDroppedGitGutterKey: git_gutter's on/off/auto tri-state was replaced by the
+// two mode sections. A config still carrying it must load clean and ignore it — the same
+// tolerance the dead extension scalar gets — and must not have its new defaults disturbed.
+func TestLoadConfigDroppedGitGutterKey(t *testing.T) {
+	cfg := writeConfig(t, "git_gutter: off\nscan_depth: 4\n")
+	if cfg.ScanDepth != 4 {
+		t.Fatalf("scan depth = %d, want the rest of the file to still load", cfg.ScanDepth)
+	}
+	if !cfg.Project.GitGutter || !cfg.SingleFile.GitGutter {
+		t.Error("the dead git_gutter key should not turn the new sections' gutters off")
+	}
+}

@@ -101,11 +101,12 @@ func severityName(severity protocol.DiagnosticSeverity) string {
 }
 
 func (s *homeScreen) restartLanguageServers(sh *core.Shared) core.Action {
-	m := Of(sh).lsp
+	c := Of(sh)
+	m := c.lsp
 	if m == nil {
-		return core.SetStatus("LSP is disabled by auto-lsp: false")
+		return core.SetStatus("LSP is disabled by " + lspDisabledReason(c))
 	}
 	m.Restart()
-	m.Reconcile(Of(sh))
+	m.Reconcile(c)
 	return core.SetStatus("restarting language servers")
 }

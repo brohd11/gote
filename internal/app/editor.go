@@ -121,12 +121,11 @@ func (s *homeScreen) editorLanguageItems(sh *core.Shared) []components.MenuItem 
 	}
 }
 
+// The two groups the panel lock and the LSP gate take away are omitted rather than muted,
+// the same call editorLanguageItems makes: a row that can never act on this launch says
+// nothing about the document, and this menu is meant to be read in one glance.
 func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
-	outlineLabel := "Show outline"
-	if s.outlineVisible {
-		outlineLabel = "Hide outline"
-	}
-	return []components.MenuItem{
+	items := []components.MenuItem{
 		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.cyclePreview())
 		}},
@@ -141,25 +140,42 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 			s.editor.ToggleLineNums()
 			return core.Pop()
 		}},
-		{Label: outlineLabel, Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.toggleOutline(sh))
-		}},
-		{Label: "Toggle diagnostics panel", Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.toggleBottom(sh))
-		}},
-		{Label: "Toggle diagnostics gutter", Pick: func(*core.Shared) core.Action {
-			s.setDiagnosticsGutter(!s.diagnosticsGutter)
-			return core.Pop()
-		}},
-		{Label: "Toggle git gutter", Pick: func(*core.Shared) core.Action {
+	}
+	if s.panelToggles {
+		outlineLabel := "Show outline"
+		if s.outlineVisible {
+			outlineLabel = "Hide outline"
+		}
+		items = append(items,
+			components.MenuItem{Label: outlineLabel, Pick: func(*core.Shared) core.Action {
+				return core.Seq(core.Pop(), s.toggleOutline(sh))
+			}},
+			components.MenuItem{Label: "Toggle diagnostics panel", Pick: func(*core.Shared) core.Action {
+				return core.Seq(core.Pop(), s.toggleBottom(sh))
+			}})
+	}
+	// The diagnostics column has nothing to draw without a manager; the git column stands
+	// on its own (it is not even gated on being in a repo — see setGitGutter).
+	if lspEnabled(sh) {
+		items = append(items,
+			components.MenuItem{Label: "Toggle diagnostics gutter", Pick: func(*core.Shared) core.Action {
+				s.setDiagnosticsGutter(!s.diagnosticsGutter)
+				return core.Pop()
+			}})
+	}
+	items = append(items,
+		components.MenuItem{Label: "Toggle git gutter", Pick: func(*core.Shared) core.Action {
 			// Seq rather than a bare Pop: turning the column on hands back a baseline
 			// read, and the router collects the cmd lane of every Action in a Seq.
 			return core.Seq(core.Pop(), core.Async(s.setGitGutter(!s.gitGutter)))
-		}},
-		{Label: "Restart language servers", Pick: func(sh *core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.restartLanguageServers(sh))
-		}},
+		}})
+	if lspEnabled(sh) {
+		items = append(items,
+			components.MenuItem{Label: "Restart language servers", Pick: func(sh *core.Shared) core.Action {
+				return core.Seq(core.Pop(), s.restartLanguageServers(sh))
+			}})
 	}
+	return items
 }
 
 // editorSaved is the editor pane's OnSaved hook (ctrl+s): the buffer stays exactly

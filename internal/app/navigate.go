@@ -40,6 +40,33 @@ func (s *homeScreen) lspFeatureReady(sh *core.Shared) bool {
 		s.fullPreview == nil && s.editorPanel.Focused()
 }
 
+// lspEnabled reports whether this launch has a language-server manager at all — the one
+// question the menu builders ask, as distinct from lspFeatureReady's "can a request be
+// made right now". A menu row is about whether the feature exists, not about where the
+// caret happens to be.
+func lspEnabled(sh *core.Shared) bool {
+	return sh != nil && Of(sh).lsp != nil
+}
+
+// lspDisabledReason names the config key that left this launch without a manager, for
+// the messages and help rows that report the absence. Three keys can produce the same
+// nil manager (see Ctx.newWithColorProfile), and a message that always blamed auto-lsp
+// would send the user to edit a key that is already true.
+//
+// It answers only for a launch that HAS no manager; the caller checks that first.
+func lspDisabledReason(c *Ctx) string {
+	switch {
+	case c == nil:
+		return "auto-lsp: false"
+	case !c.Config.AutoLSP:
+		return "auto-lsp: false"
+	case c.Mode == ModeFile:
+		return "single_file_mode.default_allow_lsp: false"
+	default:
+		return "project_mode.default_allow_lsp: false"
+	}
+}
+
 // requestAt issues one on-demand request for the caret's position. A refusal is
 // reported as a status rather than silently: pressing a key and getting nothing back is
 // indistinguishable from a hang, and the two reasons a request is refused — no server

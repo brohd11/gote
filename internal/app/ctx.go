@@ -126,7 +126,11 @@ func newWithColorProfile(version string, cfg Config, opts Options, profile color
 		Config:  cfg,
 		open:    newOpenSet(),
 	}
-	if cfg.AutoLSP {
+	// Two gates, ANDed: auto-lsp is the master switch and the mode's default_allow_lsp
+	// narrows it to this kind of launch. A nil manager is a state the whole app already
+	// handles — every LSP-derived row, key and gutter falls away with it — so denying one
+	// here needs no further plumbing.
+	if cfg.AutoLSP && cfg.modeDefaults(opts.Mode).AllowLSP {
 		c.lsp = newLSPManager(cfg, version)
 	}
 	if opts.DepthSet {
@@ -327,6 +331,13 @@ func (c *Ctx) SwitchVault(name string) error {
 	c.activeID, c.restore = "", nil
 	c.Mode, c.VaultName, c.ScanDir = ModeVault, name, path
 	c.FilePath = ""
+	// A single-file launch that single_file_mode.default_allow_lsp denied a manager is
+	// now a vault, and project_mode may well allow one. Created here rather than left for
+	// the rest of the session, since this is the only route out of ModeFile and nothing
+	// downstream reconsiders the question.
+	if c.lsp == nil && c.Config.AutoLSP && c.Config.Project.AllowLSP {
+		c.lsp = newLSPManager(c.Config, c.Version)
+	}
 	c.Seed()
 	return nil
 }

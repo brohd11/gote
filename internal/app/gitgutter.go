@@ -122,22 +122,12 @@ func newFileSign() editor.Sign {
 	return editor.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(core.MutedColor)}
 }
 
-// gutterDefault decides whether the column starts on. The config has the final say; its
-// "auto" (the default) defers to the launch, and the launch answers by mode.
-//
-// A bare `gote <file>` is the chrome-less editor — no header, no lists, no help bar,
-// nano's shape — and a git column is exactly the kind of thing that launch exists to
-// leave out. The full editor is where you are working through a project's files, which
-// is where the question "what have I changed here" is actually being asked.
+// gutterDefault decides whether the column starts on: the launch picks a config section
+// (project_mode or single_file_mode) and the section answers. It stays a function rather
+// than an inlined field read because the mode-to-answer step is the thing worth naming,
+// and because the vault promotion re-asks it for a mode the screen was not built with.
 func gutterDefault(cfg Config, mode Mode) bool {
-	switch cfg.GitGutter {
-	case gutterOn:
-		return true
-	case gutterOff:
-		return false
-	default:
-		return mode != ModeFile
-	}
+	return cfg.modeDefaults(mode).GitGutter
 }
 
 // setGitGutter turns the column on or off, clearing the cached baseline on the way down

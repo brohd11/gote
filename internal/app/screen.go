@@ -34,7 +34,6 @@ const sidebarWidth = 30
 var (
 	bottomKey  = key.NewBinding(key.WithKeys("alt+\\"), key.WithHelp("alt+\\", "bottom panel"))
 	sidebarKey = key.NewBinding(key.WithKeys("alt+|"), key.WithHelp("alt+|", "sidebar"))
-	actionsKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
 	// The reader gets its own key rather than a third rung on ctrl+p: reading the whole
 	// document is a mode you sit in, not a state you cycle past on the way back to the
@@ -136,6 +135,7 @@ type homeScreen struct {
 	editorFlex           float64              // editor's share when the preview flex column is present; zero uses half
 	flat                 bool                 // the docs slot shows the flat scan (true) or the folder explorer
 	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
+	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
 	indentGuides         bool                 // config-selected leading-indent visualization for every buffer
 	gitGutter            bool                 // draw change markers against HEAD (see gitgutter.go)
 	diagnosticsGutter    bool                 // independently toggle the LSP marker column
@@ -197,7 +197,13 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		openDocsTabs:  c.Config.OpenDocsView == "tabs",
 		sidebarSplits: make(map[string][]float64), outlineDataSeq: -1, outlineScheduledSeq: -1,
 		indentGuides: c.Config.IndentGuides,
-		gitGutter:    gutterDefault(c.Config, c.Mode), diagnosticsGutter: c.lsp != nil,
+		gitGutter:    gutterDefault(c.Config, c.Mode),
+		// Both gates: the mode's default asks for the column, and only a launch with a
+		// manager has anything to draw in it.
+		diagnosticsGutter: c.lsp != nil && c.Config.modeDefaults(c.Mode).DiagnosticsGutter,
+		// The lock is single-file's alone, so every other launch is unconditionally true
+		// rather than reading a key that does not speak for it.
+		panelToggles:   !minimal || c.Config.SingleFile.AllowPanelToggle,
 		gutterDebounce: gitGutterDebounce}
 	// Border on both sidebar lists: with three panes on screen the focused one has
 	// to be visible, and the editor pane is framed automatically (ScreenPanel borders
@@ -362,9 +368,17 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 			return s, s.descendFolder(sh)
 		}
 		if core.MatchKey(k, bottomKey) {
+			if !s.panelToggles {
+				return s, core.Action{}
+			}
 			return s, s.toggleBottom(sh)
 		}
+		// Locked with the panels rather than on its own: a result forces the bottom panel
+		// open (searchPanel's setResult path), so a live find would defeat the lock.
 		if core.MatchKey(k, findFilesKey) {
+			if !s.panelToggles {
+				return s, core.Action{}
+			}
 			s.closeCompletion()
 			return s, core.Push(s.findFilesForm(sh))
 		}
@@ -391,7 +405,11 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 			s.setFlat(!s.flat)
 			return s, core.Action{}
 		}
-		if core.MatchKey(k, actionsKey) && !s.modular.Filtering() {
+		// The ctrl+alt+a arm of core.Keys.Actions bypasses the capture gate the same way
+		// helpKey's alt+? does below, and for a stronger reason: the editor pane's
+		// Filtering() is unconditionally true, so bare "a" is text whenever it has the
+		// keys — and in the minimal launch it is usually the only pane there is.
+		if core.MatchKey(k, core.Keys.Actions) && (!s.modular.Filtering() || k == "ctrl+alt+a") {
 			s.closeCompletion()
 			return s, core.Push(s.actionsMenu(sh))
 		}
@@ -473,6 +491,11 @@ func (s *homeScreen) languageServerKey(sh *core.Shared, k string) (core.Action, 
 		return s.requestAt(sh, lspReqHover), true
 	case core.MatchKey(k, symbolsKey):
 		s.closeCompletion()
+		if !s.panelToggles {
+			// Claimed and dropped, not passed on: alt+o must not reach the editor as a
+			// word motion just because the outline is locked away.
+			return core.Action{}, true
+		}
 		return s.toggleOutline(sh), true
 	case core.MatchKey(k, referencesKey):
 		s.closeCompletion()
@@ -877,7 +900,11 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	s.minimal = false
 	s.sidebar = true
 	// The launch mode this screen was built for is gone; a vault is the full editor, so
-	// the auto default has to be asked again rather than carrying ModeFile's answer over.
+	// every mode-derived default has to be asked again rather than carrying ModeFile's
+	// answers over. The panel lock goes with the minimal mode it belonged to, and the
+	// manager may have been created by SwitchVault a moment ago.
+	s.panelToggles = true
+	s.setDiagnosticsGutter(c.lsp != nil && c.Config.Project.DiagnosticsGutter)
 	gutterCmd := s.setGitGutter(gutterDefault(c.Config, ModeVault))
 	if c.lsp != nil {
 		c.lsp.Reconcile(c)
