@@ -73,15 +73,15 @@ func disabledKeys(why string, binds ...key.Binding) []key.Binding {
 // here. The editor section comes from the live editor's own
 // HelpBindings, so its chords are stated once (in bubblestack).
 //
-// The key column is 14 wide because "alt+backspace" is 13 — every label here spells its
-// modifier out rather than using ⌥, so the widest entry sets the column.
+// The key column is 19 wide because "ctrl+alt+backspace" is 18 — every label here spells
+// its modifier out rather than using ⌥, so the widest entry sets the column.
 func (s *homeScreen) helpText() string {
 	var b strings.Builder
 	writeSection := func(name string, binds []key.Binding) {
 		b.WriteString(name + "\n\n")
 		for _, kb := range binds {
 			h := kb.Help()
-			fmt.Fprintf(&b, "  %-14s %s\n", h.Key, h.Desc)
+			fmt.Fprintf(&b, "  %-19s %s\n", h.Key, h.Desc)
 		}
 		b.WriteString("\n")
 	}

@@ -723,6 +723,14 @@ func TestHomeLeavesWordMotionsToTheEditor(t *testing.T) {
 	if back == end {
 		t.Fatal("alt+b should reach the editor and move back by a word")
 	}
+	// alt+f is not the exact undo of alt+b: back stops on the previous word's END and
+	// forward on the next word's START, so the caret crosses the gap on one press and the
+	// word on the next. Two presses return it, which is still cursor position as the
+	// assertion — only the count changed.
+	s.Update(sh, keyMsg("alt+f"))
+	if s.editor.CursorPosition() == back {
+		t.Fatal("alt+f should reach the editor and move forward")
+	}
 	s.Update(sh, keyMsg("alt+f"))
 	if s.editor.CursorPosition() != end {
 		t.Fatalf("alt+f should move forward by a word: %v, want %v", s.editor.CursorPosition(), end)
@@ -805,7 +813,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		"ctrl+n", "new unsaved file", "actions", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", // gote's alt chords
-		"alt+c", "alt+v", "alt+backspace", // the editor's, via HelpBindings
+		"alt+c", "alt+v", "alt+backspace", "ctrl+alt+backspace", // the editor's, via HelpBindings
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("the ? overlay is the only place these keys are written; missing %q:\n%s", want, help)
