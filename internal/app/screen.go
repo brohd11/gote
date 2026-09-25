@@ -31,7 +31,7 @@ var (
 	// alt+z, not ctrl+w: ctrl+w is the editor's own delete-word-back (and readline's),
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey       = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
-	lineNumsKey   = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "line nums"))
+	lineNumsKey   = key.NewBinding(key.WithKeys("alt+l"), key.WithHelp("alt+l", "line nums"))
 	completionKey = key.NewBinding(key.WithKeys("ctrl+space"), key.WithHelp("ctrl+space", "completion"))
 	newBufferKey  = key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new unsaved file"))
 	helpKey       = key.NewBinding(key.WithKeys("?", "alt+?"), key.WithHelp("?", "more"))

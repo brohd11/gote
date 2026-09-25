@@ -15,7 +15,10 @@ import (
 // releases the keys, ctrl+s saves and stays. BaseDir is docsRoot's directory, not the
 // cwd, and is read per call because a vault switch moves it.
 func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
+	defaults := c.Config.modeDefaults(c.Mode)
 	return editor.Opts{
+		Wrap:            defaults.Wrap,
+		LineNumbers:     defaults.LineNumbers,
 		BaseDir:         docsRoot(c),
 		HideTitle:       s.tabsVisible(),
 		OnExit:          s.editorExit,

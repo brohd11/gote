@@ -104,6 +104,8 @@ type LanguageServerConfig struct {
 // ModeDefaults are a launch's startup toggles, each still toggleable at runtime. The file
 // is loaded over DefaultConfig, so a section naming one key keeps the others' defaults.
 type ModeDefaults struct {
+	Wrap              bool `yaml:"default_wrap"`               // soft-wrap each new document
+	LineNumbers       bool `yaml:"default_line_numbers"`       // line numbers, independent of wrap
 	GitGutter         bool `yaml:"default_git_gutter"`         // draw change markers against HEAD
 	DiagnosticsGutter bool `yaml:"default_diagnostics_gutter"` // draw the LSP severity column
 	// AllowLSP narrows AutoLSP for this launch (they are ANDed); off means no manager at all.

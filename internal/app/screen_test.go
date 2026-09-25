@@ -627,7 +627,7 @@ func msgType(act core.Action) string {
 	return reflect.TypeOf(act.Msg).String()
 }
 
-// TestHomeWrapAndLineNums: alt+z toggles soft wrap and ctrl+l the line-number gutter on
+// TestHomeWrapAndLineNums: alt+z toggles soft wrap and alt+l the line-number gutter on
 // the editor. The editor owns the state; the home screen just forwards the keys.
 //
 // Every toggle is followed by a render, which is the assertion that matters: the flags
@@ -659,14 +659,14 @@ func TestHomeWrapAndLineNums(t *testing.T) {
 	}
 	render("unwrapped")
 
-	s.Update(sh, keyMsg("ctrl+l"))
+	s.Update(sh, keyMsg("alt+l"))
 	if !s.editor.LineNumMode() {
-		t.Fatal("ctrl+l should turn line numbers on")
+		t.Fatal("alt+l should turn line numbers on")
 	}
 	render("numbered")
-	s.Update(sh, keyMsg("ctrl+l"))
+	s.Update(sh, keyMsg("alt+l"))
 	if s.editor.LineNumMode() {
-		t.Fatal("a second ctrl+l should turn line numbers off")
+		t.Fatal("a second alt+l should turn line numbers off")
 	}
 	render("unnumbered")
 }
@@ -812,7 +812,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		"alt+|", "sidebar", `alt+\`, "bottom panel", // the panel toggles
 		"ctrl+n", "new unsaved file", "actions", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
-		"alt+p", "alt+z", // gote's alt chords
+		"alt+p", "alt+z", "alt+l", // gote's alt chords
 		"alt+c", "alt+v", "alt+backspace", "ctrl+alt+backspace", // the editor's, via HelpBindings
 	} {
 		if !strings.Contains(help, want) {
@@ -975,7 +975,7 @@ func TestPreviewScrollsByHand(t *testing.T) {
 	if got := s.previewPanel.ScrollOffset(); got != byHand {
 		t.Fatalf("a re-layout at the same size must not move the pane: %d → %d", byHand, got)
 	}
-	s.Update(sh, keyMsg("ctrl+l")) // line numbers: nothing to do with the pane
+	s.Update(sh, keyMsg("alt+l")) // line numbers: nothing to do with the pane
 	if got := s.previewPanel.ScrollOffset(); got != byHand {
 		t.Fatalf("an unrelated message must not move the pane: %d → %d", byHand, got)
 	}

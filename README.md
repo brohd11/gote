@@ -176,17 +176,32 @@ restart failed server connections. Which of the two columns a launch *starts* wi
 
 ```yaml
 project_mode:            # gote, gote here, gote --vault <name>
+  default_wrap: false
+  default_line_numbers: false
   default_git_gutter: true
   default_diagnostics_gutter: true
   default_allow_lsp: true
 single_file_mode:        # gote <file> — see Single Document
+  default_wrap: false
+  default_line_numbers: false
   default_git_gutter: true
   default_diagnostics_gutter: false
   default_allow_lsp: true
   allow_panel_toggle: false
 ```
 
-These replace the old `git_gutter: on|off|auto` key, whose `auto` encoded exactly this
+`alt+z` toggles soft wrapping and `alt+l` toggles line numbers independently;
+`ctrl+l` is no longer bound to line numbers. With wrapping enabled, Up/Down moves
+between visible rows at the same text column, and Shift+Up/Down extends selection.
+Wrapping prefers spaces and tabs, keeping punctuation attached to words (`end.` stays
+together). A word or URL wider than the pane starts on a fresh row and splits only
+when necessary. Wrapping preserves the document's text and whitespace.
+`default_wrap` and `default_line_numbers` apply to each newly opened or restored
+document and new scratch buffer. Both default to false in each launch mode. Switching
+between open documents retains their runtime choices; toggles do not change config
+or persist across launches. Run `gote config` to add the new keys to an existing config.
+
+The gutter defaults replace the old `git_gutter: on|off|auto` key, whose `auto` encoded exactly this
 per-mode split in code. A config still carrying `git_gutter` loads fine and ignores it;
 `gote config` drops it on the next rewrite.
 
@@ -270,6 +285,8 @@ What it starts with, and how far it can be opened up, is the `single_file_mode` 
 
 ```yaml
 single_file_mode:
+  default_wrap: false
+  default_line_numbers: false
   default_git_gutter: true
   default_diagnostics_gutter: false
   default_allow_lsp: true
