@@ -14,15 +14,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// The markdown preview: the ctrl+p side pane and the alt+p reader that takes the editor's
-// own pane, what may be previewed, and keeping the side pane in sync with the editor's
-// buffer and scroll position. The homeScreen fields these read (preview, previewPrior,
-// fullPreview, previewSrc/W/Map/At) are declared with the rest in screen.go.
+// The markdown preview: the ctrl+p side pane and the alt+p reader in the editor's pane,
+// what may be previewed, and keeping the side pane in sync with the editor.
 
-// previewable reports whether ctrl+p has anything worth showing. The pane is a
-// markdown reader — it joins paragraphs and re-flows to its own width — so pointing it
-// at a .go or .json file destroys exactly the indentation that made the file readable.
-// The unnamed scratch buffer counts as markdown, which is what it has always been.
+// previewable reports whether ctrl+p has anything to show: the pane re-flows markdown,
+// which would mangle code. The scratch buffer counts as markdown.
 func (s *homeScreen) previewable() bool {
 	if s.currentPath == "" {
 		return true
@@ -34,14 +30,9 @@ func (s *homeScreen) previewable() bool {
 	return false
 }
 
-// enforcePreview closes a preview the current document no longer earns — the doc switched
-// to a non-markdown file, or a save-as renamed the open one out of markdown underneath it.
-// Called wherever currentPath moves; a no-op when neither preview is up.
-//
-// It returns closeFullPreview's cmd (the editor's Init, re-armed as it goes back into the
-// pane) rather than swallowing it: today that cmd is always nil — every editor gote hands
-// the pane is loaded by then — but a caller that batches it cannot be broken by a future
-// where it isn't.
+// enforcePreview closes a preview the current document no longer qualifies for, wherever
+// currentPath moves. It returns closeFullPreview's cmd (currently nil) for the caller to
+// batch.
 func (s *homeScreen) enforcePreview() tea.Cmd {
 	if s.previewable() {
 		return nil
@@ -53,13 +44,9 @@ func (s *homeScreen) enforcePreview() tea.Cmd {
 	return cmd
 }
 
-// cyclePreview steps ctrl+p through the panes: off → the side pane → off. Every rung is
-// a layout change, so nothing here touches the router's stack and there is no
-// navigation state to keep in sync. On a file the renderer would mangle, ctrl+p does
-// nothing at all.
-//
-// The reader hands the editor back first: ctrl+p is the SIDE pane's key, and the two
-// previews are never on screen together (the rule alt+p keeps from its own side).
+// cyclePreview toggles ctrl+p's side pane (off, pane, off), a pure layout change; nothing
+// on files the renderer would mangle. The reader is closed first: the two previews never
+// show together.
 func (s *homeScreen) cyclePreview() core.Action {
 	if !s.previewable() {
 		return core.Action{}
@@ -74,19 +61,9 @@ func (s *homeScreen) cyclePreview() core.Action {
 	return act
 }
 
-// previewScreen builds alt+p's reader: bubblestack's read-only DocScreen, hosted as the
-// EDITOR PANE's child (toggleFullPreview) rather than pushed over the app. That is what
-// leaves the sidebar drawn and toggleable beside it — the reader covers the editor and
-// nothing else — and it is why the reader needs no chrome mask of its own any more: the
-// home screen is still the top screen, so the mask the router asks for every frame is the
-// one it was already answering with.
-//
-// Every caller reads the live buffer, the --preview launch included — it seeds the editor
-// before swapping the reader in, so there is no launch that renders off disk (homeScreen.Init).
-//
-// The buffer accessor is bound HERE rather than called from inside the render closure: the
-// reader is built over ONE document, so a doc swap builds a new reader (paneChild) instead
-// of leaving this one aimed at the editor that has left the pane.
+// previewScreen builds alt+p's reader: a DocScreen hosted as the editor pane's child
+// (not pushed), so the sidebar stays usable beside it. It renders the live buffer, bound
+// here: a doc switch builds a new reader (paneChild).
 func (s *homeScreen) previewScreen() *components.DocScreen {
 	src := s.editor.Text
 	return components.NewDocScreen(components.DocOpts{
@@ -94,26 +71,16 @@ func (s *homeScreen) previewScreen() *components.DocScreen {
 		// the reader is a view of the same document, so the two bars line up.
 		Title:  s.readerTitle(),
 		Render: func(width int) string { return components.RenderMarkdown(src(), width) },
-		// Bound here with the buffer accessor, and for the same reason: the reader is
-		// built over ONE document, so the directory its relative links resolve against is
-		// the one this document sits in.
+		// Bound with the buffer for the same reason: relative links resolve against this
+		// document's directory.
 		Links: s.previewLinks(),
-		// No Help and no OnKey, which is what being a pane rather than a screen costs and
-		// saves: a ScreenPanel contributes no PanelHelp, so the way out is named by the
-		// host's bar instead (buildModular), and closing the reader is a change to the
-		// HOME screen's state, so the home screen claims alt+p and esc before the pane is
-		// ever consulted. A Crumb would go the same way — the stack never moves, so the
-		// breadcrumb stays the editor's.
+		// No Help or OnKey: the host bar names the way out, and the home screen claims alt+p and
+		// esc before the pane.
 	})
 }
 
-// toggleFullPreview is the whole of alt+p: the reader takes the editor pane, or gives it
-// back. Nothing is pushed and nothing is masked — the layout, the sidebar and the
-// breadcrumb are the home screen's throughout, which is what makes the sidebar usable
-// while the reader is up (pick a doc and it opens INTO the preview, see paneChild).
-//
-// Minimal mode needs no branch here: it has no sidebar, so the editor pane IS the
-// terminal and the reader covers it exactly as the pushed screen used to.
+// toggleFullPreview is alt+p: the reader takes the editor pane or gives it back. Nothing is
+// pushed, so the sidebar works while it is up (a picked doc opens into the preview).
 func (s *homeScreen) toggleFullPreview() core.Action {
 	if s.fullPreview != nil {
 		return s.closeFullPreview()
@@ -130,9 +97,8 @@ func (s *homeScreen) toggleFullPreview() core.Action {
 	return core.Async(cmd)
 }
 
-// closeFullPreview puts the editor back in its pane, exactly as it stood: SetChild runs
-// the child's Init, and EditorScreen.Init is idempotent (its loaded flag), so the buffer,
-// cursor, scroll and undo history survive the round trip rather than being re-read.
+// closeFullPreview restores the editor exactly as it was: its Init is idempotent, so the
+// buffer and history survive.
 func (s *homeScreen) closeFullPreview() core.Action {
 	if s.fullPreview == nil {
 		return core.Action{}
@@ -144,11 +110,8 @@ func (s *homeScreen) closeFullPreview() core.Action {
 	return core.Async(cmd)
 }
 
-// paneChild points the editor pane at the document the screen has just moved to — the
-// editor itself, or a reader over it while the full preview is up. Rebuilding the reader
-// is what makes a doc picked from the sidebar open INTO the preview: previewScreen binds
-// one editor's Text at build time, and the old reader would otherwise keep rendering the
-// document that has just left.
+// paneChild points the editor pane at the current document, rebuilding the reader when
+// the preview is up (a reader is bound to one editor).
 func (s *homeScreen) paneChild() tea.Cmd {
 	s.editor.SetTitleVisible(!s.tabsVisible())
 	if s.fullPreview == nil {
@@ -158,35 +121,19 @@ func (s *homeScreen) paneChild() tea.Cmd {
 	return s.editorPanel.SetChild(s.fullPreview)
 }
 
-// seedForPreview loads a freshly opened buffer off disk when the reader — not the editor —
-// is what the pane is about to show. EditorScreen.Init reads ASYNCHRONOUSLY and the result
-// comes back as a message the router hands to the top screen, which routes it to the pane's
-// child: with the reader in that seat the load reaches nothing, leaving an empty buffer
-// aimed at a file that is not empty, which the first save would truncate. SetText marks the
-// editor loaded, so the Init that follows dispatches no read at all.
-//
-// Only for a buffer that has never READ its file — a fresh open, or one restored from
-// the session file and not yet switched to. A buffer that has been in the pane may hold
-// unsaved edits, and seeding those away is the very loss this exists to prevent.
+// seedForPreview loads a freshly opened buffer from disk when the reader will occupy the
+// pane: the editor's async load would go to the reader and be lost, leaving an empty
+// buffer the first save would truncate the file with. Only for buffers that never read
+// their file, so unsaved edits are never overwritten.
 func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, unread bool) {
 	if unread && s.fullPreview != nil {
 		ed.SetText(fileText(path))
 	}
 }
 
-// previewLinks is what clicking a link in either preview does. Both previews share it:
-// they are two views of the same document, and a link means the same thing in each.
-//
-// A text file opens as a buffer — the editor is what gote HAS for text, so following a
-// link between notes is the same gesture as picking one from the sidebar, undo history
-// and all (openDoc). Anything else is handed to the OS: a URL to the browser, a file gote
-// can't display revealed in the file manager rather than launched, which is the
-// difference between being shown where a screenshot lives and having an image viewer
-// thrown over the terminal.
-//
-// A link to a file that isn't there does nothing. openDoc would happily open a buffer on
-// it and the first save would create it, so a typo'd link would quietly become a new
-// document.
+// previewLinks is what a link click does in either preview. Text files open as buffers
+// (openDoc); URLs go to the browser and other files are revealed in the file manager. A
+// link to a missing file does nothing, rather than creating it on first save.
 func (s *homeScreen) previewLinks() components.LinkHooks {
 	return components.LinkHooks{
 		Base: s.previewDir(),
@@ -201,9 +148,8 @@ func (s *homeScreen) previewLinks() components.LinkHooks {
 	}
 }
 
-// previewDir is what a relative link resolves against: the open document's own directory,
-// or the process's cwd for the unnamed scratch buffer, which has no directory of its own
-// until it is saved.
+// previewDir is where relative links resolve: the document's directory, or the cwd for an
+// unsaved buffer.
 func (s *homeScreen) previewDir() string {
 	if s.currentPath != "" {
 		return filepath.Dir(s.currentPath)
@@ -226,9 +172,7 @@ func (s *homeScreen) previewName() string {
 	return docName(s.currentPath)
 }
 
-// setPreview swaps which preview pane (if any) sits beside the editor, rebuilding the
-// layout around it. ctrl+p is a view toggle, not a navigation, so focus goes back to the
-// editor pane.
+// setPreview swaps the side preview and rebuilds the layout, focusing the editor.
 func (s *homeScreen) setPreview(mode int) {
 	if s.preview == mode {
 		return
@@ -237,12 +181,8 @@ func (s *homeScreen) setPreview(mode int) {
 	s.relayout()
 }
 
-// relayout rebuilds the layout around the current preview flags and re-seeds the side
-// pane. Shared by the ctrl+p toggle and the alt+p reader, which both change what the
-// editor column holds and what the help bar has to name (buildModular).
-//
-// Focus lands on the editor pane, which has no on-focus work to hand back; dropping the
-// cmd keeps this off the four-deep enforcePreview/cyclePreview call chain.
+// relayout rebuilds the layout for the preview flags and re-seeds the side pane, focusing
+// the editor (whose on-focus cmd is empty, so it is dropped).
 func (s *homeScreen) relayout() {
 	_ = s.rebuildModular(s.sh, s.editorSlot())
 	s.resetPreviewCache()
@@ -258,13 +198,9 @@ func (s *homeScreen) previewTarget() *components.ScrollContainer {
 	return nil
 }
 
-// refreshPreview re-renders the live pane when the buffer changed under it, or when
-// the pane changed width (the render is wrapped to it). It runs from Update — once per
-// message — rather than from View, which would re-render the whole document on every
-// frame, mouse motion included.
-//
-// The mapped renderer costs nothing over the plain one and is what makes the scroll
-// sync exact, so the map is kept with the render it belongs to.
+// refreshPreview re-renders the side pane when the buffer or its width changed, once per
+// message from Update rather than per frame in View. The mapped render keeps scroll sync
+// exact.
 func (s *homeScreen) refreshPreview() {
 	panel := s.previewTarget()
 	if panel == nil || s.editor == nil {
@@ -283,24 +219,11 @@ func (s *homeScreen) refreshPreview() {
 	panel.SetLinks(components.ScanLinks(out))
 }
 
-// syncPreviewScroll scrolls the live pane to follow the editor. The two views do not
-// hold the same number of rows for the same text — the render joins paragraphs, gives
-// every heading a blank line and grows rules around fences — so a single alignment
-// cannot be right everywhere. This one is right where it matters and eases where it
-// cannot be:
-//
-//   - Through the body of the document the editor's MIDDLE line sits at the pane's
-//     middle row, on the row RenderMarkdownMapped says that line rendered to. Aligning
-//     the middles (rather than the tops) keeps the correspondence readable across the
-//     whole pane, and leaves a half-pane of slack at each end for the two views to
-//     disagree in.
-//   - Within one editor screenful of either end the target eases into the end itself:
-//     offset 0 at the top, the pane's last page at the bottom. Without that the pane
-//     could never reach the bottom at all — the render outruns the source, so the
-//     editor bottoms out while the anchor still points a screenful short.
-//
-// The sync fires only when the editor's scroll offset actually moves, so a manually
-// scrolled pane is left alone until the editor scrolls again.
+// syncPreviewScroll keeps the side pane following the editor. The render and the source
+// differ in row counts, so through the body the editor's middle line is aligned with the
+// pane's middle row (via RenderMarkdownMapped); within a screenful of either end the
+// target eases to that end, or the pane could never reach its bottom. It only runs when
+// the editor's offset moves, so a manually scrolled pane is left alone.
 func (s *homeScreen) syncPreviewScroll() {
 	panel := s.previewTarget()
 	if panel == nil || s.editor == nil {
@@ -320,9 +243,7 @@ func (s *homeScreen) syncPreviewScroll() {
 	center := s.editor.CenterLine()
 	anchored := s.previewMap[min(center, len(s.previewMap)-1)] - panel.VisibleRows()/2
 
-	// ends is where the pane must be when the editor is AT an end; w is how much of it
-	// to apply — nothing through the body, all of it at either extreme, smoothstepped
-	// between so the handoff has no kink.
+	// ends is the pane offset at an editor end; w blends toward it (smoothstep near the ends).
 	w, ends := 1.0, 0.0
 	if maxOff > 0 {
 		band := float64(max(editorRows, 1))
@@ -334,10 +255,8 @@ func (s *homeScreen) syncPreviewScroll() {
 	panel.ScrollTo(int(math.Round((1-w)*float64(anchored) + w*ends)))
 }
 
-// resetPreviewCache drops the memo of what the preview pane last rendered. Clearing it
-// is what makes REOPENING the pane work: the buffer has not changed since the pane was
-// last up, so the skip-on-unchanged check would otherwise bring it back blank. The
-// scroll anchor goes with it so the pane re-syncs to wherever the editor is scrolled.
+// resetPreviewCache forgets the last render so a reopened pane renders instead of staying
+// blank, and re-syncs its scroll.
 func (s *homeScreen) resetPreviewCache() {
 	s.previewSrc, s.previewW, s.previewMap = "", 0, nil
 	s.previewAt = -1

@@ -3,22 +3,19 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/brohd11/bubblestack/core"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-// The semantic-token lane. Unlike hover and go-to-definition this is not something the
-// user asks for — it runs behind every open document a server will answer for — so it gets
-// its own slot and counter rather than sharing the on-demand lane. Sharing would let a
-// background refresh evict the definition the user just pressed a key for, which is the
-// exact failure the on-demand lane's "replace what has not started" rule is designed to
-// cause on purpose.
+// The semantic-token lane has its own slot and counter because it runs in the background:
+// sharing the on-demand lane would let it evict a request the user just made.
 
-// semanticToken is one painted run: a row, a half-open span in UTF-16 code units (the
-// encoding gote negotiates at initialize), and the palette slot to paint it with. The
-// token TYPE is already resolved to a slot here, so nothing downstream needs the legend
-// or the mapping — a decoded set is self-contained and safe to cache against a path.
+// semanticToken is one painted run: a row, a UTF-16 span, and the palette slot, already
+// resolved from the type so a decoded set is self-contained.
 type semanticToken struct {
 	line       int
 	startUTF16 int
@@ -42,9 +39,8 @@ type lspSemanticResult struct {
 	err     error
 }
 
-// semanticLegend unwraps the server's capability union and returns its token type list.
-// The union is either options or registration options; anything else — including the
-// absent capability — means the server will not answer, which is not an error.
+// semanticLegend returns the server's token type list from the capability union; false
+// when absent.
 func semanticLegend(provider protocol.SemanticTokensProvider) ([]string, bool) {
 	switch value := provider.(type) {
 	case *protocol.SemanticTokensOptions:
@@ -61,20 +57,13 @@ func semanticLegend(provider protocol.SemanticTokensProvider) ([]string, bool) {
 	return nil, false
 }
 
-// decodeSemanticTokens unpacks the wire format: a flat uint32 array of five-element
-// tuples, each RELATIVE to the token before it —
+// decodeSemanticTokens unpacks the wire format of relative five-tuples:
 //
 //	deltaLine, deltaStartChar, length, typeIndex, modifiers
 //
-// deltaLine counts rows forward from the previous token; deltaStartChar is relative to the
-// previous token's start when they share a row and absolute when the row advanced. Getting
-// that second rule wrong is silent: every token after the first line break drifts, and the
-// colors merely look subtly wrong rather than failing.
-//
-// typeIndex indexes the SERVER's legend, so the same number means different things to
-// different servers — which is why the legend is cached per session and the mapping is
-// keyed by name. A type the palette does not map is dropped here rather than carried,
-// leaving chroma's span untouched, which is what makes this an overlay.
+// deltaStartChar is relative to the previous token only on the same row. typeIndex indexes
+// the server's legend, so mapping is by name. Unmapped types are dropped, leaving chroma's
+// span.
 func decodeSemanticTokens(data []uint32, legend []string, slots map[string]string) []semanticToken {
 	// A trailing partial tuple is a malformed answer; take the whole tuples and ignore it
 	// rather than reading past the end.
@@ -103,10 +92,8 @@ func decodeSemanticTokens(data []uint32, legend []string, slots map[string]strin
 	return tokens
 }
 
-// RequestSemanticTokens queues a fetch for path, replacing any earlier one that had not
-// started. Returns 0 when there is nothing to ask — the document is untracked, the manager
-// is closed, or the server never advertised a provider — so the caller can stop rather
-// than wait for a result that will not arrive.
+// RequestSemanticTokens queues a fetch for path, replacing an unstarted one. 0 means there
+// is nothing to ask.
 func (m *lspManager) RequestSemanticTokens(path string, editSeq int) uint64 {
 	if m == nil || path == "" {
 		return 0
@@ -144,49 +131,25 @@ func (m *lspManager) takeSemantic() *lspSemanticRequest {
 	return request
 }
 
-// startSemantic flushes the document to its session and starts the RPC, the same shape
-// startRequest has: the DidChange write happens on the actor goroutine so the server scores
-// the exact text these tokens will be painted onto, and only the wait moves to a worker.
+// startSemantic flushes the document and starts the semantic-tokens RPC on a worker.
 func (m *lspManager) startSemantic(sessions map[string]*lspSession,
 	pending map[string]lspDocument, request lspSemanticRequest) context.CancelFunc {
-	m.mu.Lock()
-	doc, ok := m.desired[request.path]
-	legend := m.semanticLegends[doc.key()]
-	slots := m.semanticSlotsLocked(doc)
-	m.mu.Unlock()
-	if !ok || doc.editSeq != request.editSeq || len(legend) == 0 {
-		m.emitSemantic(request, lspSemanticResult{})
+	var legend []string
+	var slots map[string]string
+	_, session, err := m.flushForRequest(sessions, pending, request.path, request.editSeq,
+		func(doc lspDocument, _ *lspSession) bool {
+			m.mu.Lock()
+			legend, slots = m.semanticLegends[doc.key()], m.semanticSlotsLocked(doc)
+			m.mu.Unlock()
+			return len(legend) > 0
+		})
+	if session == nil {
+		m.emitSemantic(request, lspSemanticResult{err: err})
 		return nil
-	}
-	session := sessions[doc.key()]
-	if session == nil || session.server == nil {
-		m.emitSemantic(request, lspSemanticResult{})
-		return nil
-	}
-	if session.sent[doc.path] != doc.version {
-		if err := session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-			TextDocument: protocol.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
-				Version:                doc.version,
-			},
-			ContentChanges: []protocol.TextDocumentContentChangeEvent{
-				&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
-			},
-		}); err != nil {
-			m.failSession(session, err)
-			clearPendingSession(pending, session.key)
-			m.emitSemantic(request, lspSemanticResult{err: err})
-			return nil
-		}
-		session.sent[doc.path] = doc.version
-		delete(pending, doc.path)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), lspRequestLimit)
-	server, path := session.server, doc.path
-	m.workers.Add(1)
-	go func() {
-		defer m.workers.Done()
+	server, path := session.server, request.path
+	return m.goRequest(lspRequestLimit, func(ctx context.Context) {
 		answer, err := server.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(path)},
 		})
@@ -201,8 +164,7 @@ func (m *lspManager) startSemantic(sessions map[string]*lspSession,
 		m.emitSemantic(request, lspSemanticResult{
 			tokens: decodeSemanticTokens(answer.Data, legend, slots),
 		})
-	}()
-	return cancel
+	})
 }
 
 // semanticSlotsLocked is the mapping this document's server paints through: the built-in
@@ -222,4 +184,50 @@ func (m *lspManager) emitSemantic(request lspSemanticRequest, result lspSemantic
 	}
 	result.id, result.path, result.editSeq = request.id, request.path, request.editSeq
 	m.emit(lspEvent{semantic: &result})
+}
+
+// semanticDebounce matches the editor's highlight debounce, so both refresh on one
+// cadence.
+const semanticDebounce = 250 * time.Millisecond
+
+type semanticTick struct {
+	target     *homeScreen
+	generation int
+}
+
+// scheduleSemanticTokens debounces behind a generation counter, so a typing burst sends
+// one fetch once it settles (each fetch flushes the whole document).
+func (s *homeScreen) scheduleSemanticTokens() tea.Cmd {
+	if s.editor == nil || s.currentPath == "" {
+		return nil
+	}
+	seq := s.editor.EditSeq()
+	if s.semanticPath == s.currentPath && s.semanticSeq == seq {
+		return nil // this generation has already been asked for
+	}
+	s.semanticGen++
+	generation := s.semanticGen
+	return tea.Tick(semanticDebounce, func(time.Time) tea.Msg {
+		return semanticTick{target: s, generation: generation}
+	})
+}
+
+// handleSemanticTick issues the fetch unless a later edit superseded it. A refusal is not
+// recorded or reported, so a document opened before its server started is retried after
+// the next edit.
+func (s *homeScreen) handleSemanticTick(sh *core.Shared, tick semanticTick) {
+	if tick.target != s || tick.generation != s.semanticGen {
+		return
+	}
+	if s.editor == nil || s.currentPath == "" {
+		return
+	}
+	c := Of(sh)
+	if c == nil || c.lsp == nil {
+		return
+	}
+	seq := s.editor.EditSeq()
+	if c.lsp.RequestSemanticTokens(s.currentPath, seq) != 0 {
+		s.semanticPath, s.semanticSeq = s.currentPath, seq
+	}
 }

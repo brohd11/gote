@@ -47,29 +47,21 @@ func (s *homeScreen) newOutlinePanel() *components.TreePanel {
 	})
 }
 
-// toggleOutline changes only session state. In a normal workspace turning it on also
-// restores the sidebar if alt+| had hidden it; ModeFile instead gets an outline-only
-// side column and keeps its chrome mask.
+// toggleOutline toggles the outline panel. Turning it on also restores a hidden sidebar;
+// ModeFile gets an outline-only side column.
 func (s *homeScreen) toggleOutline(sh *core.Shared) core.Action {
-	s.closeCompletion()
-	s.closeHover()
-	s.saveResize(s.modular.ResizeState())
-	focus := s.focusedPane()
-	s.outlineVisible = !s.outlineVisible
-	s.outlineGeneration++
-	if s.outlineVisible {
-		if !s.minimal {
-			s.sidebar = true
+	cmd := s.togglePanes(sh, func() {
+		s.outlineVisible = !s.outlineVisible
+		s.outlineGeneration++
+		if s.outlineVisible {
+			if !s.minimal {
+				s.sidebar = true
+			}
+			s.prepareOutlineDocument()
+		} else {
+			s.outlineRequestID = 0
 		}
-		s.prepareOutlineDocument()
-	} else {
-		s.outlineRequestID = 0
-	}
-	s.rebuildModular(sh, noFocus)
-	if s.panelSlot(focus) == noFocus {
-		focus = s.editorPanel
-	}
-	cmd := s.modular.FocusSlot(s.panelSlot(focus))
+	})
 	if s.outlineVisible {
 		cmd = tea.Batch(cmd, s.scheduleOutline())
 	}

@@ -10,25 +10,14 @@ import (
 	"go.lsp.dev/uri"
 )
 
-// The workspace-diagnostic lane: LSP 3.17 pull diagnostics, the standard way to ask a
-// server what is wrong with a project rather than inferring it from what it volunteers.
-//
-// It is a lane in the sense of the other four (lsp.go's completion and on-demand lanes,
-// lsp_semantic.go, lsp_outline.go): one replaceable request per session, its own worker,
-// gated on an advertised capability, and unable to evict anything a keystroke asked for.
-//
-// Why this exists at all: a server decides the SCOPE of its own diagnostics, and the three
-// answers are all different. gdscript-lsp diagnoses its whole project on `initialized` and
-// pushes the result unasked — measured at 197 diagnostics across 36 files with gote having
-// opened nothing. rust-analyzer does the same across a crate. gopls advertises no
-// diagnosticProvider at all and reports only on the package holding an open file. This
-// lane serves the fourth case, a server that answers workspace pulls, and the other three
-// need nothing beyond keeping what arrives (see lspClient.PublishDiagnostics).
+// The workspace-diagnostic lane (LSP 3.17 pull diagnostics): one replaceable request per
+// session on its own worker, gated on the capability. Servers differ in diagnostic scope:
+// gdscript-lsp and rust-analyzer push whole-project results unasked, gopls reports only on
+// packages with open files, and this lane serves servers that answer workspace pulls.
 
 const (
-	// The floor between two workspace pulls. The request is specified as long-running —
-	// a server may hold it open until it has news — so the loop is normally paced by the
-	// server itself; this only stops a server that answers instantly from spinning the lane.
+	// The minimum gap between pulls. Long-polling servers pace the loop themselves; this stops
+	// an instantly answering one from spinning.
 	lspPullMinInterval = 2 * time.Second
 	// After a failed pull. Deliberately not failSession's business: a diagnostics request
 	// that errors must not take the whole session down with a dead-server backoff.
@@ -42,9 +31,7 @@ type lspPullResult struct {
 	err    error
 }
 
-// workspaceDiagnosticOptions reads the workspace half of the diagnosticProvider
-// capability. It is a union of two shapes in the protocol — the registration variant
-// embeds the plain one — and anything else means the server said nothing usable.
+// workspaceDiagnosticOptions reads the workspace half of the diagnosticProvider union.
 func workspaceDiagnosticOptions(provider protocol.DiagnosticProvider) (supported bool, identifier *string) {
 	switch options := provider.(type) {
 	case *protocol.DiagnosticOptions:
@@ -81,10 +68,8 @@ func (m *lspManager) beginWorkspacePull(session *lspSession) {
 		params.Identifier = session.pullIdentifier
 	}
 
-	// No timeout, unlike every other lane. workspace/diagnostic is specified as
-	// long-running: the server is entitled to hold the request open until it has
-	// something to report, and that long poll IS the refresh mechanism. The context is
-	// cancelled by session teardown and by nothing else.
+	// No timeout: the request may be held open until the server has news (that long poll is
+	// the refresh). Only session teardown cancels it.
 	ctx, cancel := context.WithCancel(context.Background())
 	session.pullCancel, session.pullActive = cancel, true
 	server, key := session.server, session.key
@@ -114,9 +99,7 @@ func (m *lspManager) applyWorkspacePull(sessions map[string]*lspSession, result 
 		return
 	}
 	m.foldWorkspacePull(session, result.report)
-	// Straight back around: on a server that long-polls this parks until it has news,
-	// which is exactly the intended shape. The floor is what saves us from one that
-	// answers instantly.
+	// Loop straight back; a long-polling server parks here until it has news.
 	session.pullAgainAt = time.Now().Add(lspPullMinInterval)
 	m.beginWorkspacePull(session)
 }

@@ -14,12 +14,8 @@ import (
 	"go.lsp.dev/uri"
 )
 
-// The on-demand request lane. Completion has a lane of its own (lsp.go) because it is
-// typing-driven and carries its own trigger and rebasing rules; everything else a
-// language server answers is a request the user asked for, one at a time, where a newer
-// one replaces whatever was queued. That is one slot, one generation counter, and one
-// worker — the same shape startCompletion has, without bending completion into a
-// generic mechanism it would only complicate.
+// The on-demand request lane: one slot where a newer request replaces a queued one, one
+// generation counter and one worker. Completion has its own lane.
 
 const (
 	lspRequestLimit = 3 * time.Second // gopls cold on a large module beats completion's 2s
@@ -112,11 +108,9 @@ type lspRequestResult struct {
 	err        error
 }
 
-// Request queues an on-demand request, replacing any that had not started yet, and
-// returns the generation the eventual result will carry. Like RequestCompletion it does
-// no IO on the UI goroutine. A zero id means the request was refused outright — the
-// document is not tracked, or the server never advertised the capability — and the
-// caller should say so rather than wait for a result that will not arrive.
+// Request queues an on-demand request (replacing any not yet started) and returns the
+// result's generation. 0 means refused (untracked document or unsupported), so the caller
+// should say so rather than wait.
 func (m *lspManager) Request(kind lspRequestKind, path string, editSeq int, position protocol.Position) uint64 {
 	if m == nil || path == "" {
 		return 0
@@ -140,10 +134,8 @@ func (m *lspManager) Request(kind lspRequestKind, path string, editSeq int, posi
 	return id
 }
 
-// Supports reports whether the initialized server for path advertised kind. Before
-// initialization nothing is advertised and the answer is false, which is what keeps a
-// key pressed during startup from firing a MethodNotFound at a server that would then
-// look like a failed session.
+// Supports reports whether path's server advertised kind (false before initialization, so
+// startup keys do not send unsupported methods).
 func (m *lspManager) Supports(path string, kind lspRequestKind) bool {
 	if m == nil || path == "" {
 		return false
@@ -214,55 +206,23 @@ func (m *lspManager) takeRequest() *lspRequest {
 	return request
 }
 
-// startRequest flushes the document to its session and starts the RPC, exactly as
-// startCompletion does and for the same reason: the notification write happens first,
-// on the actor goroutine, so the server observes the text whose position the request
-// names. Only the wait moves to a worker.
+// startRequest flushes the document and starts the request's RPC on a worker.
 func (m *lspManager) startRequest(sessions map[string]*lspSession,
 	pending map[string]lspDocument, request lspRequest) context.CancelFunc {
-	m.mu.Lock()
-	doc, ok := m.desired[request.path]
-	m.mu.Unlock()
-	if !ok || doc.editSeq != request.editSeq {
-		m.emitRequest(request, lspRequestResult{})
+	doc, session, err := m.flushForRequest(sessions, pending, request.path, request.editSeq, nil)
+	if session == nil {
+		m.emitRequest(request, lspRequestResult{err: err})
 		return nil
-	}
-	session := sessions[doc.key()]
-	if session == nil || session.server == nil {
-		m.emitRequest(request, lspRequestResult{})
-		return nil
-	}
-	if session.sent[doc.path] != doc.version {
-		if err := session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-			TextDocument: protocol.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
-				Version:                doc.version,
-			},
-			ContentChanges: []protocol.TextDocumentContentChangeEvent{
-				&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
-			},
-		}); err != nil {
-			m.failSession(session, err)
-			clearPendingSession(pending, session.key)
-			m.emitRequest(request, lspRequestResult{err: err})
-			return nil
-		}
-		session.sent[doc.path] = doc.version
-		delete(pending, doc.path)
 	}
 
 	limit := lspRequestLimit
 	if request.kind == lspReqFormat {
 		limit = lspFormatLimit
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	server, path := session.server, doc.path
-	m.workers.Add(1)
-	go func() {
-		defer m.workers.Done()
+	return m.goRequest(limit, func(ctx context.Context) {
 		m.emitRequest(request, dispatchLSPRequest(ctx, server, path, request))
-	}()
-	return cancel
+	})
 }
 
 // dispatchLSPRequest issues one request and projects its answer. It runs on a worker and
@@ -297,14 +257,9 @@ func dispatchLSPRequest(ctx context.Context, server protocol.Server, path string
 	return result
 }
 
-// requestFormatEdits asks for organize-imports and formatting in that order and returns
-// their edits concatenated. The order is the one an editor's "format on save" uses:
-// imports are rewritten against the source as it stands, then the whole file is laid
-// out — and gopls only ever offers import fixes through the code-action path, which is
-// why plain formatting is not enough for Go.
-//
-// Neither half failing aborts the other: a server with formatting and no code actions,
-// or the reverse, still gets to do the part it can.
+// requestFormatEdits asks for organize-imports, then formatting, and returns both edit
+// sets (gopls fixes imports only via code actions). Either half may fail without stopping
+// the other.
 func requestFormatEdits(ctx context.Context, server protocol.Server,
 	document protocol.TextDocumentIdentifier, path string) ([]lspTextEdit, error) {
 	var edits []lspTextEdit
@@ -343,9 +298,8 @@ func requestFormatEdits(ctx context.Context, server protocol.Server,
 	return nil, failure
 }
 
-// splitWorkspaceEdit takes the edits a WorkspaceEdit aims at path, and reports whether
-// it also touches any other file. Both the `changes` map and the newer `documentChanges`
-// list are read, since servers answer with either.
+// splitWorkspaceEdit returns the edits aimed at path and whether any other file is
+// touched, reading both `changes` and `documentChanges`.
 func splitWorkspaceEdit(edit *protocol.WorkspaceEdit, path string) (local []lspTextEdit, foreign bool) {
 	if edit == nil {
 		return nil, false
@@ -384,9 +338,8 @@ func projectTextEdits(edits []protocol.TextEdit) []lspTextEdit {
 	return out
 }
 
-// projectDefinition collapses all three arms of the definition union. A DefinitionLink
-// carries both the whole symbol and the range worth revealing; the selection range is
-// the one that puts the caret on the name rather than on a doc comment above it.
+// projectDefinition flattens the definition union. A DefinitionLink's selection range puts
+// the caret on the name.
 func projectDefinition(result protocol.DefinitionResult) []lspLocation {
 	switch value := result.(type) {
 	case *protocol.Location:
@@ -422,9 +375,7 @@ func projectLocations(locations []protocol.Location) []lspLocation {
 	return out
 }
 
-// uriPath is the one place a location's URI becomes a filesystem path. A non-file URI
-// (a server answering with a jdt: or zipfile: scheme) yields "", which every caller
-// treats as "not a jumpable location" rather than as an error.
+// uriPath converts a file URI to a path; other schemes yield "" (not jumpable).
 func uriPath(u uri.URI) string {
 	if !u.IsFile() {
 		return ""
@@ -432,9 +383,8 @@ func uriPath(u uri.URI) string {
 	return filepath.Clean(u.FsPath())
 }
 
-// sameFilePath compares paths at the LSP URI boundary. File URIs canonicalize
-// Windows drive letters (and UNC authorities) to lowercase, while paths received
-// from the OS may retain their original casing. They still identify the same file.
+// sameFilePath compares paths across the URI boundary, which lowercases Windows drive
+// letters and UNC authorities.
 func sameFilePath(left, right string) bool {
 	left, right = filepath.Clean(left), filepath.Clean(right)
 	if runtime.GOOS == "windows" {
@@ -443,12 +393,8 @@ func sameFilePath(left, right string) bool {
 	return left == right
 }
 
-// diagnosticsKey is the spelling the diagnostics map is keyed on. Paths reach that map
-// from two sources that disagree on Windows: the OS, which spells a drive letter (or a
-// UNC authority) however the user did, and file URIs, which canonicalize both to
-// lowercase. Storing under one spelling and reading with the other loses every diagnostic
-// for the file, so both sides come through here. Only the volume is folded — the rest of
-// the path is what the panel shows.
+// diagnosticsKey is the diagnostics map's key spelling: the volume folded to lowercase, so
+// OS paths and URIs agree on Windows.
 func diagnosticsKey(path string) string {
 	path = filepath.Clean(path)
 	if runtime.GOOS != "windows" {
@@ -458,9 +404,8 @@ func diagnosticsKey(path string) string {
 	return strings.ToLower(volume) + path[len(volume):]
 }
 
-// projectSymbols preserves the hierarchy of DocumentSymbol results. The legacy
-// SymbolInformation shape has no reliable parent relation, so it stays flat and is
-// sorted into document order, which that response shape does not guarantee.
+// projectSymbols keeps DocumentSymbol hierarchy; legacy SymbolInformation stays flat,
+// sorted into document order.
 func projectSymbols(result protocol.DocumentSymbolResult) []lspSymbol {
 	switch value := result.(type) {
 	case protocol.DocumentSymbolSlice:
@@ -499,9 +444,8 @@ func projectSymbols(result protocol.DocumentSymbolResult) []lspSymbol {
 	return nil
 }
 
-// flattenHover reduces every arm of HoverContents to one markdown string. The
-// MarkedString arms are the pre-3.15 shape and are still what several servers answer
-// with, so they are wrapped back into fenced blocks rather than dropped.
+// flattenHover reduces HoverContents to one markdown string, wrapping pre-3.15
+// MarkedStrings back into fences.
 func flattenHover(contents protocol.HoverContents) string {
 	switch value := contents.(type) {
 	case *protocol.MarkupContent:

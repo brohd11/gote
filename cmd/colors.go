@@ -11,10 +11,9 @@ import (
 
 var colorsBasic bool
 
-// colorsCmd is the palette tuning loop. Editing syntax_colors means choosing an ANSI-256
-// index, and neither the config file nor the editor can say what an index looks like or
-// how it reads against code — so this prints the slots, a highlighted sample and the whole
-// 256-color space, all in the palette currently in effect.
+// colorsCmd helps tune syntax_colors: it prints the slots, a highlighted sample and the
+// whole 256-color space in the active palette, since an ANSI index says nothing about
+// how it looks.
 var colorsCmd = &cobra.Command{
 	Use:   "colors [file]",
 	Short: "Show the syntax palette, a highlighted sample, and the 256-color space",
@@ -32,10 +31,8 @@ var colorsCmd = &cobra.Command{
 		if len(args) == 1 {
 			path = args[0]
 		}
-		// Through a colorprofile.Writer, because outside the TUI nothing else downsamples:
-		// bubbletea's renderer is what re-emits cell styles through the detected profile,
-		// and without it this would print 256-color swatches on a terminal where the
-		// editor renders 16 — the report would misreport the one thing it exists to show.
+		// Through a colorprofile.Writer, which downsamples to the terminal's profile as
+		// bubbletea would; otherwise the swatches could show colors the editor cannot.
 		out := colorprofile.NewWriter(cmd.OutOrStdout(), os.Environ())
 		return app.RenderPalette(out, cfg, app.RenderOptions{Path: path, Basic: colorsBasic, Profile: out.Profile})
 	},

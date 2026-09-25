@@ -7,9 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -29,26 +27,20 @@ import (
 const (
 	lspRetryDelay = 15 * time.Second
 	lspDialLimit  = 1500 * time.Millisecond
-	// Generous on purpose. A server may index the whole project inside its initialize
-	// handler before answering — gdscript-lsp takes ~10s over a 422-file Godot project —
-	// and a client that gives up first does not merely wait longer for that session: the
-	// timeout is an error, failSession calls it a dead server, and the 15s backoff
-	// respawns it to time out again, forever. That loop cost this project every LSP
-	// feature, not just diagnostics.
+	// Generous because a server may index the whole project during initialize
+	// (gdscript-lsp takes ~10s on a large project); a timeout fails the session and the
+	// respawn would time out again forever.
 	lspInitLimit       = 60 * time.Second
 	lspCompletionLimit = 2 * time.Second
 	lspChangeDebounce  = 500 * time.Millisecond
 )
 
-// How often a project-wide diagnostic report reaches the UI. The panel reflows every entry
-// it holds whenever the revision moves, and a server that answers for a whole project
-// reports on dozens of files at once. The file in the editor is exempt — that one still
-// emits the moment it arrives.
+// How often project-wide diagnostics reach the UI (the panel reflows on each revision);
+// the file in the editor is emitted immediately.
 const lspDiagnosticsSettle = 300 * time.Millisecond
 
-// lspDocument is the manager's desired view of one live editor buffer. Version is an
-// LSP version, independent of EditorScreen.EditSeq: it begins at one on didOpen and
-// advances monotonically whenever the editor generation changes.
+// lspDocument is the manager's desired view of one editor buffer. version is the LSP
+// version, starting at 1 on didOpen and advancing with each editor generation.
 type lspDocument struct {
 	path, language, server, root, text string
 	editSeq                            int
@@ -56,53 +48,6 @@ type lspDocument struct {
 }
 
 func (d lspDocument) key() string { return d.server + "\x00" + d.root }
-
-// lspDiagnostic is the UI-sized projection of protocol.Diagnostic. Keeping protocol
-// unions out of the renderer makes snapshots cheap and gives the rest of Gote stable
-// strings regardless of whether a server used a string or markup message/code.
-type lspDiagnostic struct {
-	Line, Character       uint32
-	EndLine, EndCharacter uint32
-	Severity              protocol.DiagnosticSeverity
-	Message, Source, Code string
-}
-
-type lspCompletionEdit struct {
-	Range   protocol.Range
-	NewText string
-}
-
-type lspCompletionItem struct {
-	Label, Detail, FilterText, SortText, InsertText string
-	Edit                                            *lspCompletionEdit
-	Stops                                           []editor.CompletionStop
-	Snippet                                         bool
-	Preselect                                       bool
-}
-
-type lspCompletionRequest struct {
-	id               uint64
-	path             string
-	editSeq          int
-	position         protocol.Position
-	triggerCharacter string
-	manual           bool
-}
-
-type lspCompletionResult struct {
-	id       uint64
-	path     string
-	editSeq  int
-	position protocol.Position
-	items    []lspCompletionItem
-	// incomplete is the server's isIncomplete: "ask me again as the user types" rather
-	// than "I truncated this". Nothing reads it, deliberately. gopls sets it on every
-	// answer — a three-item member list as readily as a scope-wide one — and the popup
-	// already schedules a fresh request on each identifier keystroke, so acting on the
-	// flag would ask for exactly what the debounce asks for anyway.
-	incomplete bool
-	err        error
-}
 
 type lspEvent struct {
 	status     string
@@ -112,10 +57,9 @@ type lspEvent struct {
 	outline    *lspOutlineResult
 }
 
-// lspManager is an actor around all server and document lifecycle work. The UI writes
-// the latest desired snapshots under mu and nudges wake; the actor converges sessions
-// to that state off Bubble Tea's update goroutine. Repeated edits are retained as one
-// latest snapshot and sent only after the change debounce expires.
+// lspManager is an actor for server and document lifecycle. The UI writes desired
+// snapshots under mu and wakes it; it converges sessions off the Bubble Tea goroutine,
+// sending edits after the change debounce.
 type lspManager struct {
 	cfg            Config
 	version        string
@@ -139,17 +83,13 @@ type lspManager struct {
 	// refreshPulls carries workspace/diagnostic/refresh from the jsonrpc goroutine to
 	// the actor, by session root.
 	refreshPulls map[string]bool
-	// projectRoots are the roots whose server has shown it reports beyond the documents
-	// it was handed — by answering a workspace pull, or by volunteering a file gote never
-	// opened. Under such a root a closed buffer keeps its diagnostics, because the report
-	// is about the project and not about the tab. Everywhere else a closed file's
-	// diagnostics are stale the moment it closes: the server was told didClose and will
-	// never correct them.
+	// projectRoots are roots whose server reports beyond the open documents (a workspace
+	// pull, or files gote never opened). There a closed buffer keeps its diagnostics;
+	// elsewhere they go stale on didClose.
 	projectRoots map[string]bool
-	// The semantic-token lane (lsp_semantic.go): its own slot and counter for the same
-	// reason the on-demand lane has its own — a background refresh must never evict the
-	// definition the user just asked for. semanticLegends is per session because a token's
-	// type arrives as an index into the server's own list.
+	// The semantic-token lane has its own slot so background refreshes never evict user
+	// requests. semanticLegends is per session: token types are indexes into each server's
+	// list.
 	semantic        *lspSemanticRequest
 	nextSemantic    uint64
 	semanticLegends map[string][]string
@@ -264,9 +204,7 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 	})
 	for path := range m.desired {
 		if _, ok := next[path]; !ok {
-			// A project-wide server keeps reporting on a file long after its tab closes,
-			// so those diagnostics stay; anywhere else they are stale the moment the
-			// server is told didClose. See projectRoots.
+			// Keep a closed file's diagnostics only under a project-scoped root (see projectRoots).
 			if !m.projectScopedLocked(path) {
 				key := diagnosticsKey(path)
 				if _, ok := m.diagnostics[key]; ok {
@@ -291,59 +229,6 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 		m.signal()
 	}
 	return len(next) > 0
-}
-
-// CompletionTrigger reports whether the initialized server for path declared text as
-// a completion trigger character. Before initialization there is no advertised set and
-// false is returned; manual and identifier-driven requests remain available.
-func (m *lspManager) CompletionTrigger(path, text string) bool {
-	if m == nil || path == "" || text == "" {
-		return false
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	doc, ok := m.desired[filepath.Clean(path)]
-	if !ok {
-		return false
-	}
-	return m.completionTriggers[doc.key()][text]
-}
-
-// RequestCompletion replaces any queued completion request with the newest editor
-// snapshot. It performs no IO on the UI goroutine and returns the generation carried by
-// the eventual result.
-func (m *lspManager) RequestCompletion(path string, editSeq int, position protocol.Position,
-	triggerCharacter string, manual bool) uint64 {
-	if m == nil || path == "" {
-		return 0
-	}
-	path = filepath.Clean(path)
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return 0
-	}
-	if _, ok := m.desired[path]; !ok {
-		m.mu.Unlock()
-		return 0
-	}
-	m.nextComplete++
-	id := m.nextComplete
-	m.completion = &lspCompletionRequest{
-		id: id, path: path, editSeq: editSeq, position: position,
-		triggerCharacter: triggerCharacter, manual: manual,
-	}
-	m.mu.Unlock()
-	m.signal()
-	return id
-}
-
-func (m *lspManager) takeCompletion() *lspCompletionRequest {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	request := m.completion
-	m.completion = nil
-	return request
 }
 
 func (m *lspManager) DidSave(path string) {
@@ -449,9 +334,8 @@ func (m *lspManager) loop() {
 		}
 		changeTimerC = changeTimer.C
 	}
-	// armDiagnostics is the same shape and for the same reason: under a stream of project
-	// publishes this fires on a fixed cadence, where a restarting debounce would never
-	// fire at all until the stream stopped.
+	// Fire on a fixed cadence under a stream of publishes; a restarting debounce would never
+	// fire.
 	armDiagnostics := func() {
 		if diagTimerC != nil {
 			return
@@ -556,10 +440,9 @@ func (m *lspManager) desiredSnapshot() (map[string]lspDocument, map[string]bool,
 	return docs, saves, restart
 }
 
-// converge applies document lifecycle work immediately. Ordinary content changes are
-// retained in pending until a quiet period; saves and reconnects always use the latest
-// snapshot without waiting. The return value reports whether a newer pending version was
-// observed and therefore needs a fresh debounce window.
+// converge applies lifecycle work immediately; content changes wait in pending for a
+// quiet period, while saves and reconnects send the latest snapshot at once. It reports
+// whether a newer pending version needs a fresh debounce.
 func (m *lspManager) converge(sessions map[string]*lspSession, pending map[string]lspDocument, flushChanges bool) bool {
 	docs, saves, restart := m.desiredSnapshot()
 	queuedChange := false
@@ -651,15 +534,7 @@ func (m *lspManager) converge(sessions map[string]*lspSession, pending map[strin
 					}
 					continue
 				}
-				err = session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-					TextDocument: protocol.VersionedTextDocumentIdentifier{
-						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
-						Version:                doc.version,
-					},
-					ContentChanges: []protocol.TextDocumentContentChangeEvent{
-						&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
-					},
-				})
+				err = didChangeWhole(session.server, doc)
 			}
 			if err != nil {
 				m.failSession(session, err)
@@ -684,9 +559,8 @@ func (m *lspManager) converge(sessions map[string]*lspSession, pending map[strin
 	return queuedChange
 }
 
-// publishRoots hands the live session roots to the UI side, which uses them to print a
-// diagnostic's file as a project-relative path instead of a full absolute one. It is the
-// only thing about a session the UI goroutine ever gets to see.
+// publishRoots hands the session roots to the UI (for project-relative paths); the only
+// session state the UI sees.
 func (m *lspManager) publishRoots(sessions map[string]*lspSession) {
 	roots := make([]string, 0, len(sessions))
 	for _, session := range sessions {
@@ -716,152 +590,57 @@ func clearPendingSession(pending map[string]lspDocument, key string) {
 	}
 }
 
-// startCompletion flushes the requested document to its session and starts the RPC.
-// The notification write happens first on the actor goroutine, so the server observes
-// the exact text whose cursor position the request names. Only the RPC wait is moved to
-// a worker.
-func (m *lspManager) startCompletion(sessions map[string]*lspSession,
-	pending map[string]lspDocument, request lspCompletionRequest) context.CancelFunc {
+// flushForRequest resolves the live session for path at editSeq and, on the actor
+// goroutine, sends it the document's current text if it holds an older version, so a
+// request names exactly the text the server has. usable (optional) vetoes the session
+// before anything is sent. session is nil when the request cannot proceed; err is set
+// when the flush itself failed, which also fails the session.
+func (m *lspManager) flushForRequest(sessions map[string]*lspSession, pending map[string]lspDocument,
+	path string, editSeq int, usable func(lspDocument, *lspSession) bool) (lspDocument, *lspSession, error) {
 	m.mu.Lock()
-	doc, ok := m.desired[request.path]
+	doc, ok := m.desired[path]
 	m.mu.Unlock()
-	if !ok || doc.editSeq != request.editSeq {
-		m.emitCompletion(request, nil, false, nil)
-		return nil
+	if !ok || doc.editSeq != editSeq {
+		return doc, nil, nil
 	}
 	session := sessions[doc.key()]
-	if session == nil || session.server == nil || session.caps == nil || session.caps.CompletionProvider == nil {
-		m.emitCompletion(request, nil, false, nil)
-		return nil
+	if session == nil || session.server == nil || (usable != nil && !usable(doc, session)) {
+		return doc, nil, nil
 	}
 	if session.sent[doc.path] != doc.version {
-		if err := session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-			TextDocument: protocol.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
-				Version:                doc.version,
-			},
-			ContentChanges: []protocol.TextDocumentContentChangeEvent{
-				&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
-			},
-		}); err != nil {
+		if err := didChangeWhole(session.server, doc); err != nil {
 			m.failSession(session, err)
 			clearPendingSession(pending, session.key)
-			m.emitCompletion(request, nil, false, err)
-			return nil
+			return doc, nil, err
 		}
 		session.sent[doc.path] = doc.version
 		delete(pending, doc.path)
 	}
+	return doc, session, nil
+}
 
-	kind := protocol.CompletionTriggerKindInvoked
-	var trigger *string
-	if !request.manual && request.triggerCharacter != "" {
-		for _, candidate := range session.caps.CompletionProvider.TriggerCharacters {
-			if candidate == request.triggerCharacter {
-				kind = protocol.CompletionTriggerKindTriggerCharacter
-				value := request.triggerCharacter
-				trigger = &value
-				break
-			}
-		}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), lspCompletionLimit)
-	server := session.server
+// didChangeWhole sends doc's full text as a didChange notification.
+func didChangeWhole(server protocol.Server, doc lspDocument) error {
+	return server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
+			Version:                doc.version,
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
+		},
+	})
+}
+
+// goRequest runs fn on a tracked worker under a timeout and returns its cancel.
+func (m *lspManager) goRequest(limit time.Duration, fn func(ctx context.Context)) context.CancelFunc {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
-		result, err := server.Completion(ctx, &protocol.CompletionParams{
-			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-				TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
-				Position:     request.position,
-			},
-			Context: protocol.CompletionContext{TriggerKind: kind, TriggerCharacter: trigger},
-		})
-		items, incomplete := projectCompletions(result)
-		m.emitCompletion(request, items, incomplete, err)
+		fn(ctx)
 	}()
 	return cancel
-}
-
-func (m *lspManager) emitCompletion(request lspCompletionRequest, items []lspCompletionItem,
-	incomplete bool, err error) {
-	m.mu.Lock()
-	current := !m.closed && request.id == m.nextComplete
-	m.mu.Unlock()
-	if !current {
-		return
-	}
-	m.emit(lspEvent{completion: &lspCompletionResult{
-		id: request.id, path: request.path, editSeq: request.editSeq, position: request.position,
-		items: items, incomplete: incomplete, err: err,
-	}})
-}
-
-func projectCompletions(result protocol.CompletionResult) ([]lspCompletionItem, bool) {
-	var source []protocol.CompletionItem
-	incomplete := false
-	switch result := result.(type) {
-	case protocol.CompletionItemSlice:
-		source = []protocol.CompletionItem(result)
-	case *protocol.CompletionList:
-		if result != nil {
-			source, incomplete = result.Items, result.IsIncomplete
-		}
-	}
-	items := make([]lspCompletionItem, 0, len(source))
-	for _, item := range source {
-		projected := lspCompletionItem{Label: item.Label}
-		if value, ok := item.Detail.Get(); ok {
-			projected.Detail = value
-		}
-		if value, ok := item.FilterText.Get(); ok {
-			projected.FilterText = value
-		}
-		if projected.FilterText == "" {
-			projected.FilterText = item.Label
-		}
-		if value, ok := item.SortText.Get(); ok {
-			projected.SortText = value
-		}
-		if value, ok := item.InsertText.Get(); ok {
-			projected.InsertText = value
-		}
-		if projected.InsertText == "" {
-			projected.InsertText = item.Label
-		}
-		if value, ok := item.Preselect.Get(); ok {
-			projected.Preselect = value
-		}
-		switch edit := item.TextEdit.(type) {
-		case *protocol.TextEdit:
-			if edit != nil {
-				projected.Edit = &lspCompletionEdit{Range: edit.Range, NewText: edit.NewText}
-			}
-		case *protocol.InsertReplaceEdit:
-			if edit != nil {
-				projected.Edit = &lspCompletionEdit{Range: edit.Replace, NewText: edit.NewText}
-			}
-		}
-		if item.InsertTextFormat == protocol.InsertTextFormatSnippet {
-			text := projected.InsertText
-			if projected.Edit != nil {
-				text = projected.Edit.NewText
-			}
-			expanded, stops, ok := parseLSPSnippet(text)
-			if !ok {
-				continue
-			}
-			projected.Snippet = true
-			projected.Stops = stops
-			if projected.Edit != nil {
-				projected.Edit.NewText = expanded
-			} else {
-				projected.InsertText = expanded
-			}
-		}
-		items = append(items, projected)
-	}
-	return items, incomplete
 }
 
 func (m *lspManager) startSession(session *lspSession) error {
@@ -914,7 +693,6 @@ func (m *lspManager) startSession(session *lspSession) error {
 	rootURI := uri.File(session.root)
 	pid := int32(os.Getpid())
 	version := protocol.NewOptional(m.version)
-	yes := true
 	var initializationOptions protocol.LSPAny
 	if cfg.InitializationOptions != nil {
 		encoded, marshalErr := json.Marshal(cfg.InitializationOptions)
@@ -936,76 +714,7 @@ func (m *lspManager) startSession(session *lspSession) error {
 				URI: rootURI, Name: filepath.Base(session.root),
 			}}),
 		},
-		Capabilities: protocol.ClientCapabilities{
-			Workspace: &protocol.WorkspaceClientCapabilities{
-				WorkspaceFolders: &yes,
-				// refreshSupport is the server's way to say "ask me again"; without it a
-				// pulled project would only refresh on its own cadence.
-				Diagnostics: &protocol.DiagnosticWorkspaceClientCapabilities{RefreshSupport: &yes},
-			},
-			TextDocument: &protocol.TextDocumentClientCapabilities{
-				PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{VersionSupport: &yes},
-				// Declaring the pull capability is what lets a server advertise
-				// diagnosticProvider back; without it gote would never learn that
-				// workspace/diagnostic is on offer. See lsp_diagnostic_pull.go.
-				Diagnostic: &protocol.DiagnosticClientCapabilities{},
-				Completion: &protocol.CompletionClientCapabilities{
-					ContextSupport: &yes,
-					CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &yes},
-				},
-				// Nothing below is optional politeness: a server that is not told the
-				// client supports a feature is entitled not to advertise it back, and
-				// Request dispatch gates every feature on that advertisement.
-				Hover: &protocol.HoverClientCapabilities{
-					ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
-				},
-				Definition: &protocol.DefinitionClientCapabilities{LinkSupport: &yes},
-				References: &protocol.ReferenceClientCapabilities{},
-				DocumentSymbol: &protocol.DocumentSymbolClientCapabilities{
-					HierarchicalDocumentSymbolSupport: &yes,
-				},
-				Formatting: &protocol.DocumentFormattingClientCapabilities{},
-				CodeAction: &protocol.CodeActionClientCapabilities{
-					CodeActionLiteralSupport: protocol.ClientCodeActionLiteralOptions{
-						CodeActionKind: protocol.ClientCodeActionKindOptions{
-							ValueSet: []protocol.CodeActionKind{protocol.CodeActionKindSourceOrganizeImports},
-						},
-					},
-				},
-				// AugmentsSyntaxTokens is the overlay design stated to the server: the
-				// spec defines it as "client side created syntax tokens and semantic
-				// tokens are both used for colorization", which is exactly what gote
-				// does — chroma paints first and these correct it.
-				//
-				// The full spec name lists are declared rather than only the ones the
-				// palette maps, because this says what the client can DECODE; a server
-				// may omit anything from its legend, and narrowing the declaration would
-				// quietly change which tokens it bothers to compute.
-				//
-				// This capability alone is not enough for gopls, which gates the whole
-				// feature behind its own semanticTokens option — see defaultLanguageServers.
-				SemanticTokens: protocol.SemanticTokensClientCapabilities{
-					Requests: protocol.ClientSemanticTokensRequestOptions{
-						Full: protocol.Boolean(true),
-					},
-					TokenTypes:           semanticTokenTypeNames,
-					TokenModifiers:       semanticTokenModifierNames,
-					Formats:              []protocol.TokenFormat{protocol.TokenFormatRelative},
-					AugmentsSyntaxTokens: &yes,
-				},
-				SignatureHelp: &protocol.SignatureHelpClientCapabilities{
-					SignatureInformation: &protocol.ClientSignatureInformationOptions{
-						DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
-						ParameterInformation: &protocol.ClientSignatureParameterInformationOptions{
-							LabelOffsetSupport: &yes,
-						},
-					},
-				},
-			},
-			General: &protocol.GeneralClientCapabilities{
-				PositionEncodings: []protocol.PositionEncodingKind{protocol.PositionEncodingKindUTF16},
-			},
-		},
+		Capabilities: clientCapabilities(),
 	})
 	if err != nil {
 		_ = conn.Close()
@@ -1030,10 +739,8 @@ func (m *lspManager) startSession(session *lspSession) error {
 		if signature := session.caps.SignatureHelpProvider; signature != nil {
 			m.signatureTriggers[session.key] = triggerSet(signature.TriggerCharacters)
 		}
-		// The legend is the server's, and a token's type arrives as an INDEX into it —
-		// the numbers differ between servers, so it has to be kept to decode anything at
-		// all. Cached here for the same reason the trigger sets are: this is the one
-		// moment the capabilities are in hand.
+		// Cache the server's token legend now, while the capabilities are in hand: types arrive
+		// as indexes into it.
 		if legend, ok := semanticLegend(session.caps.SemanticTokensProvider); ok {
 			m.semanticLegends[session.key] = legend
 		}
@@ -1060,9 +767,8 @@ func triggerSet(characters []string) map[string]bool {
 	return triggers
 }
 
-// forgetCapabilitiesLocked drops everything cached from one session's initialize answer.
-// Held under mu by every caller; a session without capabilities answers "unsupported" to
-// every on-demand request, which is the right state for one that is down.
+// forgetCapabilitiesLocked drops one session's cached capabilities (held under mu); a
+// session without them answers "unsupported".
 func (m *lspManager) forgetCapabilitiesLocked(key string) {
 	delete(m.completionTriggers, key)
 	delete(m.signatureTriggers, key)
@@ -1112,202 +818,7 @@ func (m *lspManager) emit(event lspEvent) {
 	}
 }
 
-// lspClient ignores every server-to-client feature except diagnostics. The embedded
-// implementation still answers optional notifications safely and rejects unsupported
-// requests with the protocol package's standard response.
-type lspClient struct {
-	protocol.UnimplementedClient
-	manager *lspManager
-	root    string
-}
-
-func (*lspClient) RegisterCapability(context.Context, *protocol.RegistrationParams) error {
-	return nil
-}
-
-func (*lspClient) UnregisterCapability(context.Context, *protocol.UnregistrationParams) error {
-	return nil
-}
-
-func (*lspClient) WorkDoneProgressCreate(context.Context, *protocol.WorkDoneProgressCreateParams) error {
-	return nil
-}
-
-// DiagnosticRefresh is the server saying that everything it has answered may now be wrong.
-// UnimplementedClient replies with an error, which a server is entitled to read as "this
-// client cannot refresh"; answering it properly is what keeps a pulled project in step
-// after a change the server noticed on its own.
-func (c *lspClient) DiagnosticRefresh(context.Context) error {
-	c.manager.requestPullRefresh(c.root)
-	return nil
-}
-
-func (c *lspClient) Configuration(_ context.Context, params *protocol.ConfigurationParams) ([]protocol.LSPAny, error) {
-	if params == nil {
-		return nil, nil
-	}
-	return make([]protocol.LSPAny, len(params.Items)), nil
-}
-
-func (c *lspClient) WorkspaceFolders(context.Context) ([]protocol.WorkspaceFolder, error) {
-	return []protocol.WorkspaceFolder{{URI: uri.File(c.root), Name: filepath.Base(c.root)}}, nil
-}
-
-func (c *lspClient) PublishDiagnostics(_ context.Context, params *protocol.PublishDiagnosticsParams) error {
-	if params == nil || !params.URI.IsFile() {
-		return nil
-	}
-	path := uriPath(params.URI)
-	c.manager.mu.Lock()
-	// Keep diagnostics under the spelling used by the open document. On Windows
-	// the URI path normally has a lowercased drive letter, so an exact map lookup
-	// would discard diagnostics for an otherwise identical path.
-	var doc lspDocument
-	open := false
-	for desiredPath, candidate := range c.manager.desired {
-		if sameFilePath(desiredPath, path) {
-			path, doc, open = desiredPath, candidate, true
-			break
-		}
-	}
-	if !open {
-		// Anything a server volunteers about a file gote never opened is kept, and saying
-		// so marks the root as project-scoped. That is not generosity, it is the whole
-		// diagnostics story for the servers that have one:
-		// gdscript-lsp diagnoses its entire project on `initialized` and pushes the result
-		// unasked, and rust-analyzer does the same across a crate. Discarding these was
-		// what used to leave the panel empty for files nobody had a tab for. There is no
-		// client version to check against — gote holds no document for this path at all.
-		c.manager.markProjectRootLocked(c.root)
-	} else if version, ok := params.Version.Get(); ok && version < doc.version {
-		c.manager.mu.Unlock()
-		return nil
-	}
-	diagnostics := make([]lspDiagnostic, 0, len(params.Diagnostics))
-	for _, item := range params.Diagnostics {
-		diagnostics = append(diagnostics, projectDiagnostic(item))
-	}
-	key := diagnosticsKey(path)
-	changed := !slices.Equal(c.manager.diagnostics[key], diagnostics)
-	if changed {
-		c.manager.diagnosticsRevision++
-		c.manager.diagnostics[key] = diagnostics
-	}
-	c.manager.mu.Unlock()
-	if !changed {
-		return nil
-	}
-	if open {
-		// The file in the editor answers at once: its gutter and its rows are what the
-		// reader is looking at.
-		c.manager.emit(lspEvent{})
-		return nil
-	}
-	// A project file goes through the settle timer instead. The panel reflows every row
-	// it holds on each revision, and a project publishes hundreds of times.
-	c.manager.wakeDiagnostics()
-	return nil
-}
-
-// wakeDiagnostics nudges the actor to start (or keep) the settle timer. It coalesces:
-// a full channel already means the actor has been told.
-func (m *lspManager) wakeDiagnostics() {
-	m.start()
-	select {
-	case m.diagWake <- struct{}{}:
-	default:
-	}
-}
-
-func projectDiagnostic(item protocol.Diagnostic) lspDiagnostic {
-	diagnostic := lspDiagnostic{
-		Line: item.Range.Start.Line, Character: item.Range.Start.Character,
-		EndLine: item.Range.End.Line, EndCharacter: item.Range.End.Character,
-		Severity: item.Severity,
-	}
-	switch message := item.Message.(type) {
-	case protocol.String:
-		diagnostic.Message = string(message)
-	case *protocol.MarkupContent:
-		diagnostic.Message = message.Value
-	}
-	if source, ok := item.Source.Get(); ok {
-		diagnostic.Source = source
-	}
-	switch code := item.Code.(type) {
-	case protocol.String:
-		diagnostic.Code = string(code)
-	case protocol.Integer:
-		diagnostic.Code = fmt.Sprint(int32(code))
-	}
-	return diagnostic
-}
-
-func (m *lspManager) Diagnostics(path string) []lspDiagnostic {
-	if m == nil {
-		return nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]lspDiagnostic(nil), m.diagnostics[diagnosticsKey(path)]...)
-}
-
-// AllDiagnostics is every file the servers have reported on, for the panel that lists a
-// whole project. Diagnostics(path) answers one file and is what the gutter asks.
-func (m *lspManager) AllDiagnostics() map[string][]lspDiagnostic {
-	if m == nil {
-		return nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	all := make(map[string][]lspDiagnostic, len(m.diagnostics))
-	for path, diagnostics := range m.diagnostics {
-		if len(diagnostics) == 0 {
-			continue
-		}
-		all[path] = append([]lspDiagnostic(nil), diagnostics...)
-	}
-	return all
-}
-
-// stdioTransport joins a child's stdout and stdin into the bidirectional shape the LSP
-// framer expects. Closing it tears down only the process Gote created.
-type stdioTransport struct {
-	io.Reader
-	io.Writer
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	cmd    *exec.Cmd
-	once   sync.Once
-}
-
-func (t *stdioTransport) Close() error {
-	var first error
-	t.once.Do(func() {
-		if err := t.stdin.Close(); err != nil {
-			first = err
-		}
-		if err := t.stdout.Close(); first == nil && err != nil {
-			first = err
-		}
-		if t.cmd.Process != nil {
-			_ = t.cmd.Process.Kill()
-		}
-		go func() { _ = t.cmd.Wait() }()
-	})
-	return first
-}
-
-// DiagnosticsRevision changes only when the stored diagnostic set changes.
-func (m *lspManager) DiagnosticsRevision() uint64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.diagnosticsRevision
-}
-
-// cancelPull stops an in-flight workspace/diagnostic. That request has no timeout of its
-// own — a server may hold it open indefinitely by design — so teardown is the only thing
-// that ends it.
+// cancelPull ends an in-flight workspace/diagnostic, which has no timeout of its own.
 func (s *lspSession) cancelPull() {
 	if s.pullCancel != nil {
 		s.pullCancel()
@@ -1337,4 +848,65 @@ func (m *lspManager) projectScopedLocked(path string) bool {
 		}
 	}
 	return false
+}
+
+// clientCapabilities is what gote tells a server it supports. A server may withhold any
+// feature the client does not declare, and request dispatch gates on what it advertises.
+func clientCapabilities() protocol.ClientCapabilities {
+	yes := true
+	return protocol.ClientCapabilities{
+		Workspace: &protocol.WorkspaceClientCapabilities{
+			WorkspaceFolders: &yes,
+			// RefreshSupport lets a server ask for a re-pull of project diagnostics.
+			Diagnostics: &protocol.DiagnosticWorkspaceClientCapabilities{RefreshSupport: &yes},
+		},
+		TextDocument: &protocol.TextDocumentClientCapabilities{
+			PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{VersionSupport: &yes},
+			// Declared so a server can advertise pull diagnostics (lsp_diagnostic_pull.go).
+			Diagnostic: &protocol.DiagnosticClientCapabilities{},
+			Completion: &protocol.CompletionClientCapabilities{
+				ContextSupport: &yes,
+				CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &yes},
+			},
+			Hover: &protocol.HoverClientCapabilities{
+				ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
+			},
+			Definition: &protocol.DefinitionClientCapabilities{LinkSupport: &yes},
+			References: &protocol.ReferenceClientCapabilities{},
+			DocumentSymbol: &protocol.DocumentSymbolClientCapabilities{
+				HierarchicalDocumentSymbolSupport: &yes,
+			},
+			Formatting: &protocol.DocumentFormattingClientCapabilities{},
+			CodeAction: &protocol.CodeActionClientCapabilities{
+				CodeActionLiteralSupport: protocol.ClientCodeActionLiteralOptions{
+					CodeActionKind: protocol.ClientCodeActionKindOptions{
+						ValueSet: []protocol.CodeActionKind{protocol.CodeActionKindSourceOrganizeImports},
+					},
+				},
+			},
+			// Semantic tokens overlay chroma's highlighting (AugmentsSyntaxTokens). The full
+			// spec name lists say what gote can decode, not only what the palette maps.
+			// gopls also needs its own semanticTokens option (defaultLanguageServers).
+			SemanticTokens: protocol.SemanticTokensClientCapabilities{
+				Requests: protocol.ClientSemanticTokensRequestOptions{
+					Full: protocol.Boolean(true),
+				},
+				TokenTypes:           semanticTokenTypeNames,
+				TokenModifiers:       semanticTokenModifierNames,
+				Formats:              []protocol.TokenFormat{protocol.TokenFormatRelative},
+				AugmentsSyntaxTokens: &yes,
+			},
+			SignatureHelp: &protocol.SignatureHelpClientCapabilities{
+				SignatureInformation: &protocol.ClientSignatureInformationOptions{
+					DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
+					ParameterInformation: &protocol.ClientSignatureParameterInformationOptions{
+						LabelOffsetSupport: &yes,
+					},
+				},
+			},
+		},
+		General: &protocol.GeneralClientCapabilities{
+			PositionEncodings: []protocol.PositionEncodingKind{protocol.PositionEncodingKindUTF16},
+		},
+	}
 }

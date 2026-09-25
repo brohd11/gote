@@ -11,20 +11,14 @@ import (
 	"github.com/brohd11/goutil/configdir"
 )
 
-// Session state is what gote writes for ITSELF between runs: which files were open under
-// a given root, which one held the pane, and where the caret and viewport sat in each.
-// It lives in ~/.gote/state rather than in config.yml because the two have opposite
-// owners — config.yml is the user's to edit and plausibly to commit to a dotfiles repo,
-// while this file changes on every quit and is nobody's to read.
-//
-// Nothing here is load-bearing. Every failure is swallowed by the callers: a sessions
-// file that cannot be read costs a restore, never a launch, the same bargain the shared
-// theme makes in bubblestack/config.
+// Session state is what gote writes for itself between runs: open files per root, which
+// held the pane, and each caret and viewport. It lives in ~/.gote/state, not the
+// user-edited config. Every failure is swallowed: a bad sessions file costs a restore,
+// never a launch.
 const (
 	sessionsFile = "sessions.yml"
-	// homeSessionKey names the ~/.gote/docs store, which has no launch directory to be
-	// keyed by. The prefix does the same for vaults, whose configured path can be
-	// repointed while the name stays the thing the user opened.
+	// homeSessionKey names the ~/.gote/docs store; vaults are keyed by name, which survives a
+	// changed path.
 	homeSessionKey = "home"
 	vaultKeyPrefix = "vault:"
 	// sessionLimit caps how many roots the file remembers. Every directory gote is ever
@@ -45,10 +39,8 @@ type Session struct {
 	Files   []SessionFile `yaml:"files"`
 }
 
-// SessionFile is one open document and where the user was in it. Line and Col are the
-// editor's own rune-based position; Top is the buffer line that was at the top of the
-// viewport, which is what makes the restored view the one that was left rather than one
-// merely containing the caret.
+// SessionFile is one open document's position: Line and Col (runes) and Top, the line at
+// the top of the viewport.
 type SessionFile struct {
 	Path string `yaml:"path"`
 	Line int    `yaml:"line,omitempty"`
@@ -65,9 +57,7 @@ func SessionsPath() (string, error) {
 	return filepath.Join(dir, sessionsFile), nil
 }
 
-// LoadSessions reads the sessions file. A missing one is not an error — configdir.Load
-// already treats first run as an empty document — while malformed YAML is reported, so
-// callers can decide for themselves whether to care.
+// LoadSessions reads the sessions file; missing is fine, malformed is an error.
 func LoadSessions() (Sessions, error) {
 	var s Sessions
 	path, err := SessionsPath()
@@ -89,9 +79,7 @@ func SaveSessions(s Sessions) error {
 	return configdir.SaveAtomic(dir, sessionsFile, s)
 }
 
-// sessionKey identifies the root a session belongs to. An empty key means this launch
-// does not participate: ModeFile is a single named file in chrome-less minimal mode, and
-// reopening a pile of unrelated buffers into it would be nothing the user asked for.
+// sessionKey identifies the session's root. "" means no session (ModeFile).
 func sessionKey(c *Ctx) string {
 	switch c.Mode {
 	case ModeScan:
@@ -110,9 +98,7 @@ func sessionKey(c *Ctx) string {
 	return ""
 }
 
-// sessionDir is the directory a key names, when it names one. The home and vault keys
-// are symbolic — a vault's directory is reachable only through the config that defines
-// it — so neither is something the filesystem can be asked about.
+// sessionDir is the directory a key names; home and vault keys are symbolic.
 func sessionDir(key string) (string, bool) {
 	if key == homeSessionKey || strings.HasPrefix(key, vaultKeyPrefix) {
 		return "", false
@@ -120,9 +106,8 @@ func sessionDir(key string) (string, bool) {
 	return key, true
 }
 
-// prune keeps the file from growing without bound: a root that is no longer a directory
-// is gone for good, and past sessionLimit the least recently used of what is left goes
-// too. Ties break on the key so the result does not depend on map order.
+// prune drops roots that are no longer directories, then the least recently used past
+// sessionLimit (ties by key).
 func (s *Sessions) prune() {
 	for key := range s.Sessions {
 		dir, ok := sessionDir(key)
@@ -152,9 +137,8 @@ func (s *Sessions) prune() {
 	}
 }
 
-// loadSessionFor returns what was open under c's root, minus any file that has since
-// been deleted, moved, or replaced by a directory. Reporting false means there is
-// nothing worth restoring and the caller should start the way it always has.
+// loadSessionFor returns what was open under c's root, minus files that no longer exist.
+// false means nothing to restore.
 func loadSessionFor(c *Ctx) (Session, bool) {
 	key := sessionKey(c)
 	if key == "" {
@@ -182,9 +166,8 @@ func loadSessionFor(c *Ctx) (Session, bool) {
 	return session, len(kept) > 0
 }
 
-// saveSession banks the open set under c's root. It runs after the TUI is gone, off the
-// context, which is why Ctx has to carry activeID at all: by then no screen is left to
-// ask which buffer held the pane.
+// saveSession stores the open set under c's root, after the TUI has exited (hence
+// Ctx.activeID).
 func (c *Ctx) saveSession() error {
 	key := sessionKey(c)
 	if key == "" {
@@ -206,9 +189,8 @@ func (c *Ctx) saveSession() error {
 			return // an unsaved buffer has no path to be reopened by
 		}
 		if rec, ok := c.restore[entry.path]; ok {
-			// Restored last launch but never switched to, so its editor never read the
-			// file and reports a caret at the origin. The record that outlived the run
-			// is the true position; reading the editor here would quietly flatten it.
+			// A restored buffer never switched to reports a caret at the origin; keep its original
+			// record.
 			session.Files = append(session.Files, rec)
 			return
 		}
@@ -217,9 +199,7 @@ func (c *Ctx) saveSession() error {
 			Path: entry.path, Line: pos.Line, Col: pos.Column, Top: entry.editor.TopLine(),
 		})
 	})
-	// Only a real path becomes Active: an unsaved buffer's id is opaque (and contains a
-	// NUL), which is not something to write into a YAML file that means nothing on the
-	// way back in.
+	// Only real paths become Active; an unsaved buffer's id is opaque.
 	for _, f := range session.Files {
 		if f.Path == c.activeID {
 			session.Active = f.Path
@@ -238,13 +218,9 @@ func (c *Ctx) saveSession() error {
 	return SaveSessions(sessions)
 }
 
-// restoreSession reopens what the last run left open and puts the pane on whichever
-// buffer was focused. False means there was nothing to restore, and the caller installs
-// the usual scratch buffer instead.
-//
-// Only registration happens here. Carets are deferred to applyRestore because gote reads
-// a document lazily — Init reaches only the editor currently holding the pane — so every
-// buffer but one has no text to put a caret into yet.
+// restoreSession reopens the last run's buffers and focuses the one that held the pane;
+// false means install a scratch buffer. Carets are applied later (applyRestore), since
+// buffers read their files lazily.
 func (s *homeScreen) restoreSession(c *Ctx) bool {
 	session, ok := loadSessionFor(c)
 	if !ok {
@@ -275,15 +251,9 @@ func (s *homeScreen) restoreSession(c *Ctx) bool {
 	return true
 }
 
-// applyRestore puts the caret and viewport back for the buffer now holding the pane. It
-// runs from finishHomeUpdate — the seam applyPendingJump already uses — because the file
-// read is asynchronous: Reveal rejects a line the buffer does not have yet, so this just
-// tries again on the next message until the text lands.
-//
-// It gives up once the buffer has content but not the line asked for, the same rule
-// applyPendingJump follows: a file that changed on disk should cost one wrong caret, not
-// a retry that never ends. An entry for a buffer never switched to is never drained at
-// all, which is exactly what lets saveSession write the original position back.
+// applyRestore restores the caret and viewport of the buffer in the pane, retrying from
+// finishHomeUpdate until its async read lands, and giving up if the line never appears.
+// Entries for buffers never shown stay, so saveSession writes them back.
 func (s *homeScreen) applyRestore(c *Ctx) {
 	if len(c.restore) == 0 || s.editor == nil || s.currentPath == "" {
 		return

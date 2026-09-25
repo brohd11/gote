@@ -14,22 +14,13 @@ import (
 	"github.com/aymanbagabas/go-udiff"
 )
 
-// The git diff gutter: a marker beside every line the buffer has changed since HEAD.
-//
-// It is deliberately not `git diff`. That command describes the file on disk, and an
-// editor's gutter has to describe the buffer — otherwise every keystroke leaves the
-// markers a save behind, and the one moment you most want to see what you have touched
-// is the moment the markers are wrong. So HEAD's copy of the file is fetched once
-// (repo.HeadBlob) and diffed here against the live text, which is what makes the markers
-// move as you type and what keeps git out of the keystroke path entirely.
-//
-// bubblestack draws the column but knows nothing about git (editor.Sign) — the same
-// division EditorOpts.Highlighter draws. Everything below this line is gote's.
+// The git diff gutter: a marker beside every line changed since HEAD. It diffs the live
+// buffer against HEAD's copy (fetched once via repo.HeadBlob) rather than running `git
+// diff` on the file, so markers track typing and git stays out of the keystroke path.
+// bubblestack draws the column; the git meaning is gote's.
 
-// gutter is the diff state for the doc the editor pane is showing. One doc's worth: the
-// pane shows one buffer, and a baseline is cheap enough to re-read on a switch that
-// caching per open doc would only add an invalidation problem (HEAD moves under a
-// commit) for no visible gain.
+// gutter is the diff state for the doc in the editor pane. Baselines are cheap to re-read
+// on a switch, so there is no per-doc cache to invalidate when HEAD moves.
 type gutter struct {
 	path        string        // the doc base belongs to; "" ⇒ nothing loaded
 	loading     string        // a read in flight for this path, so it is issued once
@@ -44,11 +35,8 @@ type gutter struct {
 
 const gitGutterDebounce = 250 * time.Millisecond
 
-// baselineMsg carries a finished HeadBlob read. It travels as a PropagateAll payload
-// rather than as a plain async result because a plain result reaches only the screen on
-// top of the stack: open the actions menu while the read is in flight and the answer
-// lands nowhere, leaving a gutter that never appears. The broadcast reaches this screen
-// wherever it sits, which is what ReseedMsg already relies on.
+// baselineMsg carries a finished HeadBlob read as a PropagateAll payload, so it reaches
+// this screen even when something is on top of it.
 type baselineMsg struct {
 	path  string // guarded against on receipt: the pane may have moved on
 	base  string
@@ -61,43 +49,16 @@ type gutterRefreshMsg struct {
 	seq    int
 }
 
-// The markers, in the vocabulary git's own diffs use — green added, red removed — with
-// yellow for the third case a diff has no word for: a line that is neither, having been
-// edited in place.
-//
-// Deletions have no line to mark, only a gap between two, so they take a boundary tick
-// on the line the removal sat in front of: an upper edge normally, a lower one when the
-// deletion ran off the end of the buffer and there is no line below it to point at.
-//
-// Styles are rebuilt per call so a theme switch repaints them, as every other style in
-// this app is (core.MutedColor is a live var, not a constant).
+// The markers: green added, red removed, yellow edited in place. A deletion marks an edge
+// of the line after the gap (or the last line's lower edge at the end). Styles are built
+// per call to follow the theme.
 
-// signBar is the glyph EVERY whole-line marker draws — added, modified and new-file
-// alike, which differ by color and not by shape. One constant rather than three literals
-// so the column can be re-spelled in one place, and so the two candidates below can be
-// traded by moving a single comment.
-//
-// Which one reads better is a question about the terminal and the font, not about the
-// code, so both are kept here to be swapped and compared. Both are chosen for the same
-// property: a run of changed lines has to join into ONE unbroken margin rule, or the
-// column reads as a stack of separate marks and stops answering "how much of this did I
-// touch" at a glance.
-//
-//   - The half block fills its cell edge to edge, so it joins by construction.
-//   - The box-drawing vertical is a thinner rule that joins just as cleanly on a terminal
-//     that draws it full-height.
-//
-// The ASCII pipe is deliberately NOT one of the candidates: it leaves a gap between rows
-// (measured, not assumed), which is the one thing this column cannot have.
-//
-// Whatever replaces it must measure exactly one display cell: editor.Sign says so,
-// and the editor's whole left-gutter width is derived from that assumption.
-// const signBar = "▌" // U+258C left half block
+// signBar is the glyph every whole-line marker draws; the kinds differ by color only. It
+// must be one cell wide and join vertically into an unbroken rule (an ASCII pipe leaves
+// gaps between rows).
 const signBar = "┃" // U+2502 box-drawing light vertical
 
-// The deletion ticks. They mark an edge rather than a line, so they stay pinned to the
-// top and bottom of the cell and have no bearing on how signBar is spelled — swapping
-// that one does not ask for these to change too.
+// The deletion ticks mark a cell's top or bottom edge.
 const (
 	signDelTop = "▔" // U+2594 upper one-eighth block
 	signDelBot = "▁" // U+2581 lower one-eighth block
@@ -115,29 +76,21 @@ func deletedSign(text string) editor.Sign {
 	return editor.Sign{Text: text, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("1"))}
 }
 
-// newFileSign is the whole-file wash an untracked file gets: every line is new, which is
-// true but not worth a column of green shouting it. Muted says "git has never seen this"
-// without competing with the markers that report an actual change.
+// newFileSign is the muted wash for an untracked file: every line is new, not worth a
+// column of green.
 func newFileSign() editor.Sign {
-	return editor.Sign{Text: signBar, Style: lipgloss.NewStyle().Foreground(core.MutedColor)}
+	return editor.Sign{Text: signBar, Style: core.MutedStyle()}
 }
 
-// gutterDefault decides whether the column starts on: the launch picks a config section
-// (project_mode or single_file_mode) and the section answers. It stays a function rather
-// than an inlined field read because the mode-to-answer step is the thing worth naming,
-// and because the vault promotion re-asks it for a mode the screen was not built with.
+// gutterDefault reports whether the column starts on for a launch mode (project_mode or
+// single_file_mode). A vault promotion re-asks it for a new mode.
 func gutterDefault(cfg Config, mode Mode) bool {
 	return cfg.modeDefaults(mode).GitGutter
 }
 
-// setGitGutter turns the column on or off, clearing the cached baseline on the way down
-// so switching back re-reads it — HEAD may have moved while it was off.
-//
-// Turning it ON returns the work that has to happen for the column to hold anything, and
-// the caller must run it. Showing the column is not drawing it: the baseline read is
-// async, and every caller here is a key or a menu row that returns straight out of
-// Update — past the tail where refreshGutter otherwise runs. Left to that tail, a toggle
-// would raise an empty column and fill it one unrelated keystroke later.
+// setGitGutter turns the column on or off, dropping the baseline when off so HEAD is re-read
+// later. Turning it on returns the baseline read, which the caller must run: it returns out
+// of Update before refreshGutter would.
 func (s *homeScreen) setGitGutter(on bool) tea.Cmd {
 	s.gitGutter = on
 	if s.editor != nil {
@@ -166,9 +119,8 @@ func (s *homeScreen) gutterRefreshCmd(path string, seq int) tea.Cmd {
 	})
 }
 
-// refreshGutter brings the markers up to date with the buffer. It is called once per
-// message, but unchanged messages compare only path and EditSeq: joining the buffer and
-// diffing it wait until the latest edit has been quiet for the debounce window.
+// refreshGutter brings the markers up to date, cheaply once per message: the diff waits
+// until edits have been quiet for the debounce window.
 func (s *homeScreen) refreshGutter() tea.Cmd {
 	if !s.gitGutter || s.editor == nil {
 		return nil
@@ -197,20 +149,9 @@ func (s *homeScreen) refreshGutter() tea.Cmd {
 	return s.gutterRefreshCmd(s.currentPath, seq)
 }
 
-// drawGutter recomputes the markers, when the buffer has moved since the ones on screen
-// were computed from it.
-//
-// It is split out of refreshGutter because a finished baseline read needs it too, and
-// cannot get it from there: that result comes back as a broadcast Action, and the router
-// resolves an Action against the stack and returns without dispatching to any screen's
-// Update (core/router.go). So a gutter drawn only from Update would come up empty on the
-// read that was supposed to fill it, and stay empty until some unrelated key or mouse
-// event happened along — markers that appear a keystroke after you open a file.
-//
-// Doing it inline rather than bouncing a redraw back through the event loop is what
-// makes that a non-event: the baseline arrives holding everything the computation needs,
-// and bubbletea renders after every message anyway, so the frame that follows this one
-// already has the markers in it.
+// drawGutter recomputes the markers when the buffer has moved. It is separate from
+// refreshGutter because a finished baseline read arrives as a broadcast the router resolves
+// without calling Update, so the markers are drawn right there instead of a keystroke later.
 func (s *homeScreen) drawGutter() {
 	if s.editor == nil {
 		return
@@ -237,10 +178,7 @@ func (s *homeScreen) applyGutterRefresh(m gutterRefreshMsg) {
 	s.drawGutter()
 }
 
-// loadBaseline reads HEAD's copy of path in the cmd lane, where every other bit of IO in
-// this framework lives. The in-flight path guard is what keeps it to one subprocess:
-// refreshGutter runs on every message, so without it a slow git would be re-spawned a
-// few dozen times before the first one answered.
+// loadBaseline reads HEAD's copy of path in the cmd lane, one read in flight at a time.
 func (s *homeScreen) loadBaseline(path string) tea.Cmd {
 	if s.gutter.loading == path {
 		return nil
@@ -256,9 +194,7 @@ func (s *homeScreen) loadBaseline(path string) tea.Cmd {
 	}
 }
 
-// applyBaseline takes a finished read. A result for a doc the pane has since left is
-// dropped rather than stored — it would sit there claiming to be the current file's
-// baseline until the next switch, marking every line of the wrong document.
+// applyBaseline stores a finished read, dropping one for a doc the pane has left.
 func (s *homeScreen) applyBaseline(m baselineMsg) {
 	if s.gutter.loading == m.path {
 		s.gutter.loading = ""
@@ -271,9 +207,8 @@ func (s *homeScreen) applyBaseline(m baselineMsg) {
 	s.drawGutter()
 }
 
-// markers is the whole marker computation, pure over two strings so the edge cases can
-// be tested without a repo. baseline is HEAD's copy, buf the live buffer, state what
-// HEAD had to offer.
+// markers computes the whole marker map from HEAD's copy, the live buffer, and what HEAD
+// had, as a pure function so edge cases are testable.
 func markers(baseline, buf string, state repo.Baseline) map[int]editor.Sign {
 	switch state {
 	case repo.BaselineOK:
@@ -292,23 +227,10 @@ func markers(baseline, buf string, state repo.Baseline) map[int]editor.Sign {
 	}
 }
 
-// diffMarkers marks the lines of buf that differ from baseline.
-//
-// The diff runs over INTERNED LINES, not over the text, and that is the whole trick.
-// udiff.Strings diffs bytes and then widens each edit to the lines it touches, so
-// inserting one line mid-file comes back as "the line above was deleted and two lines
-// were inserted" — the unchanged line above gets swept into the change block and marked.
-// Correct as a patch, useless as a gutter: it marks lines you did not touch.
-//
-// Giving every distinct line its own rune and diffing THOSE makes a rune-level edit a
-// line-level edit exactly, with no widening step to blur it. It is the same interning the
-// GDScript original does for the same reason, and it still runs the library's Myers
-// rather than a hand-rolled one.
-//
-// The classification on top is the part a diff does not draw for you: a block holding
-// both deletions and insertions is a line that was EDITED, not one removed and another
-// added, and marking it green would say a line is new when what you want to know is that
-// you changed it.
+// diffMarkers marks the lines of buf that differ from baseline. It diffs interned lines
+// (one rune per distinct line), since udiff's byte diff widens edits to whole lines and
+// would mark untouched neighbors. A block with both deletions and insertions is marked
+// edited, not added.
 func diffMarkers(baseline, buf string) map[int]editor.Sign {
 	if baseline == buf {
 		return nil
@@ -353,18 +275,15 @@ func diffMarkers(baseline, buf string) map[int]editor.Sign {
 	return out
 }
 
-// interner assigns each distinct line a rune, shared across both sides so the same text
-// encodes to the same rune. Runes start above ASCII so the encoded strings are never
-// mistaken for ASCII by udiff's fast path, which diffs bytes — the encoding must be
-// compared rune by rune or a multi-byte line id could match halfway through.
+// interner assigns each distinct line a rune above ASCII, shared by both sides, so the
+// encoded strings are compared rune by rune.
 type interner struct {
 	ids  map[string]rune
 	next rune
 }
 
-// encode returns the interned form of lines, and the byte offset each line starts at —
-// the table that turns an edit's offsets back into line numbers. It carries one entry
-// past the end, since an edit's End may be the end of the text.
+// encode returns the interned lines and each line's start offset (with one past the end)
+// for mapping edit offsets back to lines.
 func (in *interner) encode(lines []string) (string, map[int]int) {
 	if in.ids == nil {
 		in.ids, in.next = map[string]rune{}, 0x100
@@ -388,9 +307,7 @@ func (in *interner) encode(lines []string) (string, map[int]int) {
 	return b.String(), offsets
 }
 
-// mark places a sign, ignoring one that falls outside the buffer. Out-of-range keys are
-// harmless to the editor, but dropping them keeps the map an honest description of what
-// is drawn — which is what the tests read.
+// mark places a sign, dropping out-of-range lines so the map describes what is drawn.
 func mark(out map[int]editor.Sign, line int, sign editor.Sign, last int) {
 	if line < 0 || line > last {
 		return
@@ -398,7 +315,6 @@ func mark(out map[int]editor.Sign, line int, sign editor.Sign, last int) {
 	out[line] = sign
 }
 
-// bufLines counts the buffer's lines the way EditorScreen does — splitting on "\n", so a
-// trailing newline yields a final empty line. go-udiff counts differently (it drops that
-// line), and a gutter indexed by the wrong one puts its last marker on the wrong row.
+// bufLines counts lines as the editor does (a trailing newline adds an empty line), which
+// go-udiff does not.
 func bufLines(buf string) int { return strings.Count(buf, "\n") + 1 }

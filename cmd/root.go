@@ -13,9 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is the binary version; defaults to "dev" for a plain `go build`. The makefile stamps
-// it via -X ldflags (git describe --tags --always --dirty), so release and `make` binaries report
-// their real version and the self-update check can compare it against the latest tag.
+// version is stamped by the makefile via -X ldflags; "dev" for a plain go build.
 var version = "dev"
 
 var (
@@ -42,15 +40,11 @@ type flags struct {
 // directory of the same name — `gote ./here` is the way to reach that one.
 const hereArg = "here"
 
-// depthEnv names the environment variable that supplies a scan depth when the command
-// line gives none, so a depth you always want need not be typed every run.
+// depthEnv supplies a default scan depth.
 const depthEnv = "GOTE_DEPTH"
 
-// resolveDepth picks the depth the launch starts from: the flag when it was actually
-// typed, otherwise GOTE_DEPTH, otherwise the flag's own default. set reports whether
-// either source spoke, which gote uses to tell an explicit 0 from silence. The ladder
-// itself is goutil/envopt.Int -- repoview had written the identical function for
-// REPOVIEW_DEPTH, down to the doc comment and the test table.
+// resolveDepth picks the scan depth: a typed flag, else $GOTE_DEPTH, else the default.
+// set reports whether either source spoke, to tell an explicit 0 from silence.
 func resolveDepth(flagDepth int, flagChanged bool) (depth int, set bool, err error) {
 	return envopt.Int(depthEnv, flagDepth, flagChanged)
 }
@@ -101,19 +95,13 @@ func init() {
 	rootCmd.SetVersionTemplate("gote {{.Version}}\n")
 	rootCmd.Flags().BoolVarP(&scan, "scan", "s", false, "treat the argument as a directory to scan (implied when it is one)")
 	rootCmd.Flags().IntVarP(&depth, "depth", "d", 0, "scan depth in directory levels")
-	// The real default is the ladder resolveDepth walks, not the 0 the flag holds — which
-	// pflag suppresses anyway as a zero value. DefValue is only ever the string cobra
-	// renders in "(default %s)", so rewriting it states that ladder where a reader looks.
+	// Show the real default (the resolveDepth ladder) in --help instead of the flag's 0.
 	rootCmd.Flags().Lookup("depth").DefValue = "$GOTE_DEPTH, else the config's scan_depth"
-	// Flags, not PersistentFlags: --ext means nothing to `config` or `update` and has no
-	// business in their help. On the root it already works in either position — `here` is
-	// a positional argument rather than a subcommand, and pflag parses flags interspersed
-	// with positionals, so `gote --ext=md here` and `gote here --ext=md` are the same.
+	// Root-only flags: --ext means nothing to `config` or `update`. It works before or after
+	// `here`, since that is a positional argument.
 	rootCmd.Flags().StringSliceVar(&exts, "ext", nil,
 		"limit discovery to these extensions, overriding the config (repeatable, or comma-separated; empty means any text file)")
-	// No shorthand: cobra hands -v to --version because Version is set, and it does that
-	// only when nothing else has claimed the letter. Taking it here would silently strip
-	// -v from --version rather than collide loudly.
+	// No -v shorthand: cobra gives -v to --version only when nothing else claims it.
 	rootCmd.Flags().BoolVar(&vault, "vault", false,
 		"read the argument as a configured vault name rather than a path; with no name, or one that matches no vault, list the vaults instead")
 	rootCmd.Flags().BoolVarP(&preview, "preview", "P", false,
@@ -127,13 +115,10 @@ func Execute() {
 }
 
 // runRoot resolves the launch options and starts the TUI. The config is loaded here
-// rather than inside app.Run because the argument grammar consults it: a bare argument
-// naming nothing on disk may still name a configured vault.
+// because a bare argument may name a configured vault.
 func runRoot(cmd *cobra.Command, args []string) error {
-	// Best-effort, and deliberately before the load: the file is where the schema is
-	// documented, so a user who never runs `gote config` should still end up with one to
-	// read. A failed write (a read-only home, say) is not a reason to refuse an editor,
-	// and LoadConfig treats the still-missing file as the defaults anyway.
+	// Best effort, before the load: the file documents the schema. A failed write (read-only
+	// home) is no reason to refuse to start.
 	_, _ = app.EnsureConfig()
 	cfg, err := app.LoadConfig()
 	if err != nil {
@@ -152,9 +137,8 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		vault:    vault,
 		preview:  preview,
 	}, func(name string) (string, bool, error) { return app.LookupVault(cfg, name) })
-	// Printed before the error is returned: an unnamed vault lists and succeeds, a
-	// misnamed one lists and fails, and both want the list. Cobra writes its Error: line
-	// to stderr after RunE returns, so on a terminal the list reads first.
+	// Print the vault list before returning any error: both a bare --vault and a misnamed one
+	// want it, and cobra prints its error afterwards.
 	if list {
 		printVaults(cmd.OutOrStdout(), app.VaultList(cfg))
 	}
@@ -167,9 +151,8 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	return app.Run(version, cfg, opts)
 }
 
-// printVaults writes the configured vaults as name and path columns, marking the config's
-// default. Paths print as config.yml writes them, ~ and all: this listing is also what a
-// misspelled name gets, so it has to render a vault whose directory has gone missing.
+// printVaults writes the vaults as name and path columns, marking the default. Paths print
+// as configured (with ~), so a vault whose directory is missing still lists.
 func printVaults(w io.Writer, entries []app.VaultEntry) {
 	if len(entries) == 0 {
 		fmt.Fprintln(w, "No vaults are configured. Add one from the Vaults menu, or run `gote config`.")
@@ -191,39 +174,19 @@ func printVaults(w io.Writer, entries []app.VaultEntry) {
 	}
 }
 
-// resolveOptions turns the CLI surface into the app's launch options. It is the whole
-// of gote's argument grammar, kept apart from the cobra wiring so it can be tested
-// without starting a program:
+// resolveOptions is gote's argument grammar, separate from cobra so it can be tested:
+//   - no argument: the config's default (or, with --scan, a scan of cwd)
+//   - "here": a scan of cwd
+//   - a directory, a trailing separator, or --scan: a scan of it
+//   - a name that is nothing on disk but is a configured vault: that vault
+//   - anything else, existing or not: that file in the minimal editor
 //
-//   - no argument: config chooses the default vault later, or (with --scan) scan cwd
-//   - "here": a scan of the cwd
-//   - a directory (or --scan, or a trailing separator): a scan of it
-//   - a name that is nothing on disk but IS a configured vault: that vault
-//   - anything else, existing or not: that file, in the minimal editor
+// Vaults rank below the filesystem, so ./name reaches a local file that shares a vault's
+// name. A configured vault with a bad path is a launch error. --vault reads the argument
+// only as a vault name; an unknown name then returns listVaults instead of opening a file.
 //
-// The vault rung sits below the filesystem on purpose: everything that already names
-// something real keeps meaning what it meant, so the reading can only change for an
-// argument that used to open an empty buffer. ./main-vault is the way to reach a local
-// file that shares a vault's name, the same escape hatch ./here has. lookupVault
-// reports (path, configured, err); a configured vault whose path has gone bad is a
-// launch error rather than a silent fall-through to a file of that name.
-//
-// --vault replaces that whole ladder with its one rung: the argument is a vault name,
-// the filesystem is never consulted, and "here" is not a keyword. It is the way to reach
-// a vault the cwd shadows, and it turns the one reading that cannot fail — an unknown
-// name opening an empty buffer — into a listing, reported by the returned listVaults so
-// the caller does the printing. A name that IS configured but broken still errors
-// without a listing: it matched, and the path is the problem.
-//
-// The second argument is the scan depth, overriding --depth; it applies to a vault as
-// it does to any other recursive root, and is meaningless for a file — rejected there
-// rather than ignored, since a rejected typo beats a silently dropped one. Paths are
-// made absolute — the scan root shows in the breadcrumb and the editor saves against
-// the path it was given, neither of which should depend on the cwd once the program is
-// running.
-//
-// --ext passes straight through to every mode: it filters the lists, and the app
-// normalizes it (Ctx.New via NewDocFilter), so there is nothing to validate here.
+// The second argument is the scan depth (overriding --depth); it is rejected for a file.
+// Paths are made absolute. --ext passes through for the app to normalize.
 func resolveOptions(args []string, f flags, lookupVault func(string) (string, bool, error)) (opts app.Options, listVaults bool, err error) {
 	scan := f.scan
 	// Preview rides along unjudged: it asks for a reader the launch may have nothing to
@@ -322,9 +285,8 @@ func exists(arg string) bool {
 	return err == nil
 }
 
-// isDirArg reports whether arg names a directory to scan: one that is a directory on
-// disk, one written with a trailing separator, or any argument at all under --scan
-// (which is how a directory that does not exist yet can still be named).
+// isDirArg reports whether arg names a directory to scan: an existing directory, a
+// trailing separator, or anything under --scan (so a not-yet-existing one works).
 func isDirArg(arg string, scan bool) bool {
 	if scan || len(arg) > 0 && os.IsPathSeparator(arg[len(arg)-1]) {
 		return true

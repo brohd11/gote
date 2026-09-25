@@ -2,16 +2,11 @@ package app
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/brohd11/goutil/strutil"
 	"go.lsp.dev/protocol"
 )
 
@@ -20,17 +15,9 @@ type diagnosticEntry struct {
 	diagnostic lspDiagnostic
 }
 
-// diagnosticsPanel owns selection in diagnostic units and scrolling in text rows.
-// Wrapped continuation rows map back to the same entry for mouse activation.
+// diagnosticsPanel lists the language servers' diagnostics, grouped by file.
 type diagnosticsPanel struct {
-	*components.ScrollContainer
-	entries                []diagnosticEntry
-	lines                  []string
-	owners, starts         []int
-	selected               int
-	width, height          int
-	status                 string
-	onSelect               func(*core.Shared, diagnosticEntry) core.Action
+	entryList[diagnosticEntry]
 	ctx                    *Ctx
 	manager                *lspManager
 	revision, openRevision uint64
@@ -39,8 +26,21 @@ type diagnosticsPanel struct {
 }
 
 func newDiagnosticsPanel(pick func(*core.Shared, diagnosticEntry) core.Action) *diagnosticsPanel {
-	p := &diagnosticsPanel{ScrollContainer: components.NewScrollContainer("Diagnostics"), selected: -1, onSelect: pick}
-	p.SetKeyHints(false)
+	p := &diagnosticsPanel{entryList: newEntryList("Diagnostics", pick)}
+	p.title = func() string { return fmt.Sprintf("Diagnostics (%d)", len(p.entries)) }
+	p.group = func(e diagnosticEntry) string { return e.path }
+	p.heading = func(path string) string { return projectPath(p.manager.Roots(), path) }
+	p.row = func(e diagnosticEntry) string {
+		d := e.diagnostic
+		meta := severityName(d.Severity)
+		if d.Source != "" {
+			meta += " · " + d.Source
+		}
+		if d.Code != "" {
+			meta += " " + d.Code
+		}
+		return fmt.Sprintf("%d:%d  %s  %s", d.Line+1, d.Character+1, meta, strings.TrimSpace(d.Message))
+	}
 	return p
 }
 
@@ -72,10 +72,8 @@ func (p *diagnosticsPanel) refresh(c *Ctx, current string) {
 	p.reflow()
 }
 
-// collectDiagnostics gathers what the panel lists. Which files that is IS the
-// diagnostic_open_only setting: the open buffers, or every file the servers have reported
-// on — which, with the whole project handed over, is the project. Either way the file
-// showing in the editor sorts first, since it is the one being asked about.
+// collectDiagnostics gathers what the panel lists: open buffers or every reported file,
+// per diagnostic_open_only, with the file in the editor first.
 func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 	if c == nil || c.lsp == nil {
 		return nil, "Language-server support is disabled (" + lspDisabledReason(c) + ")."
@@ -94,10 +92,8 @@ func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 		}
 		return paths[i] < paths[j]
 	})
-	// The map is keyed for lookup, not for display: diagnosticsKey folds the drive letter
-	// a file URI hands back on Windows. An entry has to name its file the way the rest of
-	// gote spells it, or activating one opens a second buffer for a file that already has
-	// a tab.
+	// Map lookup keys back to gote's own spelling of each path: diagnosticsKey folds Windows
+	// drive letters, and an entry must open the existing buffer, not a second one.
 	spelled := map[string]string{}
 	for _, doc := range c.OpenDocs() {
 		if doc.Path != "" {
@@ -130,22 +126,17 @@ func collectDiagnostics(c *Ctx, current string) ([]diagnosticEntry, string) {
 	return entries, ""
 }
 
-// projectPath is how a diagnostic's file is headed in the list. Absolute paths are what
-// the manager keys on, but a whole project's worth of them is a column of identical
-// prefixes; against a live session root the same list reads as the project's own layout.
-// A path under no root — a buffer opened from somewhere else entirely — stays absolute,
-// which is the honest answer for a file that is not part of the project.
+// projectPath heads a diagnostic's file relative to the deepest session root containing
+// it, or absolute when none does.
 func projectPath(roots []string, path string) string {
 	best, relative := "", ""
 	for _, root := range roots {
 		if len(root) <= len(best) {
 			continue
 		}
-		// Rel, not a prefix test: on Windows it compares case-insensitively, and the two
-		// spellings of a path there routinely differ in the drive letter alone. See
-		// diagnosticsKey.
-		rel, err := filepath.Rel(root, path)
-		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		// Rel, not a prefix test: Windows paths can differ in drive-letter case alone.
+		rel, ok := strutil.RelUnder(root, path)
+		if !ok || rel == "." {
 			continue
 		}
 		best, relative = root, rel
@@ -156,137 +147,8 @@ func projectPath(roots []string, path string) string {
 	return relative
 }
 
-func (p *diagnosticsPanel) SetSize(width, height int) {
-	changed := width != p.width
-	p.width, p.height = width, height
-	p.ScrollContainer.SetSize(width, height)
-	if changed {
-		p.reflow()
-	}
-}
-
-func (p *diagnosticsPanel) reflow() {
-	offset := p.ScrollOffset()
-	p.lines, p.owners, p.starts = nil, nil, nil
-	width := max(1, min(p.TextWidth(), p.width-4))
-	appendText := func(text string, owner int) {
-		for _, line := range strings.Split(ansi.Hardwrap(ansi.Wrap(ansi.Strip(text), width, ""), width, true), "\n") {
-			p.lines = append(p.lines, line)
-			p.owners = append(p.owners, owner)
-		}
-	}
-	if p.status != "" {
-		appendText(p.status, -1)
-	}
-	var roots []string
-	if p.manager != nil {
-		roots = p.manager.Roots()
-	}
-	last := ""
-	for i, entry := range p.entries {
-		if entry.path != last {
-			if i > 0 {
-				appendText("", -1)
-			}
-			appendText(projectPath(roots, entry.path), -1)
-			last = entry.path
-		}
-		d := entry.diagnostic
-		meta := severityName(d.Severity)
-		if d.Source != "" {
-			meta += " · " + d.Source
-		}
-		if d.Code != "" {
-			meta += " " + d.Code
-		}
-		p.starts = append(p.starts, len(p.lines))
-		appendText(fmt.Sprintf("%d:%d  %s  %s", d.Line+1, d.Character+1, meta, strings.TrimSpace(d.Message)), i)
-	}
-	p.SetTitle(fmt.Sprintf("Diagnostics (%d)", len(p.entries)))
-	p.paint()
-	p.ScrollTo(offset)
-}
-
-func (p *diagnosticsPanel) paint() {
-	lines := append([]string(nil), p.lines...)
-	selected := lipgloss.NewStyle().Reverse(true)
-	for i, owner := range p.owners {
-		if owner >= 0 && owner == p.selected {
-			lines[i] = selected.Render(lines[i])
-		}
-	}
-	p.SetLines(lines)
-}
-
-func (p *diagnosticsPanel) selectEntry(index int) {
-	if len(p.entries) == 0 {
-		return
-	}
-	p.selected = max(0, min(index, len(p.entries)-1))
-	p.paint()
-	row := p.starts[p.selected]
-	if row < p.ScrollOffset() || row >= p.ScrollOffset()+p.VisibleRows() {
-		p.ScrollTo(row)
-	}
-}
-
-func (p *diagnosticsPanel) activate(sh *core.Shared) core.Action {
-	if p.selected < 0 || p.selected >= len(p.entries) || p.onSelect == nil {
-		return core.Action{}
-	}
-	return p.onSelect(sh, p.entries[p.selected])
-}
-
-func (p *diagnosticsPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bool) {
-	if !p.Focused() {
-		return core.Action{}, false
-	}
-	if click, ok := msg.(tea.MouseClickMsg); ok {
-		if click.Button == tea.MouseLeft && click.Mod == 0 && click.X >= 2 && click.X < p.width-2 && click.Y >= 1 && click.Y < p.height-1 {
-			row := click.Y - 1 + p.ScrollOffset()
-			if row >= 0 && row < len(p.owners) && p.owners[row] >= 0 && click.X-2 < ansi.StringWidth(p.lines[row]) {
-				p.selectEntry(p.owners[row])
-				return p.activate(sh), true
-			}
-		}
-		return core.Action{}, true
-	}
-	if km, ok := msg.(tea.KeyPressMsg); ok {
-		k := km.String()
-		switch {
-		case core.MatchKey(k, core.Keys.Up):
-			p.selectEntry(p.selected - 1)
-		case core.MatchKey(k, core.Keys.Down):
-			p.selectEntry(p.selected + 1)
-		case k == "home" || core.MatchKey(k, core.Keys.Top):
-			p.selectEntry(0)
-		case k == "end" || core.MatchKey(k, core.Keys.Bottom):
-			p.selectEntry(len(p.entries) - 1)
-		case core.MatchKey(k, core.Keys.Select):
-			return p.activate(sh), true
-		default:
-			return p.ScrollContainer.UpdatePanel(sh, msg)
-		}
-		return core.Action{}, true
-	}
-	return p.ScrollContainer.UpdatePanel(sh, msg)
-}
-
-func (p *diagnosticsPanel) PanelHelp() []key.Binding {
-	return []key.Binding{core.Hint("jump", core.Keys.Select)}
-}
-
 func (s *homeScreen) toggleBottom(sh *core.Shared) core.Action {
-	s.closeCompletion()
-	s.closeHover()
-	s.saveResize(s.modular.ResizeState())
-	focus := s.focusedPane()
-	s.bottomVisible = !s.bottomVisible
-	s.rebuildModular(sh, noFocus)
-	if s.panelSlot(focus) == noFocus {
-		focus = s.editorPanel
-	}
-	cmd := s.modular.FocusSlot(s.panelSlot(focus))
+	cmd := s.togglePanes(sh, func() { s.bottomVisible = !s.bottomVisible })
 	s.previewAt = -1
 	s.refreshPreview()
 	s.syncPreviewScroll()

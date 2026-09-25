@@ -55,26 +55,34 @@ func (s *homeScreen) focusedPane() components.Panel {
 	return s.editorPanel
 }
 
-func (s *homeScreen) setOpenDocsTabs(sh *core.Shared, tabs bool) core.Action {
-	if s.minimal || tabs == s.openDocsTabs {
-		return core.Action{}
-	}
+// togglePanes closes the floating popups, applies change, rebuilds the layout and returns
+// focus to the pane that had it (the editor if that pane is gone).
+func (s *homeScreen) togglePanes(sh *core.Shared, change func()) tea.Cmd {
 	focus := s.focusedPane()
 	s.saveResize(s.modular.ResizeState())
 	s.closeCompletion()
 	s.closeHover()
 	s.closeSignature()
-	s.openDocsTabs = tabs
-	s.openTabs.mouseDown = false
-	if s.fullPreview != nil {
-		// Change title chrome without replacing the reader and losing its scroll.
-		s.fullPreview.Title = s.readerTitle()
-	}
+	change()
 	s.rebuildModular(sh, noFocus)
 	if s.panelSlot(focus) == noFocus {
 		focus = s.editorPanel
 	}
-	cmd := s.modular.FocusSlot(s.panelSlot(focus))
+	return s.modular.FocusSlot(s.panelSlot(focus))
+}
+
+func (s *homeScreen) setOpenDocsTabs(sh *core.Shared, tabs bool) core.Action {
+	if s.minimal || tabs == s.openDocsTabs {
+		return core.Action{}
+	}
+	cmd := s.togglePanes(sh, func() {
+		s.openDocsTabs = tabs
+		s.openTabs.mouseDown = false
+		if s.fullPreview != nil {
+			// Change title chrome without replacing the reader and losing its scroll.
+			s.fullPreview.Title = s.readerTitle()
+		}
+	})
 	s.refreshOpenTabs(sh)
 	s.previewAt = -1
 	s.refreshPreview()

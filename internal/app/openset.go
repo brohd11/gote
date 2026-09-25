@@ -6,10 +6,9 @@ import (
 	"github.com/brohd11/bubblestack/components/editor"
 )
 
-// openEntry is one retained editor buffer. id is its stable in-memory identity; path is
-// empty until an unsaved buffer is written for the first time. Keeping those facts apart
-// lets the Open list retain pathless buffers without handing a made-up filename to the
-// editor, LSP, git gutter, or filesystem.
+// openEntry is one retained buffer. id is its stable identity; path stays empty until an
+// unsaved buffer is first written, so no fake filename reaches the editor, LSP, gutter or
+// filesystem.
 type openEntry struct {
 	id     string
 	name   string
@@ -18,9 +17,8 @@ type openEntry struct {
 	editor *editor.Screen
 }
 
-// openSet owns every retained buffer, in opening order. Saved buffers use their path as
-// their id; unsaved buffers use an opaque id allocated by Ctx. byPath indexes real files
-// so Ctx.OpenDoc can still answer "already open" by filename.
+// openSet holds every retained buffer in opening order. Saved buffers use their path as
+// id, unsaved ones an opaque id; byPath indexes real files.
 type openSet struct {
 	revision uint64
 	byID     map[string]*openEntry
@@ -80,9 +78,8 @@ func (o *openSet) add(entry openEntry) {
 	o.order = append(o.order, entry.id)
 }
 
-// rekey gives a buffer its saved-file identity. A tracked buffer keeps its own slot and
-// displaces any other buffer already holding newPath. An untracked startup buffer adopts
-// an existing target's slot, or appends when the target was not already open.
+// rekey gives a buffer its file identity. A tracked buffer keeps its slot and displaces
+// another holding newPath; an untracked one takes that buffer's slot or appends.
 func (o *openSet) rekey(oldID, newPath string, ed *editor.Screen) {
 	if newPath == "" || ed == nil {
 		return

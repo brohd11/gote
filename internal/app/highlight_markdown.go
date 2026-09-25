@@ -13,14 +13,8 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// The markdown palette. Shared with the source-token palette in highlight_chroma.go —
-// both resolve from Config.SyntaxColors via palette.go — so a slot the two files both
-// have (strong text and a keyword, quoted text and a comment) is the one color in both.
-// Set per slot in ~/.gote/config.yml under syntax_colors; basic_colors reverts the lot to
-// the terminal's own eight.
-//
-// Bold, italic and underline are not configurable: they carry markdown's own structure,
-// which is the same document whatever the colors are.
+// The markdown palette, resolved from Config.SyntaxColors like the source palette, so
+// shared slots match. Bold, italic and underline are structure and not configurable.
 var (
 	mdHeadingStyle  lipgloss.Style
 	mdEmphasisStyle lipgloss.Style
@@ -31,9 +25,8 @@ var (
 	mdListStyle     lipgloss.Style
 )
 
-// mdStyle IDs index mdStyles; 0 is the unstyled run. Intervals carry the ID, so
-// span grouping never has to compare lipgloss.Style values (they carry a func
-// field, so == does not even compile).
+// mdStyle IDs index mdStyles (0 is unstyled), so grouping compares IDs rather than
+// lipgloss.Style values.
 const (
 	mdStyleNone = iota
 	mdStyleHeading
@@ -49,9 +42,7 @@ const (
 // style by reference and why the table is replaced rather than written through.
 var mdStyles []*lipgloss.Style
 
-// applyMarkdownPalette rebuilds the styles above from p, and mdStyles with them: the
-// slice holds style values indexed by mdStyle ID, so reassigning the vars alone would
-// leave every interval still pointing at the palette this replaces.
+// applyMarkdownPalette rebuilds the styles from p, and mdStyles with them.
 func applyMarkdownPalette(p syntaxPalette) {
 	mdHeadingStyle = lipgloss.NewStyle().Bold(true).Foreground(p.mdHeading)
 	mdEmphasisStyle = lipgloss.NewStyle().Italic(true).Foreground(p.mdEmphasis)
@@ -73,19 +64,14 @@ func applyMarkdownPalette(p syntaxPalette) {
 	}
 }
 
-// mdInterval is a styled half-open rune-column range [lo, hi) on one line of
-// the per-line interval list it lives in. prio resolves overlaps: inline
-// intervals (1) paint over block intervals (0) — `code` inside a heading is
-// code-colored, not heading-bold.
+// mdInterval is a styled rune-column range [lo, hi) on one line. prio resolves overlaps:
+// inline (1) paints over block (0), so `code` in a heading is code-colored.
 type mdInterval struct {
 	lo, hi, id, prio int
 }
 
-// markdownHighlighter is the goldmark-backed Highlighter. Parse walks the AST
-// once and flattens every styled construct into per-line rune-column intervals;
-// HighlightLine then just groups the intervals of its row into spans. Spans
-// always cover the full line (unstyled runs included), so the editor's concat
-// invariant holds by construction.
+// markdownHighlighter walks the goldmark AST once into per-line intervals; HighlightLine
+// groups a row's intervals into spans covering the whole line.
 type markdownHighlighter struct {
 	src       []byte          // the parsed document
 	lines     []string        // src split on '\n' (no newline runes)
@@ -97,19 +83,14 @@ type markdownHighlighter struct {
 
 var _ editor.HighlightRestartProvider = (*markdownHighlighter)(nil)
 
-// newMarkdownHighlighter returns a Highlighter for CommonMark markdown, styled
-// with the md*Style defaults: headings bold, *em* italic, **strong** bold,
-// `code` and code blocks (fenced and indented) in the code color, blockquotes
-// gray, links and autolinks underlined blue, and list markers (the "-" or "1.",
-// never the item's text) in the list color.
+// newMarkdownHighlighter highlights CommonMark: headings, emphasis, code (spans and
+// blocks), blockquotes, links, and list markers (not the item text).
 func newMarkdownHighlighter() editor.Highlighter {
 	return &markdownHighlighter{}
 }
 
-// Parse runs the document through goldmark and bakes the per-line spans. The
-// AST hands over the multi-line state for free: a fenced code block is one node
-// whose line segments span (heh) all its rows, so nothing here tracks
-// open/close across lines.
+// Parse runs goldmark and bakes the spans. Multi-line constructs come from the AST, so no
+// open/close state is tracked here.
 func (m *markdownHighlighter) Parse(doc string) {
 	m.src = []byte(doc)
 	m.lines = strings.Split(doc, "\n")
@@ -222,9 +203,8 @@ func (m *markdownHighlighter) rowOf(off int) int {
 	return r
 }
 
-// runeCol converts a byte offset on row into a rune column — the editor buffer
-// is []rune, so runes are the currency, not bytes. The offset is clamped to the
-// line's content (a trailing '\n' inside a goldmark segment never counts).
+// runeCol converts a byte offset on row to a rune column, clamped to the line (a trailing
+// '\n' never counts).
 func (m *markdownHighlighter) runeCol(row, off int) int {
 	start := m.lineStart[row]
 	end := len(m.src)
@@ -250,9 +230,8 @@ func (m *markdownHighlighter) addBlock(rowA, rowB, id int) {
 	}
 }
 
-// addInline styles the byte range [start, stop) at inline priority. A range
-// spanning rows (multi-line emphasis) is split per row, the newline itself
-// never landing on a cell.
+// addInline styles [start, stop) at inline priority, split per row for multi-line
+// emphasis.
 func (m *markdownHighlighter) addInline(start, stop int, id int) {
 	if stop <= start {
 		return
@@ -272,12 +251,9 @@ func (m *markdownHighlighter) addInline(start, stop int, id int) {
 	}
 }
 
-// listMarkerEnd is the byte offset just past the list marker starting at pos —
-// one bullet character ("-", "+", "*"), or a run of digits and the delimiter
-// closing it ("12."). ListItem.Pos() lands on the marker itself in every shape
-// goldmark produces (nested, indented, inside a blockquote), so scanning forward
-// from it is the whole extent calculation. Anything else answers pos, which
-// addInline discards as an empty range.
+// listMarkerEnd is the offset just past the list marker at pos (a bullet, or digits plus
+// "." or ")"); ListItem.Pos() is always on the marker. Anything else returns pos, an empty
+// range.
 func (m *markdownHighlighter) listMarkerEnd(pos int) int {
 	if pos < 0 || pos >= len(m.src) {
 		return pos
@@ -296,9 +272,7 @@ func (m *markdownHighlighter) listMarkerEnd(pos int) int {
 	return pos
 }
 
-// childRange is the byte range from the first to the last descendant Text
-// segment of n — the visible text of an emphasis/code-span/link, delimiters
-// excluded.
+// childRange spans n's descendant Text segments: the visible text without delimiters.
 func (m *markdownHighlighter) childRange(n ast.Node) (int, int) {
 	start, stop := -1, -1
 	ast.Walk(n, func(c ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -319,10 +293,8 @@ func (m *markdownHighlighter) childRange(n ast.Node) (int, int) {
 	return start, stop
 }
 
-// fencedLastRow is the last row a fenced code block paints: the closing fence
-// line when the block is closed (goldmark's line segments cover the content
-// only, and a closed fence immediately follows the last content line), else the
-// buffer's end — an unclosed fence styles to EOF.
+// fencedLastRow is a fenced block's last painted row: its closing fence, or the buffer's
+// end when unclosed.
 func (m *markdownHighlighter) fencedLastRow(v *ast.FencedCodeBlock) int {
 	if ls := v.Lines(); ls.Len() > 0 {
 		return m.rowOf(ls.At(ls.Len()-1).Stop-1) + 1
@@ -330,10 +302,8 @@ func (m *markdownHighlighter) fencedLastRow(v *ast.FencedCodeBlock) int {
 	return m.rowOf(v.Pos()) + 1
 }
 
-// lastRow is the deepest row a container block reaches — the max last-line row
-// over its descendant blocks (its own Lines() is empty). Inline children are
-// skipped: they never reach past the block holding them, and ast.BaseInline
-// panics on Lines() rather than answering empty.
+// lastRow is the deepest row a container block reaches, from its descendant blocks
+// (inline children are skipped; they panic on Lines()).
 func (m *markdownHighlighter) lastRow(n ast.Node) int {
 	last := m.rowOf(n.Pos())
 	if ls := n.Lines(); ls.Len() > 0 {
@@ -350,9 +320,8 @@ func (m *markdownHighlighter) lastRow(n ast.Node) int {
 	return last
 }
 
-// bake flattens the intervals into the spans HighlightLine serves: per row a
-// per-rune style-ID array (block priority first, inline painted over it),
-// grouped into runs — adjacent runs always differ, and unstyled lines stay nil.
+// bake turns the intervals into per-row runs (block priority first, inline over it);
+// unstyled lines stay nil.
 func (m *markdownHighlighter) bake() {
 	m.spans = make([][]editor.Span, len(m.lines))
 	for r, ivs := range m.intervals {

@@ -8,10 +8,8 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-// Position conversion between the editor's rune columns and LSP's UTF-16 code units.
-// UTF-16 is what gote negotiates at initialize (PositionEncodingKindUTF16), and every
-// feature that names a point in a document converts through here — which is why these
-// live in a file of their own rather than beside the first caller that needed them.
+// Conversion between the editor's rune columns and LSP UTF-16 code units (the encoding
+// negotiated at initialize).
 
 func editorPositionToLSP(ed *editor.Screen, position editor.Position) (protocol.Position, bool) {
 	line, ok := ed.LineText(position.Line)
@@ -63,11 +61,8 @@ func lspRangeToEditor(ed *editor.Screen, r protocol.Range) (editor.Range, bool) 
 	return editor.Range{Start: start, End: end}, true
 }
 
-// lspPositionToEditorClamped is the conversion a JUMP needs. A jump target names a point
-// in a file the editor may not have open yet, may have edited since the server last saw
-// it, or (for a whole-symbol range) that legitimately points one past the last line. An
-// exact conversion failing there should still land the caret somewhere sensible rather
-// than refusing to navigate, so this clamps to the nearest real position instead.
+// lspPositionToEditorClamped converts for a jump, clamping to the nearest real position:
+// the target may be in an unopened or edited file, or one past the last line.
 func lspPositionToEditorClamped(ed *editor.Screen, position protocol.Position) editor.Position {
 	if exact, ok := lspPositionToEditor(ed, position); ok {
 		return exact

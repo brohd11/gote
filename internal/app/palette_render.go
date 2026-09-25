@@ -11,17 +11,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The `gote colors` report. Picking a syntax color means answering two questions the
-// config file cannot: what does index 137 look like, and what does it look like against
-// code? A palette is only judgeable in context, so this prints the slots, a highlighted
-// sample and the whole 256-color space together.
-//
-// Nothing here decides colors. It renders what defaultSyntaxColors and the config already
-// decided, which is what makes it a tuning tool rather than a second source of truth.
+// The `gote colors` report: the slots, a highlighted sample and the 256-color space, so a
+// palette can be judged in context. It renders the colors already decided; it decides
+// nothing.
 
-// RenderOptions is what `gote colors` was asked for: a file to highlight instead of the
-// built-in samples, and whether to show the basic ANSI palette rather than the configured
-// one.
+// RenderOptions: a file to sample instead of the built-in samples, and whether to show the
+// basic ANSI palette.
 type RenderOptions struct {
 	Path  string
 	Basic bool
@@ -30,9 +25,8 @@ type RenderOptions struct {
 	Profile colorprofile.Profile
 }
 
-// RenderPalette writes the report to w. cfg supplies the palette in effect, so what the
-// report shows is what the editor would draw — the caller is expected to hand w through a
-// colorprofile.Writer for the same reason, since outside the TUI nothing else downsamples.
+// RenderPalette writes the report using cfg's palette. Pass w through a
+// colorprofile.Writer, since nothing else downsamples outside the TUI.
 func RenderPalette(w io.Writer, cfg Config, opts RenderOptions) error {
 	sc := syntaxColorsForProfile(cfg.SyntaxColors, opts.Profile)
 	if opts.Basic {
@@ -104,9 +98,8 @@ func renderSlots(w io.Writer, sc SyntaxColors, basic bool) error {
 	return err
 }
 
-// describeColor spells out what an index actually is, which is the thing the config file
-// cannot say. 0-15 have no fixed value to print — they are whatever the terminal's scheme
-// says — and that distinction is the whole reason basic_colors exists.
+// describeColor explains what an index is; 0-15 have no fixed value (the terminal's scheme
+// decides), which is why basic_colors exists.
 func describeColor(value string) string {
 	c, ok := parseSyntaxColor(value)
 	if !ok {
@@ -141,9 +134,8 @@ A paragraph with *emphasis*, **strong** text and ` + "`inline code`" + `.
 - and [a link](https://example.com)
 `
 
-// renderSample runs the real highlighter over real text. A palette judged on swatches
-// alone is how the first 256-color defaults shipped with a type and a func color that
-// were indistinguishable in actual code.
+// renderSample runs the real highlighter over real text: swatches alone hide colors that
+// clash in code.
 func renderSample(w io.Writer, path string) error {
 	samples := []struct{ name, text string }{
 		{"sample.go", goSample},
@@ -210,11 +202,9 @@ func writeHighlighted(w io.Writer, name, text string) error {
 	return nil
 }
 
-// renderSpace prints the 256-color space in its own shape rather than as a flat run.
-// 16-231 is a 6x6x6 RGB cube — index 16 + 36r + 6g + b, each channel from
-// {0,95,135,175,215,255} — so six per row is one blue ramp, and six rows is one red
-// plane. 232-255 is a 24-step grey ramp, 8 + 10*(i-232). Knowing the shape is what turns
-// picking a color from a hunt into arithmetic.
+// renderSpace prints the 256-color space in its structure: 16-231 is a 6x6x6 cube (16 +
+// 36r + 6g + b, channels {0,95,135,175,215,255}) at six per row, 232-255 a grey ramp (8 +
+// 10*(i-232)).
 func renderSpace(w io.Writer) error {
 	if _, err := fmt.Fprintln(w, "0-15 — your terminal's own scheme, not fixed values"); err != nil {
 		return err
@@ -234,12 +224,8 @@ func renderSpace(w io.Writer) error {
 	return swatchRow(w, 232, 256, 6)
 }
 
-// swatchRow prints each index as a FOREGROUND block, because a syntax color is text: a
-// background swatch flatters colors that are unreadable as glyphs. Readability against
-// real text is the sample section's job, which is why this one is just the color.
-//
-// Cells are eight columns so the widest row here — the sixteen terminal colors, eight per
-// row — lands inside eighty, and the cube's six-wide rows are comfortable at any width.
+// swatchRow prints each index as foreground text (a syntax color is text), in 8-column
+// cells so the widest row fits 80 columns.
 func swatchRow(w io.Writer, from, to, perRow int) error {
 	for i := from; i < to; i++ {
 		style := lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprint(i)))

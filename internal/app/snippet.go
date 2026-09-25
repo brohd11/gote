@@ -7,10 +7,9 @@ import (
 	"github.com/brohd11/bubblestack/components/editor"
 )
 
-// parseLSPSnippet expands the practical completion subset Gote advertises: numbered
-// tab stops, placeholders, choices, escapes, and the final $0 stop. Variables,
-// transforms, nested placeholders, and linked/repeated stops are rejected so their
-// source syntax can never leak into the editor.
+// parseLSPSnippet expands the snippet subset gote advertises: numbered stops,
+// placeholders, choices, escapes and $0. Variables, transforms, nested placeholders and
+// repeated stops are rejected so their syntax never reaches the buffer.
 func parseLSPSnippet(source string) (string, []editor.CompletionStop, bool) {
 	p := snippetParser{source: []rune(normalizeCompletionText(source)), seen: make(map[int]bool)}
 	if !p.parseText() {

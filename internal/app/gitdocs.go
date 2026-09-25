@@ -128,9 +128,8 @@ func (s *homeScreen) fileTitleColor(e components.FileEntry) color.Color {
 	return gitStateColor(s.gitDocs.snapshot.state(e.Path, e.IsDir))
 }
 
-// buildDocsGitSnapshot runs entirely in the command lane. Discovery follows the
-// document scan's pruning/depth, with the current folder as an additional starting
-// point so walking deeper (or through a symlink) discovers its nearest checkout.
+// buildDocsGitSnapshot runs in the cmd lane. Discovery follows the doc scan's pruning and
+// depth, plus the current folder, so a deeper or symlinked folder finds its checkout.
 func buildDocsGitSnapshot(ctx context.Context, base, current string, depth int) *docsGitSnapshot {
 	v := &docsGitSnapshot{repos: map[string]repo.WorktreeStatus{}, states: map[string]gitFileState{}, dirs: map[string]gitFileState{}}
 	candidates := map[string]bool{}
@@ -229,17 +228,9 @@ type docsGit struct {
 	timer func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 }
 
-// docsGitPoll is what an IDLE editor costs. The poll exists only to notice work done
-// outside gote — a commit in another terminal — because everything done inside it
-// already refreshes on the event (see refreshDocsGit). So the interval walks out when
-// nothing is happening and snaps back to the first rung when something is.
-//
-// It is not free to leave at two seconds. Each pass spawns `rev-parse` and `status` per
-// discovered repo root, and a terminal names its tab after the processes on its tty, so
-// every probe flickers the tab through `git` and back. Spawning less often is the whole
-// mitigation. Taking those children off the tty was tried (a new session does remove
-// them from that list) and abandoned: it did not stop the flicker, and is not worth
-// orphaning a language server for.
+// docsGitPoll is the idle poll ladder. The poll only catches changes made outside gote
+// (in-gote changes refresh on the event), so it backs off while idle. Each pass spawns git
+// per repo, which flickers the terminal's tab title, so spawning less is the mitigation.
 var docsGitPoll = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second, 60 * time.Second}
 
 func (g *docsGit) pollDelay() time.Duration { return docsGitPoll[min(g.step, len(docsGitPoll)-1)] }
@@ -286,20 +277,16 @@ func (s *homeScreen) syncDocsGit() tea.Cmd {
 	return s.refreshDocsGit()
 }
 
-// refreshDocsGit is the entry point for everything that could have CHANGED the answer —
-// a save, a rename, a delete, a folder change, the sidebar coming back, the terminal
-// regaining focus. requestDocsGit is the entry point for the poll and for a stale result
-// re-requesting itself. The split is the whole backoff: resetting the ladder inside
-// requestDocsGit would mean the poll re-arming itself at two seconds forever.
+// refreshDocsGit is for events that may have changed the answer (save, rename, delete,
+// folder change, focus regained) and resets the ladder; requestDocsGit, for the poll,
+// does not, which is what makes the backoff work.
 func (s *homeScreen) refreshDocsGit() tea.Cmd {
 	s.gitDocs.step = 0
 	return s.requestDocsGit()
 }
 
-// idleDocsGit is blur: the terminal is not on screen, so nothing the user does can be
-// waiting on the sidebar. It stretches the interval to the last rung rather than stopping,
-// because focus reporting is not guaranteed to come back — tmux forwards it only with
-// focus-events on, and a terminal that reports blur but never focus must still recover.
+// idleDocsGit handles blur by stretching the interval to the last rung rather than
+// stopping, since a focus event may never come back (tmux without focus-events).
 func (s *homeScreen) idleDocsGit() {
 	s.gitDocs.step = len(docsGitPoll) - 1
 }

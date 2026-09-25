@@ -10,28 +10,21 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The hover tooltip: alt+h at the caret, or the context menu's Hover info row — which
-// is the pointer-driven version, because a right press has already moved the caret to
-// the clicked cell before the menu opens (EditorScreen.pressContext).
-//
-// There is no mouse-pointer hover. Motion without a held button only arrives under
-// tea.MouseModeAllMotion, and bubblestack deliberately runs cell motion so that no
-// hover traffic crosses Update at all (core/router_render.go).
+// The hover tooltip: alt+h at the caret, or the context menu's Hover row (a right press
+// has already moved the caret to the click). There is no pointer hover: bubblestack uses
+// cell motion, which sends no motion without a held button.
 
 const (
 	hoverMaxWidth = 62
 	// Content rows, not rendered rows: PopupPanel's border adds two more.
 	hoverMaxHeight = 14
-	// The cells PopupPanel's border and padding take off the content width. It mirrors
-	// the package-private menuChromeW the panel adds back, so gote can budget the space
-	// a box will actually occupy before it wraps anything to fit.
+	// The cells PopupPanel's border and padding take, so the content can be sized before
+	// wrapping.
 	panelChrome = 4
 )
 
-// hoverUI is the tooltip's whole state. Unlike the completion popup it holds no list and
-// no handler: FloatingPopup with a nil Handle is a passive notice, so the tooltip
-// renders over the body and claims no input — every key and every click goes where it
-// would have gone anyway, and dismisses the tooltip on the way past.
+// hoverUI is the tooltip's state: a passive FloatingPopup (nil Handle) that claims no
+// input, so keys and clicks go where they would anyway and dismiss it on the way.
 type hoverUI struct {
 	popup *components.FloatingPopup
 	body  string
@@ -43,20 +36,10 @@ func (s *homeScreen) closeHover() {
 	s.hover = hoverUI{}
 }
 
-// dismissHoverOn retires the tooltip on the next thing the user DOES. A press, a wheel
-// notch, a key or a paste is a new intent; a release or a drag-motion is the tail of a
-// gesture already under way — the rule the router (router_keys.go), ModularScreen and
-// MenuScreen each state for themselves.
-//
-// The distinction is load-bearing here, not stylistic. The context menu's Hover row fires
-// on the PRESS and pops the menu with it, so the matching RELEASE lands on this screen a
-// moment later — by which time the server has usually answered and the tooltip is up.
-// Treating that release as intent closed the tooltip the same click had just asked for,
-// which is why the row appeared to do nothing while alt+h worked.
-//
-// Motion is left out for the same reason and costs nothing today: cell-motion mode reports
-// motion only while a button is held, so a motion always belongs to a gesture whose press
-// has already been seen here.
+// dismissHoverOn closes the tooltip on the next new intent: a press, wheel notch, key or
+// paste. A release or drag-motion is the tail of a gesture and is ignored: the menu's
+// Hover row fires on press, and its release would otherwise close the tooltip it just
+// opened.
 func (s *homeScreen) dismissHoverOn(msg tea.Msg) {
 	if s.hover.popup == nil {
 		return
@@ -85,10 +68,8 @@ func (s *homeScreen) applyHover(result *lspRequestResult) core.Action {
 	return core.Action{}
 }
 
-// panelWidth is the widest content a caret-anchored panel may wrap to: whatever is left
-// between the editor's own left edge and the right of the frame, once the box's chrome is
-// paid for, capped at max. Budgeting the chrome BEFORE wrapping is what keeps a panel
-// narrow enough to sit under the caret instead of being shoved somewhere it fits.
+// panelWidth is the widest content a caret panel may wrap to: the room right of the
+// editor's left edge, minus the box's chrome, capped at max.
 func (s *homeScreen) panelWidth(max int) int {
 	available := s.w - s.editorLeft() - panelChrome - 1
 	if available < 20 {
@@ -97,9 +78,7 @@ func (s *homeScreen) panelWidth(max int) int {
 	return min(max, available)
 }
 
-// panelFit is the width a panel is actually drawn at: its widest rendered row, never more
-// than the wrap budget. Without it every tooltip would be a full-width slab regardless of
-// what it says — the completion list sizes to its longest label for the same reason.
+// panelFit is the drawn width: the widest rendered row, capped at the budget.
 func panelFit(body string, budget int) int {
 	width := 1
 	for _, line := range strings.Split(body, "\n") {
@@ -108,19 +87,13 @@ func panelFit(body string, budget int) int {
 	return min(width, budget)
 }
 
-// caretPanel places a panel against the caret. It SHIFTS left to stay on screen rather
-// than right-aligning at the caret the way components.PlacePopupAt does: that helper
-// assumes a popup narrower than the caret's column, and a wider one flips to a negative x
-// which the compositor clamps to column 0 — the panel ends up pinned to the far left of
-// the screen, nowhere near the symbol it describes.
-//
-// leftBound keeps the box off the sidebar: a tooltip is about the caret, so it belongs
-// over the text rather than over the file list.
+// caretPanel places a panel at the caret, sliding left to stay on screen (PlacePopupAt
+// would pin a wide popup to column 0) but never left of the editor (leftBound), so it
+// stays over the text.
 func caretPanel(anchorX, anchorY, leftBound int, preferAbove bool) components.PopupPlacement {
 	return func(frameW, frameH, popupW, popupH int) (int, int) {
-		// Horizontal: start at the caret, slide left only as far as the right edge
-		// demands, and never left of the editor — unless honoring that would push the
-		// box off the right edge, in which case fitting on screen wins.
+		// Start at the caret and slide left only as far as needed, never left of the editor
+		// unless that would push the box off the right edge.
 		x := min(anchorX, frameW-popupW)
 		x = max(x, min(leftBound, max(frameW-popupW, 0)))
 		x = max(x, 0)
@@ -143,12 +116,9 @@ func caretPanel(anchorX, anchorY, leftBound int, preferAbove bool) components.Po
 
 func fitsRow(y, popupH, frameH int) bool { return y >= 0 && y+popupH <= frameH }
 
-// hoverBody turns a server's markdown into the few lines a tooltip can hold. It is not
-// run through components.RenderMarkdown: that renderer is for whole document pages and
-// leans on glamour, which is pinned at v0.9.1 for the workspace's own reasons, and its
-// block spacing would spend a tooltip's entire height on margins. What a hover actually
-// needs is the code line at the top and the doc comment under it, wrapped — so fences
-// are stripped, blank runs collapsed, and the result clipped.
+// hoverBody condenses a server's markdown into a few tooltip lines: fences stripped,
+// blank runs collapsed, wrapped and clipped. components.RenderMarkdown's page spacing
+// would spend the tooltip's height on margins.
 func hoverBody(markdown string, width int) string {
 	markdown = strings.TrimSpace(markdown)
 	if markdown == "" {
@@ -161,9 +131,7 @@ func hoverBody(markdown string, width int) string {
 		if strings.HasPrefix(trimmed, "```") {
 			continue // the fence itself; its contents are the useful part
 		}
-		// gopls separates the signature from its doc comment with a horizontal rule,
-		// which in a box this small is a whole line spent on a divider the box's own
-		// border already provides.
+		// gopls separates signature and doc with a rule; the box border already divides.
 		if trimmed == "---" || trimmed == "***" || trimmed == "___" {
 			continue
 		}

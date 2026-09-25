@@ -6,32 +6,21 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
-	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
-// Syntax highlighting for the fenced code blocks in gote's markdown preview (and its
-// docs pages — the seam is global). components.RenderMarkdown knows nothing about
-// languages: it accumulates a block's raw lines and hands them to whatever
-// components.CodeBlockRenderer the consumer set, which is chromaCodeBlock here. Apps
-// that set nothing get the reader's plain muted blocks, so the highlighting costs the
-// framework no dependency.
-//
-// The renderer is the editor's chromaHighlighter reused off-label. A block is first
-// hard-wrapped to the pane's width — HardWrap preserves text, only inserting '\n's —
-// so the wrapped rows re-join to the exact block source, and the highlighter's
-// token-to-row distribution (built for an editor's lines) works on the wrapped rows
-// unchanged. Wrapping styled output would break ANSI at the cuts; wrapping first and
-// styling after never does.
+// Syntax highlighting for fenced code blocks in the markdown preview and docs, via
+// components.CodeBlockRenderer (unset apps get plain blocks). It reuses the editor's
+// chromaHighlighter: the block is hard-wrapped first (only inserting newlines), then
+// highlighted row by row, which never cuts through ANSI.
 
 // init claims the language-neutral fenced-code renderer seam for the process.
 func init() {
 	components.CodeBlockRenderer = chromaCodeBlock
 }
 
-// chromaCodeBlock renders one fenced block: lang is the fence's info string ("go" in
-// "```go", "" when absent), code the raw content lines, width the columns to fold to.
-// The returned lines are emitted verbatim by the reader (it adds the indent itself).
+// chromaCodeBlock renders one fenced block (lang from the info string, maybe "") folded
+// to width; the reader adds the indent.
 func chromaCodeBlock(lang string, code []string, width int) []string {
 	var rows []string
 	for _, line := range code {
@@ -42,7 +31,7 @@ func chromaCodeBlock(lang string, code []string, width int) []string {
 	if lexer == nil {
 		// No language (or none chroma knows): the reader's own muted look, so an
 		// unhighlightable block reads exactly as it did before highlighting existed.
-		muted := lipgloss.NewStyle().Foreground(core.MutedColor)
+		muted := core.MutedStyle()
 		for i, row := range rows {
 			rows[i] = muted.Render(row)
 		}
@@ -58,11 +47,8 @@ func chromaCodeBlock(lang string, code []string, width int) []string {
 		}
 		var b strings.Builder
 		for _, sp := range spans {
-			// Every run goes through lipgloss, unstyled ones included: Render is also what
-			// expands a tab to the editor's four-cell display form, and a code block's
-			// leading indent is exactly the run no lexer claims. The editor's own render
-			// can skip Render for an unstyled run because expandLine has already done the
-			// tabs by the time it gets there; this has no such pass.
+			// Every run goes through Render, which also expands tabs; this path has no expandLine
+			// pass.
 			style, _ := sp.SpanStyle()
 			b.WriteString(style.Render(sp.Text))
 		}

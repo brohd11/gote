@@ -12,13 +12,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Signature help: the parameter hint that appears when you open an argument list. It is
-// the one on-demand feature that is not key-triggered — a hint you have to ask for is a
-// hint you will not use — so it rides the completion lane's trigger machinery, firing on
-// the characters the server advertised (in practice "(" and ",").
-//
-// It renders ABOVE the caret while the completion list renders below it, so the two can
-// legitimately be up at once without fighting for the same rows.
+// Signature help: the parameter hint shown inside an argument list, triggered by the
+// server's trigger characters ("(" and "," in practice) through the completion lane. It
+// draws above the caret and the completion list below, so both can show.
 
 // signatureUI is the hint's state: a passive FloatingPopup (nil Handle — it claims no
 // input) plus the buffer generation it was computed for.
@@ -34,11 +30,9 @@ type signatureUI struct {
 
 func (s *homeScreen) closeSignature() { s.signature = signatureUI{} }
 
-// dismissSignatureIfLeft retires the hint once the caret is no longer inside the call it
-// was opened for. It reads only the caret, never the message, which is what lets it sit on
-// the update's common exit and cover the ways out that the typing hook never sees: a
-// message the completion popup consumed, an action carrying a control message, a click,
-// a jump, an undo. Leaving by any of them is still leaving.
+// dismissSignatureIfLeft closes the hint once the caret leaves its call. It reads only the
+// caret, so it sits on the update's common exit and covers every way out (consumed
+// messages, clicks, jumps, undo).
 func (s *homeScreen) dismissSignatureIfLeft() {
 	if s.signature.popup == nil {
 		return
@@ -53,19 +47,13 @@ func (s *homeScreen) dismissSignatureIfLeft() {
 	}
 }
 
-// signatureScanLines bounds the walk back so one keystroke can never turn into a
-// whole-buffer scan. An argument list longer than this is past the point where a
-// parameter hint is what the reader needs.
+// signatureScanLines bounds the backward walk so a keystroke never scans the whole
+// buffer.
 const signatureScanLines = 50
 
-// signatureCallStart finds the unmatched '(' the caret sits inside, walking backwards over
-// balanced brackets. It is lexical, like completionIdentifierStart and for the same
-// reason: a bracket inside a string or a comment counts as a bracket. Getting that wrong
-// shows or hides a hint, which is the cheapest thing in the editor to be wrong about.
-//
-// An unmatched '[' or '{' answers no rather than continuing past it — the caret is inside
-// an index or a composite literal, not an argument list, and whatever call encloses THAT
-// is not the one being typed into.
+// signatureCallStart finds the unmatched '(' around the caret, walking back over balanced
+// brackets (lexically; strings and comments count). An unmatched '[' or '{' means not in
+// an argument list.
 func signatureCallStart(ed *editor.Screen, position editor.Position) (
 	editor.Position, bool,
 ) {
@@ -127,9 +115,8 @@ func (s *homeScreen) applySignature(result *lspRequestResult) core.Action {
 	return core.Action{}
 }
 
-// renderSignature draws the label with the active parameter emphasized. The parameter's
-// offsets came from the server (labelOffsetSupport), so the emphasis lands on the right
-// run of characters even when the same type name appears twice in the signature.
+// renderSignature emphasizes the active parameter using the server's label offsets, so
+// repeated type names are handled.
 func renderSignature(signature lspSignature, width int) string {
 	label := []rune(signature.Label)
 	body := signature.Label
@@ -144,7 +131,7 @@ func renderSignature(signature lspSignature, width int) string {
 	}
 	lines := []string{ansi.Wrap(body, width, "")}
 	if doc := firstLine(signature.Doc); doc != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(core.MutedColor).Render(ansi.Truncate(doc, width, "…")))
+		lines = append(lines, core.MutedStyle().Render(ansi.Truncate(doc, width, "…")))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -153,11 +140,8 @@ func firstLine(text string) string {
 	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(text), "\n", 2)[0])
 }
 
-// updateSignatureAfterParent is the typing hook, updateCompletionAfterParent's sibling:
-// it observes what a message actually did to the editor rather than predicting it. It owns
-// only the ways the hint OPENS — a trigger character — plus the two dismissals a caret
-// cannot express: esc, and the buffer moving out from under it. Leaving the call itself
-// belongs to dismissSignatureIfLeft.
+// updateSignatureAfterParent opens the hint on a trigger character and closes it on esc or
+// a buffer change; leaving the call is dismissSignatureIfLeft's job.
 func (s *homeScreen) updateSignatureAfterParent(sh *core.Shared, msg tea.Msg, before completionBefore) tea.Cmd {
 	if before.editor != s.editor || before.path != s.currentPath || !s.lspFeatureReady(sh) {
 		s.closeSignature()
@@ -178,9 +162,7 @@ func (s *homeScreen) updateSignatureAfterParent(sh *core.Shared, msg tea.Msg, be
 		s.requestAt(sh, lspReqSignature)
 		return nil
 	}
-	// Nothing else here closes the hint: dismissSignatureIfLeft owns that, on the caret
-	// rather than on the key, so typing the closing bracket and arrowing past one are the
-	// same event to it.
+	// Leaving the call is handled by dismissSignatureIfLeft, based on the caret.
 	return nil
 }
 

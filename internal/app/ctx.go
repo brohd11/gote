@@ -22,11 +22,9 @@ const (
 	ModeVault             // a named, configured recursive document root
 )
 
-// Ctx is gote's app context, stored on core.Shared.App and recovered with Of. It
-// carries the seed state (mode/dir/depth/filter and the last-seeded file list)
-// and every open buffer: Open maps a doc's path to its EditorScreen, which owns the
-// buffer — so keeping the instance is what preserves unsaved edits across file
-// switches. ctrl+x in the editor closes the buffer (CloseDoc).
+// Ctx is gote's app context (core.Shared.App, read with Of): the seed state and every
+// open buffer. Open maps a path to its editor, which owns the buffer, so unsaved edits
+// survive switching files.
 type Ctx struct {
 	Version   string
 	Mode      Mode
@@ -45,14 +43,11 @@ type Ctx struct {
 	open openSet
 	lsp  *lspManager
 
-	// activeID is the buffer holding the editor pane, mirrored off homeScreen because
-	// the session save runs after the TUI is gone — by then there is no screen left to
-	// ask. See session.go.
+	// activeID is the buffer in the editor pane, kept here because the session save runs
+	// after the screen is gone (see session.go).
 	activeID string
-	// restore holds positions read from the session file and not yet applied. An entry
-	// survives for a buffer the user never switched to, whose editor therefore never
-	// read its file and reports a meaningless caret at the origin; saveSession writes
-	// the surviving entry back instead of that.
+	// restore holds session positions not yet applied. A buffer never switched to reports a
+	// caret at the origin, so saveSession writes its pending entry back instead.
 	restore map[string]SessionFile
 }
 
@@ -61,10 +56,8 @@ func (c *Ctx) SetActive(id string) { c.activeID = id }
 
 var _ core.Receiver = (*Ctx)(nil)
 
-// Receive forwards framework broadcasts to every retained editor, including buffers
-// that are currently switched out of the pane. Async highlight work can finish while a
-// different document is visible; without this registry relay its targeted completion
-// would have nowhere live to land and that editor would remain permanently in flight.
+// Receive forwards broadcasts to every retained editor, including those switched out of
+// the pane, so async highlight results always have a live target.
 func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
 	var acts []core.Action
 	c.open.each(func(entry *openEntry) {
@@ -84,16 +77,10 @@ func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
 	}
 }
 
-// Options is the launch selection the CLI resolves (see cmd.resolveOptions). Only the
-// fields the chosen mode uses are read: Dir for ModeScan, File for ModeFile, Vault and
-// Dir for ModeVault. A zero Options is the default launch — the directory or vault
-// Config.Default names when it resolves, else ~/.gote/docs (see resolveDefault).
-//
-// Depth carries DepthSet rather than treating 0 as "unset", because 0 is a meaningful
-// depth: `gote here 0` lists the current directory alone. Unset means the config's
-// ScanDepth, which is what the zero value has to mean. Exts carries ExtsSet for the
-// same reason: `gote --ext=` is an empty set on purpose — it widens a restricting
-// config back to every text file for one run.
+// Options is the launch the CLI resolves (cmd.resolveOptions); only the chosen mode's
+// fields are read. The zero value is the default launch (Config.Default, else
+// ~/.gote/docs). DepthSet and ExtsSet exist because 0 and an empty --ext= are
+// meaningful values.
 type Options struct {
 	Mode     Mode
 	Dir      string // ModeScan root, or ModeVault's already-resolved root, absolute
@@ -126,10 +113,8 @@ func newWithColorProfile(version string, cfg Config, opts Options, profile color
 		Config:  cfg,
 		open:    newOpenSet(),
 	}
-	// Two gates, ANDed: auto-lsp is the master switch and the mode's default_allow_lsp
-	// narrows it to this kind of launch. A nil manager is a state the whole app already
-	// handles — every LSP-derived row, key and gutter falls away with it — so denying one
-	// here needs no further plumbing.
+	// auto-lsp and the mode's default_allow_lsp are ANDed; a nil manager is handled
+	// everywhere.
 	if cfg.AutoLSP && cfg.modeDefaults(opts.Mode).AllowLSP {
 		c.lsp = newLSPManager(cfg, version)
 	}
@@ -147,9 +132,7 @@ func newWithColorProfile(version string, cfg Config, opts Options, profile color
 	case ModeFile:
 		c.FilePath = opts.File
 	case ModeVault:
-		// Named on the command line. The CLI resolved and validated the path already
-		// (cmd.resolveOptions' vault lookup), so a bad name never reaches here — it is
-		// a launch error, not a screen that silently lists nothing.
+		// The CLI already resolved and validated this vault.
 		c.VaultName, c.ScanDir = opts.Vault, opts.Dir
 	case ModeHome:
 		c.Mode, c.VaultName, c.ScanDir = resolveDefault(cfg)
@@ -167,10 +150,8 @@ func (c *Ctx) close() {
 // Of recovers the gote context from a Shared. Screens call c := app.Of(sh).
 func Of(sh *core.Shared) *Ctx { return core.App[Ctx](sh) }
 
-// Seed re-reads the doc list for the current mode. Home mode lists its store;
-// scan mode walks ScanDir; file mode has no list at all (the minimal screen renders no
-// sidebar), so it touches the filesystem not at all. Seeding never touches Open —
-// buffers outlive reseeds.
+// Seed re-reads the doc list for the current mode (home store, scan, or nothing for a
+// single file). Open buffers are never touched.
 func (c *Ctx) Seed() {
 	switch c.Mode {
 	case ModeScan, ModeVault:
@@ -187,18 +168,10 @@ func (c *Ctx) Seed() {
 	}
 }
 
-// resolveDefault turns Config.Default into the launch a bare `gote` gets. The value is
-// read as a directory path when it is written as one — ~-prefixed, dot-relative, or
-// otherwise containing a separator — and as the name of a configured vault otherwise,
-// which is the same ladder the CLI's bare argument climbs (see cmd.resolveOptions).
-//
-// A default naming ~/.gote/docs resolves back to home mode rather than to a scan of it.
-// The two seed differently — home lists the store flat, a scan walks it to Depth — so
-// spelling out the store gote already opens must not quietly change what it shows.
-//
-// Anything that does not resolve — a directory that is gone, a vault that was never
-// configured — falls back to the home store, the same silent fallback an unconfigured
-// default has always had: a bad default should open the wrong list, not refuse to start.
+// resolveDefault turns Config.Default into a bare `gote` launch: a path when written as
+// one (~, ./, or a separator), otherwise a vault name, as the CLI reads bare arguments.
+// ~/.gote/docs resolves to home mode rather than a scan of it. Anything that does not
+// resolve falls back to the home store rather than refusing to start.
 func resolveDefault(cfg Config) (mode Mode, name, dir string) {
 	if cfg.Default == "" {
 		return ModeHome, "", ""
@@ -220,9 +193,8 @@ func resolveDefault(cfg Config) (mode Mode, name, dir string) {
 	return ModeVault, cfg.Default, path
 }
 
-// isPathRef reports whether a config value is written as a directory path rather than as
-// a vault name. A bare word is a name — the same reading `gote main-vault` gives it — and
-// "./notes" is the escape hatch for a directory whose name a vault has claimed.
+// isPathRef reports whether a config value is a path rather than a vault name; "./notes"
+// reaches a directory whose name a vault has claimed.
 func isPathRef(s string) bool {
 	return strings.HasPrefix(s, "~") || strings.HasPrefix(s, ".") ||
 		strings.ContainsRune(s, '/') || strings.ContainsRune(s, filepath.Separator)
@@ -241,9 +213,8 @@ func vaultPath(cfg Config, name string) (string, error) {
 	return path, nil
 }
 
-// LookupVault is vaultPath for the CLI, which must tell "no such vault" (fall through
-// to the next reading of the argument) apart from "that vault is broken" (a launch
-// error) — an error alone cannot carry that difference, so ok does.
+// LookupVault is vaultPath for the CLI, where ok separates "no such vault" (try the next
+// reading) from "broken vault" (err).
 func LookupVault(cfg Config, name string) (path string, ok bool, err error) {
 	if _, ok := cfg.Vaults[name]; !ok {
 		return "", false, nil
@@ -252,10 +223,8 @@ func LookupVault(cfg Config, name string) (path string, ok bool, err error) {
 	return path, true, err
 }
 
-// VaultEntry is one configured vault as a caller outside the TUI sees it: the name it
-// is reached by and the path exactly as config.yml writes it. Unnormalized on purpose —
-// a vault whose directory has gone missing must still appear in the listing that
-// explains why, which normalizeDirPath would turn into an error instead.
+// VaultEntry is one configured vault as listed outside the TUI, with its path exactly as
+// configured, so a vault whose directory is gone still lists.
 type VaultEntry struct {
 	Name    string
 	Path    string
@@ -273,12 +242,9 @@ func VaultList(cfg Config) []VaultEntry {
 	return entries
 }
 
-// AddVault validates and persists a new named vault, creating its directory when it
-// does not exist yet and adopting the folder as it stands when it does. Config is
-// replaced in memory only after the atomic write succeeds, so an error cannot leave the
-// menu ahead of config.yml. The directory is made last of the checks, so a rejected name
-// or a duplicate path leaves nothing behind; only a failed SaveConfig can, and an empty
-// folder is inert.
+// AddVault validates and saves a new vault, creating or adopting its directory. Config
+// changes in memory only after the atomic write; the directory is created after the other
+// checks, so a rejected add leaves nothing behind.
 func (c *Ctx) AddVault(name, rawPath string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -331,10 +297,8 @@ func (c *Ctx) SwitchVault(name string) error {
 	c.activeID, c.restore = "", nil
 	c.Mode, c.VaultName, c.ScanDir = ModeVault, name, path
 	c.FilePath = ""
-	// A single-file launch that single_file_mode.default_allow_lsp denied a manager is
-	// now a vault, and project_mode may well allow one. Created here rather than left for
-	// the rest of the session, since this is the only route out of ModeFile and nothing
-	// downstream reconsiders the question.
+	// A single-file launch whose settings denied a manager may be allowed one as a vault;
+	// create it now, since nothing else reconsiders.
 	if c.lsp == nil && c.Config.AutoLSP && c.Config.Project.AllowLSP {
 		c.lsp = newLSPManager(c.Config, c.Version)
 	}
@@ -342,10 +306,8 @@ func (c *Ctx) SwitchVault(name string) error {
 	return nil
 }
 
-// OpenDoc returns the editor for path, creating and registering it on first open.
-// opts carries the host's hooks (Path is filled in here); they are wired only into
-// newly created editors, since an already-open doc keeps its existing editor — and its
-// buffer — untouched. See homeScreen.editorOpts for what gote passes.
+// OpenDoc returns path's editor, creating and registering it on first open with opts
+// (see homeScreen.editorOpts). An already-open doc keeps its editor and buffer.
 func (c *Ctx) OpenDoc(path string, opts editor.Opts) *editor.Screen {
 	if entry, ok := c.open.getPath(path); ok {
 		return entry.editor
@@ -356,10 +318,8 @@ func (c *Ctx) OpenDoc(path string, opts editor.Opts) *editor.Screen {
 	return ed
 }
 
-// unread reports whether path is registered but has never read its file — a restored
-// buffer the user has not switched to yet. Membership in the open set used to imply
-// having been loaded, and the preview seeding was entitled to assume it; session restore
-// is what separated the two.
+// unread reports whether path is open but has never read its file: a restored buffer not
+// yet switched to.
 func (c *Ctx) unread(path string) bool {
 	_, pending := c.restore[path]
 	return pending
@@ -392,9 +352,8 @@ func (c *Ctx) bufferInfo(id string) (DocFile, bool) {
 	return DocFile{ID: entry.id, Name: entry.name, Path: entry.path, Root: entry.root}, true
 }
 
-// newUnsavedIdentity finds the lowest unsaved_N suffix not currently retained. Saving
-// or closing a pathless buffer therefore releases its number for the next one. The NUL
-// in the opaque id cannot occur in a filesystem path, so identity and path cannot clash.
+// newUnsavedIdentity finds the lowest free unsaved_N; the NUL in the id cannot clash with
+// a real path.
 func (c *Ctx) newUnsavedIdentity() (id, name string) {
 	for n := 1; ; n++ {
 		id = fmt.Sprintf("\x00gote:unsaved:%d", n)
@@ -413,16 +372,10 @@ func (c *Ctx) trackUnsaved(id, name string, ed *editor.Screen) {
 	c.open.addUnsaved(id, name, ed)
 }
 
-// EachDoc visits every open buffer whose text speaks for a file, in opening order. Two
-// kinds are held back, for the same reason: they have no authoritative text to offer.
-// Pathless buffers are retained by the context but name no file. Restored buffers name
-// one they have not read yet — their editor is empty until the user switches to them,
-// and handing that emptiness to a consumer is worse than handing it nothing, because
-// every consumer here already falls back to the file on disk. Telling gopls that an
-// unvisited foo.go is empty is what made a restored foo_test.go report every symbol in
-// its package undefined.
-//
-// Callers that want every retained buffer regardless have open.each and OpenDocs.
+// EachDoc visits every open buffer that speaks for a file, in opening order, skipping
+// pathless buffers and restored buffers not yet read, whose empty text would mislead
+// consumers (it made gopls report a whole package undefined). open.each and OpenDocs
+// visit everything.
 func (c *Ctx) EachDoc(fn func(path string, ed *editor.Screen)) {
 	c.open.each(func(entry *openEntry) {
 		if entry.path != "" && !c.unread(entry.path) {
@@ -431,12 +384,9 @@ func (c *Ctx) EachDoc(fn func(path string, ed *editor.Screen)) {
 	})
 }
 
-// RekeyDoc re-files ed under newPath after a save-as, keeping the Open metadata
-// consistent with a buffer that gained or changed its path. An untracked startup buffer
-// is registered here; an already-retained buffer keeps its slot so the Open list does
-// not jump under the selection. An ordinary same-path save does nothing.
-// Saving over a path that some OTHER buffer already holds drops that buffer's entry:
-// the list is keyed by path and two rows for one file would both claim to be it.
+// RekeyDoc re-files ed under newPath after a save-as, keeping its Open slot (or
+// registering an untracked startup buffer). Another buffer already holding newPath is
+// dropped, since the list is keyed by path.
 func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 	if newPath == "" || ed == nil {
 		return
@@ -444,9 +394,7 @@ func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 	if cur, ok := c.open.getPath(newPath); oldID == newPath && ok && cur.editor == ed {
 		return
 	}
-	// A restored buffer can be renamed before it is ever switched to, and its pending
-	// position has to travel with it — stranded under the old path, saveSession would
-	// fall through to an editor that never read anything and record a caret at 0,0.
+	// A restored buffer renamed before being opened carries its pending position with it.
 	if rec, ok := c.restore[oldID]; ok {
 		delete(c.restore, oldID)
 		rec.Path = newPath
@@ -458,14 +406,12 @@ func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 // OpenDocs lists the open buffers in opening order, for the open-docs list.
 func (c *Ctx) OpenDocs() []DocFile { return c.open.docs() }
 
-// CloseDoc removes id from the open set (an unknown id is a no-op, which makes an
-// untracked startup editor's exit free) and returns the buffer to switch to:
-// the one after it in open order, else the new last, else "" when none remain.
+// CloseDoc removes id from the open set (unknown ids are ignored) and returns the buffer
+// to show next: the one after it, else the last, else "".
 func (c *Ctx) CloseDoc(id string) (next string) { return c.open.remove(id) }
 
-// rootForPath records where a document came from when it first enters Open. Seeded
-// docs carry an exact root; other paths use the active mode, while a standalone or
-// otherwise unseeded file is treated as flat in its containing directory.
+// rootForPath records a document's origin root on first open: exact for seeded docs, the
+// mode's root otherwise, or its own directory for a standalone file.
 func (c *Ctx) rootForPath(path string) string {
 	for _, doc := range c.Files {
 		if doc.Path == path && doc.Root != "" {

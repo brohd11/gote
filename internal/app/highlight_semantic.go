@@ -5,11 +5,9 @@ import (
 	"github.com/brohd11/bubblestack/core"
 )
 
-// The semantic overlay: Chroma paints the immutable syntax snapshot, then the editor's
-// positional host layer corrects the ranges a language server understands more precisely.
-// The layer belongs to the retained editor rather than to a global cache: its row map can
-// follow untouched lines through edits, while edited rows fall back to Chroma until a
-// fresh server answer arrives.
+// The semantic overlay: Chroma paints the syntax snapshot and the editor's host layer
+// corrects ranges the language server knows better. It lives on the editor, so untouched
+// rows follow edits and edited rows show Chroma until a new answer arrives.
 
 // semanticHighlightRanges converts the LSP's UTF-16 columns into the editor's rune-based
 // public ranges. One malformed token is dropped without costing the rest of the answer.
@@ -41,9 +39,8 @@ func semanticHighlightRanges(ed *editor.Screen, tokens []semanticToken) []editor
 	return out
 }
 
-// applySemanticTokens installs a successful answer directly on the retained buffer it
-// describes, active or not. SetHighlightOverlay repeats the generation check at
-// publication. A successful empty answer is still installed: it clears an older overlay.
+// applySemanticTokens installs a successful answer on the buffer it describes, active or
+// not; an empty answer clears the old overlay.
 func (s *homeScreen) applySemanticTokens(sh *core.Shared, result *lspSemanticResult) {
 	if result == nil || result.err != nil || result.path == "" {
 		return

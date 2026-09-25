@@ -8,26 +8,16 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// The transient status line, drawn by gote instead of by the router.
+// The status line, drawn by gote rather than the router: the router's status row takes a
+// row from the body, so panes would jump on each message. With ChromeMask.Status set, the
+// screen paints it into space the frame already uses:
+//   - into the help bar's blank top row (statusBar), or
+//   - over the body's last row when there is no help bar (statusOver).
 //
-// The router treats the status as a sibling of the body: belowChrome appends it and
-// bodyHeightFor subtracts its height, so a message appearing costs the body a row and
-// clearing gives the row back — the panes' bottoms climb one line and drop back five
-// seconds later, and an editor near the end of its buffer scrolls with them. Masking
-// ChromeMask.Status and painting the line ourselves puts it in space the frame already
-// spends, so the body's height never changes:
-//
-//   - a screen with a help bar lends its blank top padding row (statusBar)
-//   - a screen whose help bar is masked lends its own last row (statusOver)
-//
-// Every screen that masks the status MUST route through one of the two, or the message
-// has nowhere to land and is lost.
+// Every screen that masks the status must use one of these, or messages are lost.
 
-// statusLine is the current status message clamped to one row and the terminal width.
-// The clamp is not cosmetic: core's statusStyle sets no width, so a message wider than
-// the terminal wraps to two rows while lipgloss.Height still reports one — which would
-// spend the very row this file exists to save (and, drawn by the router, overflows the
-// frame). "" when there is no message, no status element, or no chrome at all.
+// statusLine is the current message clamped to one row of the terminal width (an
+// unclamped one would wrap to a second row); "" when there is none.
 func statusLine(sh *core.Shared) string {
 	if sh == nil || sh.Chrome == nil || sh.Chrome.Status == nil || !sh.Chrome.Status.Shown() {
 		return ""
@@ -43,13 +33,8 @@ func statusLine(sh *core.Shared) string {
 	return clamp.Render(line)
 }
 
-// statusBar draws the status into the help bar's own blank top row. The bar is two rows,
-// not one: it renders through bubbles' list HelpStyle, which pads a row above the hints
-// (Padding(1, 0, 0, 2)) — so the row is already being paid for, and the status can have
-// it for free. help is returned untouched when there is nothing to show.
-//
-// A bar whose first row is NOT blank isn't one we can borrow from, so the line goes above
-// it instead: that costs a row (the old behaviour) but never swallows a message.
+// statusBar draws the status into the help bar's blank top row (from bubbles' HelpStyle
+// padding). If that row is not blank, the line goes above the bar instead.
 func statusBar(sh *core.Shared, help string) string {
 	line := statusLine(sh)
 	if line == "" {
@@ -65,13 +50,8 @@ func statusBar(sh *core.Shared, help string) string {
 	return strings.Join(lines, "\n")
 }
 
-// statusOver paints the status over the last row of a body — the fallback for a screen
-// with no help bar to lend a row (minimal mode masks it). The body keeps every row it
-// had; the message covers only the cells it is wide, so a short one leaves a side pane's
-// bottom row alone, and the text underneath comes back when the message clears.
-//
-// bodyHeight is the height the router handed to SetSize: a body that drew short is padded
-// out to it first, so the line lands on the frame's bottom row rather than mid-screen.
+// statusOver paints the status over the body's last row (minimal mode, no help bar),
+// covering only its own width. A short body is first padded to bodyHeight.
 func statusOver(sh *core.Shared, body string, bodyHeight int) string {
 	line := statusLine(sh)
 	if line == "" || bodyHeight < 1 {

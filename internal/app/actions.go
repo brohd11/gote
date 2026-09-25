@@ -9,15 +9,10 @@ import (
 	"charm.land/bubbles/v2/list"
 )
 
-// actionsMenu is the small Actions picker opened with core.Keys.Actions ("a", or
-// ctrl+alt+a from the editor) — the shared bubblestack menu plus gote's document-root,
-// gutter and language-server controls.
-//
-// The rows are assembled rather than listed because three of the gates that hide them are
-// per-launch and permanent: a locked panel, a launch with no language-server manager, and
-// minimal mode's missing Open view. A row that cannot act for the whole session is omitted
-// rather than shown dead, which is the same call editorLanguageItems makes for the
-// right-click menu.
+// actionsMenu is the Actions picker ("a", or ctrl+alt+a from the editor): the shared
+// menu plus gote's document-root, gutter and language-server rows. Rows that cannot act
+// for the whole session (locked panels, no language-server manager, minimal mode) are
+// left out rather than shown disabled.
 func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 	lsp := lspEnabled(sh)
 	extra := []list.Item{vaultsItem()}
@@ -110,8 +105,7 @@ func refreshAction(sh *core.Shared) core.Action {
 	return core.PropagateAll(ReseedMsg{})
 }
 
-// vaultsItem opens the saved document roots. It supersedes the old home/scan mode
-// toggle; ad-hoc scans remain available from gote's CLI.
+// vaultsItem opens the saved document roots; ad-hoc scans are a CLI launch.
 func vaultsItem() components.Item {
 	return components.Item{
 		Name: "▣ Vaults",

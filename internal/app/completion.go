@@ -98,10 +98,9 @@ func (s *homeScreen) requestCompletion(sh *core.Shared, trigger string, manual b
 	return core.Action{}
 }
 
-// updateCompletionAfterParent observes what an unhandled message actually did to the
-// editor. Identifier typing and backspace keep an open list locally filtered; cursor
-// motion and unrelated edits dismiss it. The returned command is only the automatic
-// request debounce.
+// updateCompletionAfterParent reacts to what an unhandled message did to the editor:
+// identifier typing and backspace re-filter an open list, other motion and edits close
+// it. It returns only the request debounce.
 func (s *homeScreen) updateCompletionAfterParent(sh *core.Shared, msg tea.Msg, before completionBefore) tea.Cmd {
 	if before.editor != s.editor || before.path != s.currentPath || !before.focused || !s.completionAvailable(sh) {
 		s.closeCompletion()
@@ -115,12 +114,8 @@ func (s *homeScreen) updateCompletionAfterParent(sh *core.Shared, msg tea.Msg, b
 			return nil
 		}
 		if s.completion.popup != nil {
-			// Presses, wheel notches and keys only — a release or a drag-motion ends a
-			// gesture rather than starting one (dismissHoverOn carries the full reasoning,
-			// and the bug that made it matter). No behavior changes here: this popup is
-			// never summoned by a mouse gesture, so the press has always dismissed it
-			// before its release could. The two lists are kept identical so the rule is
-			// one rule.
+			// Presses, wheel notches and keys only: a release or drag-motion ends a gesture rather
+			// than starting one (the same list as dismissHoverOn).
 			switch msg.(type) {
 			case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
 				s.closeCompletion()
@@ -157,9 +152,8 @@ func (s *homeScreen) updateCompletionAfterParent(sh *core.Shared, msg tea.Msg, b
 		}
 		s.completion.list.SetQuery(query)
 		if s.completion.list.Len() == 0 {
-			// An empty filtered list renders nothing but would still consume the
-			// popup's Enter/Tab/navigation keys. Remove it now; the debounce below
-			// remains active and may replace it with a fresh server result.
+			// An empty list would still swallow Enter, Tab and navigation, so close it; the debounce
+			// may bring a fresh result.
 			s.closeCompletion()
 		}
 	}
@@ -211,9 +205,8 @@ func (s *homeScreen) applyCompletionResult(result *lspCompletionResult) {
 		},
 	})
 	list.SetQuery(query)
-	// Seed after the initial query so the list selects its highest-ranked match. An LSP
-	// preselect is useful when there is no local ranking signal, but must not override a
-	// non-empty fuzzy query's answer.
+	// Seed after the query so the best fuzzy match is selected; an LSP preselect must not
+	// override a non-empty query.
 	list.SetItems(items)
 	if query == "" && preselect >= 0 {
 		list.Select(preselect)
@@ -244,10 +237,8 @@ func (s *homeScreen) acceptCompletion(item lspCompletionItem) {
 		}
 		end := editor.Position{}
 		if item.Edit.Range.End == s.completion.resultPos || item.Edit.Range.End == s.completion.resultEnd {
-			// Extend an edit ending at either the request position or the result's real
-			// caret through the current locally matched query. The first covers servers
-			// editing only up to the asked position; the second keeps typing-after-result
-			// rebasing intact.
+			// Extend an edit ending at the request position, or at the result's caret, through the
+			// query typed since.
 			end = current
 		} else {
 			var endOK bool
@@ -290,12 +281,9 @@ func isCompletionIdentifierRune(r rune) bool {
 }
 
 // completionIdentifierStart is both the left edge of the local fuzzy query and the LSP
-// request position, so the server is always asked with an empty prefix: "bg" asks at the
-// start of the word and "value.bg" asks immediately after the dot. The server therefore
-// answers with everything in scope — or every member of the receiver — and completionQuery
-// carries the full typed word to the popup's own fuzzy match, which is the only thing that
-// narrows. Seeding the request one rune in (the old behavior) capped the candidate set at
-// names beginning with that rune, which fuzzy matching can never widen back out.
+// request position, so the server is asked with an empty prefix ("bg" at the word start,
+// "value.bg" right after the dot) and returns everything in scope. The popup's fuzzy
+// match does the narrowing; a one-rune prefix would cap what fuzzy matching can find.
 func completionIdentifierStart(ed *editor.Screen, position editor.Position) editor.Position {
 	line, ok := ed.LineText(position.Line)
 	if !ok {

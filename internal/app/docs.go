@@ -23,23 +23,18 @@ type DocFile struct {
 	Root string // origin root used to render stable relative path context
 }
 
-// DocFilter decides which files seed the lists. An empty Exts means any text file,
-// judged by sniffing content (textfile.IsText) — the default, so a fresh gote lists
-// everything it can actually edit. A non-empty Exts is the user's explicit word, from
-// config.yml's extensions key or the --ext flag, and is taken at face value without
-// sniffing.
+// DocFilter decides which files seed the lists. Empty Exts means any text file (by
+// content sniffing); non-empty Exts (config or --ext) are taken at face value.
 type DocFilter struct {
 	Exts []string // lowercase, no leading dot; see NewDocFilter
 }
 
-// NewDocFilter builds a filter from extension strings however they were written — "MD",
-// ".md" and " md " all mean md, and empties drop out. The single normalization point
-// for both config.yml's extensions key and the --ext flag, so the two cannot drift.
+// NewDocFilter normalizes extensions ("MD", ".md", " md " all mean md; empties drop). It is
+// the one normalization point for config and --ext.
 func NewDocFilter(exts []string) DocFilter { return DocFilter{Exts: normalizeExts(exts)} }
 
-// normalizeExts is NewDocFilter's canonical form, shared with Config so a loaded config
-// holds what it means. An all-empty input returns nil, not an empty slice: the two are
-// the same filter but only one of them compares equal to a zero Config.
+// normalizeExts is the canonical form; all-empty input returns nil so a loaded config
+// equals the zero Config.
 func normalizeExts(exts []string) []string {
 	out := make([]string, 0, len(exts))
 	for _, e := range exts {
@@ -53,9 +48,8 @@ func normalizeExts(exts []string) []string {
 	return out
 }
 
-// defaultExt is what rename appends to a name typed without one: the first
-// configured extension, so a filtered session keeps renamed files visible,
-// and "md" when nothing is configured.
+// defaultExt is what rename appends to a bare name: the first configured extension, else
+// "md".
 func defaultExt(exts []string) string {
 	if len(exts) > 0 {
 		return exts[0]
@@ -83,10 +77,8 @@ func (f DocFilter) hasExt(name string) bool {
 	return false
 }
 
-// HomeDocs lists the docs stored flat in dir (the home mode seed), filtered by f.
-// The directory is created when missing — the first run of a fresh install should
-// still find its store. A listing failure yields an empty list, not an error: the
-// TUI shows an empty list and stays usable.
+// HomeDocs lists the docs stored flat in dir, creating dir if missing. A listing failure
+// yields an empty list.
 func HomeDocs(dir string, f DocFilter) []DocFile {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil
@@ -107,10 +99,8 @@ func HomeDocs(dir string, f DocFilter) []DocFile {
 	return docs
 }
 
-// skipDirs are trees a doc scan never descends into. With every text file valid by
-// default, a depth-5 scan of any real project would otherwise be mostly vendored
-// dependency source and build output. Dot-prefixed names (.git, .venv) need no entry
-// here — the dot rule below already covers them.
+// skipDirs are trees a scan never enters (vendored code, build output); dot-directories
+// are pruned separately.
 var skipDirs = map[string]bool{
 	"node_modules": true,
 	"vendor":       true,
@@ -121,10 +111,8 @@ var skipDirs = map[string]bool{
 	"venv":         true,
 }
 
-// docsRoot is the directory the folder view is rooted at, and its floor: the scan or vault
-// root in the modes that have one, the doc store in home mode, the file's own directory in
-// single-file mode (where the sidebar is unreachable anyway). "" leaves the explorer
-// unclamped at the working directory, which is the honest answer when gote has no root.
+// docsRoot is the folder view's root and floor: the scan or vault root, the doc store in
+// home mode, or the file's directory in single-file mode. "" leaves it unclamped.
 func docsRoot(c *Ctx) string {
 	switch c.Mode {
 	case ModeScan, ModeVault:
@@ -141,10 +129,8 @@ func docsRoot(c *Ctx) string {
 	return ""
 }
 
-// includeDoc is the folder view's components.FilePanelOpts.Include: the same rules
-// ScanDocs prunes a walk with, asked one directory at a time. So the explorer shows
-// exactly the files the flat list shows, only nested — the configured extensions (or the
-// text sniff) still decide, and .git and node_modules still stay out of the way.
+// includeDoc is the folder view's Include, applying ScanDocs' rules per directory so both
+// views show the same files.
 func includeDoc(c *Ctx) func(string, fs.DirEntry) bool {
 	return func(path string, d fs.DirEntry) bool {
 		name := d.Name()
@@ -158,11 +144,8 @@ func includeDoc(c *Ctx) func(string, fs.DirEntry) bool {
 	}
 }
 
-// ScanDocs walks root recursively down to depth directory levels below it (0 = root
-// only), collecting the files f accepts. Dot-directories and skipDirs are pruned — a
-// scan of ~ has no business descending into .git, and one of a project has none
-// descending into node_modules. Both rules spare the root itself, so scanning from
-// inside such a directory still lists it. Unreadable subtrees are skipped, not fatal.
+// ScanDocs walks root to depth levels (0 = root only) collecting accepted files, pruning
+// dot-directories and skipDirs (but never root itself). Unreadable subtrees are skipped.
 func ScanDocs(root string, depth int, f DocFilter) []DocFile {
 	var docs []DocFile
 	root = filepath.Clean(root)
@@ -192,15 +175,9 @@ func sortDocs(docs []DocFile) {
 	sort.Slice(docs, func(i, j int) bool { return docs[i].Path < docs[j].Path })
 }
 
-// docItem adapts a DocFile to a list.Item for the picker panels. current marks the
-// doc showing in the editor pane: its row gets a dot prefix (the list has no other
-// "open here" channel — selection is focus, not state).
-//
-// dirty is the row's unsaved-changes probe, set only on the OPEN list (a file with no
-// buffer cannot be dirty, so a docs row leaves it nil). It is a func rather than a bool
-// because the open list is rebuilt only on open/save/reseed and never per keystroke: a
-// value read at build time would go stale the moment the next character landed, while a
-// probe is answered afresh by every render.
+// docItem adapts a DocFile to a list row. current marks the doc in the editor with a dot.
+// dirty, set only on the Open list, is a probe rather than a bool so each render reads the
+// buffer's current state.
 type docItem struct {
 	doc        DocFile
 	current    bool
@@ -221,11 +198,8 @@ func (i docItem) TitleColor() color.Color {
 	return nil
 }
 
-// KeepColor implements core.KeepColorItem: on a list that carries git state, the cursor row
-// is exactly where "is this modified?" is being asked, so the row keeps its color and the
-// panel's tinted left rule is left to mark the selection on its own. Gated on the hook
-// rather than a field of its own, so the Docs panel (docRows sets it) opts in and the Open
-// panel (openDocItems, no git color to protect) keeps the accent.
+// KeepColor keeps git colors under the cursor on the Docs panel (which sets the color
+// hook); the Open panel keeps the accent.
 func (i docItem) KeepColor() bool     { return i.titleColor != nil }
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
@@ -237,9 +211,8 @@ func (i docItem) identity() string {
 	return i.doc.Path
 }
 
-// Mark flags a buffer with unsaved changes, matching the marker the editor pane's own
-// title bar carries. core.MarkItem reserves its width before the name is truncated, so it
-// is still readable on a row the sidebar has narrowed — see core.CompactDelegate.
+// Mark flags unsaved changes, like the editor's title bar; MarkItem keeps it visible on a
+// narrow sidebar.
 func (i docItem) Mark() string {
 	if i.dirty != nil && i.dirty() {
 		return " (*)"
@@ -271,11 +244,8 @@ func docItems(docs []DocFile, currentPath string) []list.Item {
 	return items
 }
 
-// openDocItems is the open list's rows: docItems plus the live dirty probe each open
-// buffer can answer. The probe is the editor's own Dirty method value, so a row reports
-// what the buffer holds right now — including the one being typed into, whose editor is
-// the very instance the pane is showing. A path whose buffer went missing gets a nil
-// probe and simply shows no marker.
+// openDocItems builds the Open list rows with each buffer's live Dirty method as the
+// probe.
 func openDocItems(c *Ctx, currentID string) []list.Item {
 	docs := c.OpenDocs()
 	items := make([]list.Item, 0, len(docs))
@@ -300,31 +270,22 @@ func (s *homeScreen) docRows(c *Ctx) []list.Item {
 	return items
 }
 
-// newDocPath resolves a name typed into the rename line edit against base. A name
-// without an extension gets ext (the config's default_extension) — a convenience, not
-// a necessity now that an extensionless file lists fine, but typing "notes" should
-// still land notes.md; "/" in the name nests under base. Absolute names and ones
-// escaping base ("..") are rejected — the line edit must never write outside the doc
-// store.
+// newDocPath resolves a rename name against base. A name without an extension gets ext;
+// "/" nests under base. Absolute names and ".." escapes are rejected: the box must never
+// write outside the doc store.
 func newDocPath(base, name, ext string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", fmt.Errorf("no name given")
 	}
-	// filepath.IsAbs follows the host rules: on Windows it does not consider a
-	// leading slash (for example, "/etc/x") absolute, even though that spelling
-	// is rooted and must not be accepted as a doc-store-relative name. Refuse
-	// either separator and drive/UNC volumes explicitly so names stay confined
-	// to base on every platform.
+	// Refuse rooted names by either separator and drive/UNC volumes explicitly:
+	// filepath.IsAbs on Windows does not treat "/etc/x" as absolute.
 	if filepath.IsAbs(name) || filepath.VolumeName(name) != "" ||
 		strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
 		return "", fmt.Errorf("%q is absolute; give a name relative to the doc store", name)
 	}
-	// A home path is neither absolute nor an escape by the check below, so without this
-	// it would quietly create a directory literally named "~" inside the store. Refused
-	// rather than expanded: these boxes are confined to the doc store by design, and a
-	// file written to ~ would vanish from the list on the next reseed. (The editor's
-	// save-as box is the one that WRITES anywhere, and it does expand "~".)
+	// Refuse "~": it would create a literal "~" directory, and these boxes are confined to the
+	// store (the editor's save-as box is the one that expands it).
 	if strings.HasPrefix(name, "~") {
 		return "", fmt.Errorf("%q is a home path; give a name relative to the doc store", name)
 	}
@@ -352,8 +313,6 @@ func renameDoc(old, newPath string) error {
 	return os.Rename(old, newPath)
 }
 
-// deleteDoc removes a doc from disk — os.Remove, not RemoveAll: the lists hold files,
-// and a directory that somehow reached this call must not take its contents with it.
-// A missing file reports its error, which the confirm shows: the row promised a
-// document, so its absence is news rather than a no-op.
+// deleteDoc removes one file (os.Remove, never RemoveAll). A missing file is an error the
+// confirm reports.
 func deleteDoc(path string) error { return os.Remove(path) }

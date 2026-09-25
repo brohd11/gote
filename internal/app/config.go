@@ -10,58 +10,38 @@ import (
 	"github.com/brohd11/goutil/strutil"
 )
 
-// Config is the parsed ~/.gote/config.yml. A missing file yields the defaults, so a
-// fresh install needs no setup.
-// Nothing is omitempty: the written file is the only place the schema is visible, so
-// every key appears even when its value is empty. An unset extensions list renders as
-// "extensions: []" and an empty vault map as "vaults: {}", which reads as "this key
-// exists and takes a list" rather than not appearing at all.
+// Config is ~/.gote/config.yml; a missing file yields the defaults. Nothing is
+// omitempty, so every key appears in the written file (empty lists as [] and {}).
 type Config struct {
 	Extensions []string `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
 	ScanDepth  int      `yaml:"scan_depth"` // default recursive scan depth (default 5)
 	AutoLSP    bool     `yaml:"auto-lsp"`   // lazily start/connect configured servers for supported files
-	// FolderView opens the sidebar on the folder explorer instead of the flat scan list —
-	// a preset for alt+t, not a mode: the scan still runs and the flat list is still
-	// seeded behind it, so the toggle shows it with nothing left to load.
+	// FolderView starts the sidebar in the folder view instead of the flat scan list (the
+	// alt+t preset); the scan still runs.
 	FolderView bool `yaml:"folder_view"`
 	// OpenDocsView selects the startup presentation; Actions changes only the session.
 	OpenDocsView string `yaml:"open_docs_view"`
 	// IndentGuides makes the editor visualize complete leading indent levels. It is
 	// off by default so existing configs retain the uncluttered rendering.
 	IndentGuides bool `yaml:"indent_guides"`
-	// Project and SingleFile are the per-launch startup toggles. They are two sections
-	// rather than one set of keys because the two launches want opposite answers and
-	// neither is wrong: `gote <file>` is the chrome-less editor and a git column or a
-	// diagnostics gutter is the kind of thing that launch exists to leave out, while the
-	// full editor is where you are working through a project's files and the question
-	// "what have I changed here" is actually being asked.
-	//
-	// They replace the old `git_gutter: on|off|auto` key, whose auto encoded exactly this
-	// per-mode rule in code — somewhere the config file could neither state it nor let it
-	// be changed. A file still carrying that key loads clean; the key is simply ignored,
-	// and `gote config` drops it on the next rewrite.
+	// Project and SingleFile are per-launch startup toggles, separate because the two
+	// launches want opposite defaults: `gote <file>` leaves out the gutters and diagnostics
+	// that a project session wants. A leftover `git_gutter` key is ignored and dropped on the
+	// next `gote config`.
 	Project    ModeDefaults     `yaml:"project_mode"`     // ModeHome, ModeScan, ModeVault
 	SingleFile SingleFileConfig `yaml:"single_file_mode"` // ModeFile
-	// LanguageServers owns transport configuration, while language.go owns which files
-	// use which server. A missing entry receives its built-in transport; Disabled is the
-	// explicit way to suppress one without copying the rest of its defaults.
+	// LanguageServers configures transports (language.go maps files to servers). A missing
+	// entry gets its built-in transport; Disabled turns one off.
 	LanguageServers map[string]LanguageServerConfig `yaml:"language_servers"`
-	// ClickDefinition and ClickContext name the modifier each gesture rides on, because
-	// terminals disagree about which ones they hand over: Terminal.app claims ctrl+click
-	// for its own contextual menu, iTerm2 turns it into a right click before the app sees
-	// it, and shift is reserved almost everywhere for the terminal's own text selection.
-	// A chord that works on one machine can be dead or redundant on the next, so both are
-	// settings rather than constants. "none" turns a gesture off; see clickModifier.
+	// ClickDefinition and ClickContext name each gesture's modifier, since terminals differ
+	// in which modifiers they pass through (Terminal.app and iTerm2 take ctrl+click, shift is
+	// usually selection). "none" disables a gesture.
 	ClickDefinition string `yaml:"click_definition"` // alt (default), ctrl, shift, none
 	ClickContext    string `yaml:"click_context"`    // ctrl (default), alt, shift, none
-	// FormatOnSave asks the language server to format (and organize imports) on every
-	// ctrl+s. The reformat lands just AFTER the write rather than blocking it — see
-	// homeScreen.formatOnSave — so the buffer is left dirty and the next save settles
-	// it. Off by default: a save should not rewrite a buffer until asked.
+	// FormatOnSave formats (and organizes imports) after each ctrl+s. The reformat lands
+	// after the write, leaving the buffer dirty until the next save. Off by default.
 	FormatOnSave bool `yaml:"format_on_save"`
-	// SyntaxColors is the editor's syntax palette. See palette.go for the defaults and
-	// what governs them; highlight_chroma.go and highlight_markdown.go are the two files
-	// that draw with them.
+	// SyntaxColors is the syntax palette (defaults in palette.go).
 	SyntaxColors SyntaxColors           `yaml:"syntax_colors"`
 	Default      string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
 	Vaults       map[string]VaultConfig `yaml:"vaults"`
@@ -76,22 +56,12 @@ const (
 	clickShift = "shift"
 )
 
-// SyntaxColors is one color per highlighted slot, as an ANSI-256 index ("133") or a hex
-// literal ("#af5faf"). It is in the config file rather than only in the code because
-// syntax colors are taste, and the defaults are absolute colors that no terminal scheme
-// adjusts for the user — so the file has to be where they can be adjusted by hand.
-//
-// The first ten slots color source tokens, the Md ones markdown structure; a slot may
-// repeat a color, as Inserted and String do. An empty or unparseable value falls back to
-// its default rather than failing the load (normalizeSyntaxColors), which is also why
-// every key is written out: an unwritten key is one nobody knows they can set.
-//
-// A detected 16-color terminal selects the basic palette at runtime, without changing
-// this configuration. BasicColors also forces that palette on richer terminals.
-// BasicColors overrides all of them with the eight-color ANSI palette gote used before
-// this key existed. Those colors are the terminal's own, so they follow whatever scheme
-// the user runs — the one thing a 256-color palette cannot do. The other keys are left
-// alone while it is set, so turning it off returns the palette the file names.
+// SyntaxColors is one color per slot, as an ANSI-256 index ("133") or hex ("#af5faf"),
+// configurable because colors are taste and 256-color defaults ignore the terminal
+// scheme. The first ten slots are source tokens, the Md ones markdown; an unparseable
+// value falls back to its default. A 16-color terminal gets the basic palette
+// automatically; BasicColors forces it (the terminal's own eight colors, which follow its
+// scheme) without discarding the other keys.
 type SyntaxColors struct {
 	BasicColors bool `yaml:"basic_colors"`
 	// Brackets is the rainbow-bracket cycle. A missing key inherits the defaults because
@@ -118,59 +88,39 @@ type SyntaxColors struct {
 	MdList     string `yaml:"md_list"`
 }
 
-// LanguageServerConfig selects exactly one transport. Address is a TCP endpoint for a
-// server managed elsewhere; Command is an executable followed by its arguments for a
-// stdio server whose process lifetime belongs to gote. InitializationOptions is the
-// server-specific JSON-shaped object sent during the standard LSP handshake.
+// LanguageServerConfig selects one transport: Address (TCP, managed elsewhere) or Command
+// (a stdio server gote runs). InitializationOptions is sent in the LSP handshake.
 type LanguageServerConfig struct {
 	Disabled              bool           `yaml:"disabled"`
 	Address               string         `yaml:"address"`
 	Command               []string       `yaml:"command"`
 	InitializationOptions map[string]any `yaml:"initialization_options,omitempty"`
-	// SemanticTokens overrides how this server's semantic token types land on the syntax
-	// palette, as token-type name to syntax_colors slot name. It is omitempty and normally
-	// absent: the type names are the LSP specification's, so gote's built-in map already
-	// serves every server that speaks them (see semantic_map.go). This is for the
-	// non-standard names a server invents on top — rust-analyzer's builtinType and
-	// lifetime, say. An empty slot value turns a type off rather than painting it.
+	// SemanticTokens maps this server's non-standard semantic token types to syntax_colors
+	// slots (standard LSP names are already mapped, see semantic_map.go). An empty slot turns
+	// a type off.
 	SemanticTokens map[string]string `yaml:"semantic_tokens,omitempty"`
 }
 
-// ModeDefaults are the startup toggles a launch resolves from its mode — what the editor
-// is showing before anything is toggled by hand. Every one of them remains a runtime
-// toggle; these keys decide only where each starts.
-//
-// Booleans rather than a tri-state, because there is nothing left for an "auto" to defer
-// to: the mode question IS which of the two sections is read. They need no unset state
-// either — LoadConfig unmarshals the file OVER DefaultConfig, so a section naming one key
-// keeps the defaults for the rest.
+// ModeDefaults are a launch's startup toggles, each still toggleable at runtime. The file
+// is loaded over DefaultConfig, so a section naming one key keeps the others' defaults.
 type ModeDefaults struct {
 	GitGutter         bool `yaml:"default_git_gutter"`         // draw change markers against HEAD
 	DiagnosticsGutter bool `yaml:"default_diagnostics_gutter"` // draw the LSP severity column
-	// AllowLSP narrows AutoLSP for this launch; the two are ANDed. AutoLSP is the master
-	// switch — "never start a language server" — and this says "not from this kind of
-	// launch". Off means no manager is created at all, which is the same state
-	// `auto-lsp: false` produces, so every LSP-derived row and key falls away with it.
+	// AllowLSP narrows AutoLSP for this launch (they are ANDed); off means no manager at all.
 	AllowLSP bool `yaml:"default_allow_lsp"`
 }
 
-// SingleFileConfig is ModeDefaults plus the one lock only the chrome-less launch has.
-// AllowPanelToggle is not in ModeDefaults because there is no version of the full editor
-// that wants it: the panels are most of what that launch IS.
+// SingleFileConfig is ModeDefaults plus AllowPanelToggle, which only the minimal launch
+// needs.
 type SingleFileConfig struct {
 	ModeDefaults `yaml:",inline"`
-	// AllowPanelToggle keeps the bottom panel and the outline reachable. False is the
-	// minimal launch taken at its word — nano's shape, and no way out of it — so the
-	// panel rows leave the Actions and right-click menus and alt+\, alt+o and ctrl+alt+f
-	// stop firing. The ? overlay still lists them, marked off and naming this key: a
-	// binding that silently vanished would read as a gote bug rather than as a setting.
-	// Find in files is locked with them because a result forces the bottom panel open.
+	// AllowPanelToggle keeps the bottom panel and outline reachable. False drops their menu
+	// rows and disables alt+\, alt+o and ctrl+alt+f (find in files opens the panel). The ?
+	// overlay still lists them, marked off with this key's name.
 	AllowPanelToggle bool `yaml:"allow_panel_toggle"`
 }
 
-// modeDefaults picks the section a launch reads. It is the single place the mode-to-section
-// mapping lives, so a new consumer cannot disagree with the existing ones about which
-// launches count as "project".
+// modeDefaults picks the section a launch reads; the one place mode maps to section.
 func (c Config) modeDefaults(mode Mode) ModeDefaults {
 	if mode == ModeFile {
 		return c.SingleFile.ModeDefaults
@@ -178,29 +128,19 @@ func (c Config) modeDefaults(mode Mode) ModeDefaults {
 	return c.Project
 }
 
-// Filter is the discovery filter the config asks for: the configured extensions, or
-// the zero DocFilter (any text file) when none are set. The --ext flag overrides it,
-// which Ctx.New applies.
+// Filter is the configured extensions filter (any text file when unset). --ext overrides
+// it.
 func (c Config) Filter() DocFilter { return NewDocFilter(c.Extensions) }
 
-// VaultConfig is one named document root. Session state deliberately does NOT live
-// here: config.yml is a file the user edits and may commit to a dotfiles repo, so what
-// gote writes for itself between runs goes to StateDir instead (see session.go).
+// VaultConfig is one named document root. Session state lives in StateDir, not in the
+// user-edited config.
 type VaultConfig struct {
 	Path string `yaml:"path"`
 }
 
-// DefaultConfig is what a missing ~/.gote/config.yml means, and — since EnsureConfig
-// writes exactly this — what a fresh one says. Extensions is left nil on purpose:
-// unconfigured, gote lists every text file it finds, and narrowing that is the opt-in.
-// (Nil rather than an empty slice because normalizeExts collapses an empty list back to
-// nil, and a loaded config must still equal this one.) ScanDepth is the depth `gote here`
-// (and a bare directory argument) scans to when none is given on the command line — deep
-// enough that a project's docs turn up without asking for it.
-//
-// Default names the home store it already resolves to, so seeding it changes nothing
-// about how gote launches (resolveDefault maps that path back to ModeHome). It is there
-// to show the user the key exists and what shape its value takes.
+// DefaultConfig is what a missing config means and what EnsureConfig writes. Extensions
+// is nil (list every text file); ScanDepth is the default depth for `gote here` and bare
+// directories. Default names the home store it already resolves to, to show the key.
 func DefaultConfig() Config {
 	return Config{
 		ScanDepth:    5,
@@ -231,23 +171,11 @@ func defaultLanguageServers() map[string]LanguageServerConfig {
 		"typescript": {Command: []string{"typescript-language-server", "--stdio"}},
 		"go": {
 			Command: []string{"gopls"},
-			// completeFunctionCalls off makes an accepted completion insert the name and
-			// nothing else. The parens are worth giving up because the parameter hint
-			// fires on a TYPED trigger character: when gopls supplies "()" itself, no "("
-			// keypress ever happens and the hint never appears for the call you just
-			// completed. Typing it yourself pairs the bracket and raises the hint, which
-			// is the whole point of having one.
-			//
-			// usePlaceholders is moot while calls are not completed at all, and is spelled
-			// out anyway so turning calls back on does not also bring back a completion
-			// that types "Sprintf(format string, a ...any)" into the buffer as literal
-			// text — abandoning that tab cycle leaves the signature in the code.
-			// semanticTokens is gopls's own switch and not the LSP capability gote
-			// declares at initialize; gopls defaults it to false and returns no
-			// SemanticTokensProvider at all without it, so both are required. Note this
-			// only reaches a config that has no initialization_options of its own —
-			// LoadConfig fills the fallback wholesale rather than merging keys — so a
-			// user with custom go options here must add it by hand.
+			// completeFunctionCalls off inserts just the name: typing the "(" yourself raises the
+			// signature hint, which a server-supplied "()" never would. usePlaceholders stays off so
+			// re-enabling calls does not insert literal signatures. semanticTokens is gopls's own
+			// switch (it returns no provider without it). These defaults only apply when the user's
+			// config sets no initialization_options for go.
 			InitializationOptions: map[string]any{
 				"completeFunctionCalls": false,
 				"usePlaceholders":       false,
@@ -273,9 +201,8 @@ func Dir() (string, error) {
 	return configdir.Dir("gote")
 }
 
-// DocsDir is ~/.gote/docs, the home-mode document store. It sits one level below the
-// config home on purpose: discovery takes any text file, so a store flat in ~/.gote
-// would list gote's own config.yml as a document.
+// DocsDir is ~/.gote/docs, the home store; one level down so ~/.gote's own config.yml is
+// not listed as a document.
 func DocsDir() (string, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -284,11 +211,8 @@ func DocsDir() (string, error) {
 	return filepath.Join(dir, "docs"), nil
 }
 
-// StateDir is ~/.gote/state, where gote keeps what it writes for ITSELF between runs
-// rather than for the user to edit. It is a subdirectory, not a file beside config.yml,
-// so a ~/.gote that gets checked into a dotfiles repo can exclude the volatile half with
-// a single ignore line — and so home-mode discovery, which lists ~/.gote/docs, never has
-// a reason to walk it.
+// StateDir is ~/.gote/state, what gote writes for itself between runs. A subdirectory, so
+// a dotfiles repo can ignore it with one line.
 func StateDir() (string, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -307,9 +231,7 @@ func ConfigPath() (string, error) {
 	return filepath.Join(dir, "config.yml"), nil
 }
 
-// EnsureConfig returns the config path, materializing a defaults file first when none
-// exists. `gote config` on a fresh install should open the real schema to edit, not an
-// empty buffer that gives no hint what belongs in it.
+// EnsureConfig returns the config path, writing the defaults first when missing.
 func EnsureConfig() (string, error) {
 	path, err := ConfigPath()
 	if err != nil {
@@ -323,16 +245,9 @@ func EnsureConfig() (string, error) {
 	return path, nil
 }
 
-// SyncConfig materializes the config file and then rewrites it from itself, so a file
-// written before a key existed gains that key. EnsureConfig alone cannot do this: it
-// writes only when the file is MISSING, which leaves anyone who configured gote before a
-// release with no way to discover — or edit — what that release added.
-//
-// A malformed file is left exactly as it is. LoadConfig answers a parse error with the
-// defaults, and writing those back would destroy the config the user is on their way to
-// go fix; the path is still returned so `gote config` opens the broken file rather than
-// refusing. The cost of the rewrite is that hand-written YAML is reformatted, which is
-// why only `gote config` calls this and a launch does not.
+// SyncConfig ensures the config and rewrites it from itself, so keys added since it was
+// written appear. A malformed file is left alone (its path still returned). The rewrite
+// reformats hand-written YAML, so only `gote config` calls it.
 func SyncConfig() (string, error) {
 	path, err := EnsureConfig()
 	if err != nil {
@@ -353,9 +268,8 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	// Load unmarshals over the defaults, so keys the file omits keep them. A missing file
-	// is not an error and leaves them all in place; a malformed one may have half-written
-	// cfg before failing, so the defaults are rebuilt rather than returned half-parsed.
+	// Load over the defaults so omitted keys keep them; after a parse error, rebuild the
+	// defaults rather than return a half-parsed config.
 	if err := configdir.Load(path, &cfg); err != nil {
 		return DefaultConfig(), err
 	}
@@ -387,16 +301,13 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
-// normalizeExtensions puts the extensions key into the canonical shape NewDocFilter
-// defines, so a Config compares and round-trips as whatever it meant rather than as
-// whatever it was typed as.
+// normalizeExtensions puts extensions into NewDocFilter's canonical shape, so configs
+// compare and round-trip by meaning.
 func normalizeExtensions(cfg *Config) {
 	cfg.Extensions = normalizeExts(cfg.Extensions)
 }
 
-// SaveConfig writes the complete gote config atomically — a failed write cannot truncate
-// a working config. The atomic-write mechanics are goutil/configdir's (ported from this
-// very function when the four apps' copies were collapsed into one).
+// SaveConfig writes the whole config atomically.
 func SaveConfig(cfg Config) error {
 	dir, err := Dir()
 	if err != nil {
@@ -405,12 +316,8 @@ func SaveConfig(cfg Config) error {
 	return configdir.SaveAtomic(dir, "config.yml", cfg)
 }
 
-// resolveVaultPath accepts the shell-friendly forms users type into the New Vault form
-// and returns the stable absolute path stored in YAML. Tilde handling is the shared
-// strutil.ExpandHome's — only the current user's home shorthand is expanded and
-// ~other-user is rejected rather than guessed — and the required/absolute checks around
-// it are this form's own. Nothing here touches the filesystem: New Vault resolves a path
-// it is about to create, so existence is a separate question from spelling.
+// resolveVaultPath turns a typed path into the absolute path stored in YAML (~ expanded,
+// ~user rejected). It does not touch the filesystem: New Vault may be about to create it.
 func resolveVaultPath(raw string) (string, error) {
 	p := strings.TrimSpace(raw)
 	if p == "" {
@@ -427,9 +334,7 @@ func resolveVaultPath(raw string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-// normalizeDirPath is resolveVaultPath plus the must-already-be-a-directory check that
-// every reader of a configured root wants: a vault (or a default) whose directory has
-// gone missing is a problem to report, not one to paper over.
+// normalizeDirPath is resolveVaultPath plus a must-be-a-directory check.
 func normalizeDirPath(raw string) (string, error) {
 	abs, err := resolveVaultPath(raw)
 	if err != nil {
@@ -445,10 +350,8 @@ func normalizeDirPath(raw string) (string, error) {
 	return abs, nil
 }
 
-// ensureVaultDir adopts an existing folder and creates a missing one, parents included,
-// so New Vault does not send the user out to a shell to mkdir first. A path naming a
-// file is still refused, and refused in this package's words rather than as MkdirAll's
-// ENOTDIR.
+// ensureVaultDir creates a missing folder (with parents) or adopts an existing one; a
+// file is refused with a clear message.
 func ensureVaultDir(abs string) error {
 	info, err := os.Stat(abs)
 	switch {

@@ -10,26 +10,14 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
-// Syntax coloring for the source files gote gets pointed at in scan mode. It lives here
-// rather than in bubblestack because languageForPath is gote's language authority;
-// bubblestack receives only a language-neutral Highlighter factory. Markdown has its
-// own goldmark highlighter beside this file because headings and emphasis are document
-// structure rather than source tokens.
-//
-// Chroma is the right tokenizer for this because it is lossless — the Values of the
-// tokens it emits concatenate back to the exact input — which is precisely the contract
-// editor.Span demands (the editor drops to a plain render for any line whose spans
-// don't reconstruct it). Nothing here goes near chroma's formatters: those exist to
-// write ANSI, and the editor needs styled *runs*, which it composites itself.
+// Syntax coloring for source files, here rather than in bubblestack because
+// languageForPath is gote's language authority (bubblestack only gets a Highlighter
+// factory). Markdown has its own goldmark highlighter. Chroma suits the editor because it
+// is lossless: token values concatenate back to the input, as editor.Span requires. Its
+// ANSI formatters are not used.
 
-// The palette. The colors are Config.SyntaxColors' — 256 by default, per-slot settable
-// in ~/.gote/config.yml, and revertible to the terminal's own eight with basic_colors —
-// so these are vars an apply function writes rather than constants. See palette.go for
-// how the defaults are chosen and why they are not theme-derived.
-//
-// Only the colors are configurable. Bold and italic stay here because they mark structure
-// rather than palette: a keyword is emphatic and a comment is an aside whatever color
-// either one is wearing.
+// The palette, written from Config.SyntaxColors (see palette.go). Only colors are
+// configurable; bold and italic mark structure (a keyword is emphatic whatever its color).
 var (
 	chKeywordStyle  lipgloss.Style
 	chTypeStyle     lipgloss.Style
@@ -45,24 +33,13 @@ var (
 	chErrorStylePtr *lipgloss.Style
 )
 
-// NameBuiltin is deliberately a function and not a type: it is what chroma tags Go's
-// append/make and GDScript's print, which are called, not declared. It wore the type
-// color once and made every builtin call look like a class name.
-//
-// chromaStyles maps token types to styles. Only coarse types are listed; styleFor walks
-// a token up to its sub-category and category, so every one of chroma's ~200 leaf types
-// resolves to one of these or to nothing (an unstyled run, which is correct for plain
-// text, punctuation and whitespace — coloring everything colors nothing).
-// The map holds POINTERS, and applyChromaPalette allocates fresh ones every time it
-// rebuilds: editor.Span carries the style by reference now (a lipgloss.Style is ~650
-// bytes and a parsed document is millions of spans), so spans baked before a palette
-// change must keep pointing at the palette they were baked with rather than having it
-// change under them.
+// chromaStyles maps coarse token types to styles; styleFor walks leaf types up to them, and
+// anything else is unstyled (plain text, punctuation, whitespace). It holds pointers, and
+// applyChromaPalette allocates fresh ones on every rebuild, so spans baked earlier keep
+// their palette. NameBuiltin is styled as a function: builtins like append are called.
 var chromaStyles map[chroma.TokenType]*lipgloss.Style
 
-// applyChromaPalette rebuilds the styles above from p, and chromaStyles with them: the
-// map holds style values, not pointers, so reassigning the vars alone would leave every
-// token still wearing the palette this replaced.
+// applyChromaPalette rebuilds the styles from p, and chromaStyles with fresh pointers.
 func applyChromaPalette(p syntaxPalette) {
 	chKeywordStyle = lipgloss.NewStyle().Foreground(p.keyword).Bold(true)
 	chTypeStyle = lipgloss.NewStyle().Foreground(p.typ)
@@ -115,15 +92,9 @@ func applyChromaPalette(p syntaxPalette) {
 // wholesale without writing through to spans that already reference it.
 func styleRef(st lipgloss.Style) *lipgloss.Style { return &st }
 
-// styleFor resolves a token type to a style, falling back through chroma's own
-// hierarchy: the exact type, then its sub-category (LiteralStringDouble → LiteralString),
-// then its category (NameVariableGlobal → Name). A miss is nil, which the editor renders
-// unstyled — and, since the render path can skip lipgloss entirely for an unstyled run,
-// answering nil rather than a zero Style is worth something now.
-//
-// Deliberately not memoized: Parse runs on a background goroutine for the exact snapshot
-// and on the UI goroutine for the keystroke preview, so a cache filled on read would be a
-// data race. Three map lookups are not what makes a parse expensive.
+// styleFor resolves a token type through chroma's hierarchy (exact type, sub-category,
+// category); nil means unstyled, which lets the render skip lipgloss. Not memoized: Parse
+// runs on both the UI and a background goroutine.
 func styleFor(tt chroma.TokenType) *lipgloss.Style {
 	for _, t := range []chroma.TokenType{tt, tt.SubCategory(), tt.Category()} {
 		if st, ok := chromaStyles[t]; ok {
@@ -133,9 +104,9 @@ func styleFor(tt chroma.TokenType) *lipgloss.Style {
 	return nil
 }
 
-// chromaHighlighter is the editor.Highlighter chroma backs. Parse tokenizes the
-// whole document and bakes per-line spans; HighlightLine is then a lookup. The lexer is
-// fixed at construction (the language profile chooses it), so no per-parse detection.
+// chromaHighlighter backs editor.Highlighter with chroma: Parse tokenizes the document
+// into per-line spans, and HighlightLine looks them up. The lexer is fixed by the
+// language profile.
 type chromaHighlighter struct {
 	lexer       chroma.Lexer
 	lines       [][]editor.Span
@@ -153,9 +124,7 @@ type bracketPos struct {
 	row, span int
 }
 
-// bracketFrame is a persistent stack node. Per-row checkpoints can all point into the
-// same immutable chain, so a large document pays one node per opener rather than copying
-// its whole nesting stack on every line.
+// bracketFrame is a persistent stack node, so per-row checkpoints share one chain.
 type bracketFrame struct {
 	close  rune
 	depth  int
@@ -169,10 +138,8 @@ func chromaHighlighterFactory(lexer chroma.Lexer) func() editor.Highlighter {
 	return func() editor.Highlighter { return &chromaHighlighter{lexer: lexer} }
 }
 
-// NewHighlightPreview returns an independent Chroma adapter carrying the exact bracket
-// stack at snapshotLine. Lexical state still comes from parsing at the restart row the
-// editor selected; this seed supplies the orthogonal nesting state without replaying from
-// the outermost bracket.
+// NewHighlightPreview returns an independent highlighter seeded with the bracket stack at
+// snapshotLine; lexical state still comes from the editor's restart row.
 func (h *chromaHighlighter) NewHighlightPreview(snapshotLine int) editor.Highlighter {
 	var seed *bracketFrame
 	if snapshotLine >= 0 && snapshotLine < len(h.bracketAt) {
@@ -181,23 +148,11 @@ func (h *chromaHighlighter) NewHighlightPreview(snapshotLine int) editor.Highlig
 	return &chromaHighlighter{lexer: h.lexer, bracketSeed: seed, fragment: true}
 }
 
-// registerPatchedGDScript repairs a defect in Chroma's own GDScript lexer, in place, by
-// re-registering a patched copy under the same name. The lexer's `classname` state — the
-// one `extends` pushes — accepts a bare identifier and nothing else, so the path form
-//
-//	extends "res://my_file.gd"
-//
-// dead-ends on the opening quote: Chroma emits a one-rune Error for it and stays in the
-// state, `res` then satisfies the identifier rule and pops, and the CLOSING quote is what
-// finally opens a string — swallowing the rest of the document, comments included, until
-// some later quote happens to close it. Adding the quoted form to the state fixes it at
-// the source, so both the editor buffer and a fenced preview block inherit the fix from
-// the one registry lookup each already does.
-//
-// This is upstream's bug, not a policy of gote's: gdscript.xml has been untouched since
-// 2023 and the open Godot-4.7 PR does not go near this state. If a future Chroma
-// restructures `classname` the patch stops applying cleanly and the tests say so; the
-// right response then is to delete this function.
+// registerPatchedGDScript fixes Chroma's GDScript lexer, re-registered under the same
+// name: its `classname` state (after `extends`) accepts only an identifier, so
+// `extends "res://my_file.gd"` opens a string at the closing quote and swallows the rest
+// of the file. If a future Chroma changes `classname`, the tests fail and this function
+// should be deleted.
 func registerPatchedGDScript() {
 	base, ok := lexers.Get("gdscript").(*chroma.RegexLexer)
 	if !ok {
@@ -209,31 +164,18 @@ func registerPatchedGDScript() {
 	}
 	// Clone before touching it: Rules hands back the registry lexer's own map.
 	rules = rules.Clone()
-	// Prepended, so `extends Node` still reaches the identifier rule below. Both patterns
-	// consume at least one rune — a zero-width "pop on anything" guard would leave the
-	// lexer's position unmoved and spin forever — and both stop at a newline, which leaves
-	// an unterminated quote on Chroma's existing error path, where hitting the '\n' resets
-	// the stack to root and keeps the damage on one line.
+	// Prepended so `extends Node` still reaches the identifier rule. Both patterns consume at
+	// least one rune (a zero-width rule would loop) and stop at a newline, where Chroma's
+	// error path resets an unterminated quote.
 	rules["classname"] = append([]chroma.Rule{
 		{Pattern: `"(?:\\.|[^"\\\n])*"`, Type: chroma.LiteralStringDouble, Mutator: chroma.Pop(1)},
 		{Pattern: `'(?:\\.|[^'\\\n])*'`, Type: chroma.LiteralStringSingle, Mutator: chroma.Pop(1)},
 	}, rules["classname"]...)
 
-	// Chroma types only the engine classes it ships a list of, so a project's own classes,
-	// autoload singletons and enum type names fall through to root's `[a-zA-Z_]\w*`
-	// catch-all and render unstyled. This rule claims them for the same NameClass the
-	// engine list uses — a user class is a type, and reads as one.
-	//
-	// The lowercase in the middle is what separates PascalCase from CONSTANT_CASE: MyClass,
-	// Node2D and HTTPManager match, MAX_SPEED, AABB and a lone X do not. The trailing \w*
-	// is greedy, so a match always spans the whole identifier rather than a prefix. The
-	// lookbehind blocks a mid-identifier match but deliberately allows one after '.', so
-	// Game.PlayerState colors — which is how the engine list already behaves for Foo.Node.
-	//
-	// It goes ahead of root's call rule so `MyClass.new()` and `MyClass(…)` read as a type
-	// rather than a function, matching `Vector2(1, 2)`, whose engine-list rule already
-	// outranks that call rule. Everything above the anchor — keywords, annotations,
-	// operators, the class/extends rules, the engine types, builtins, numbers — still wins.
+	// Chroma only types the engine classes it lists, so user classes, autoloads and enums
+	// render plain. This rule styles PascalCase identifiers (a lowercase letter inside
+	// separates them from CONSTANT_CASE) as NameClass, including after "." (Game.PlayerState),
+	// and runs before the call rule so MyClass.new() reads as a type.
 	const callRule = `(\b[a-zA-Z_]\w*)([(])`
 	for i, rule := range rules["root"] {
 		if rule.Pattern != callRule {
@@ -249,13 +191,8 @@ func registerPatchedGDScript() {
 	lexers.Register(chroma.MustNewLexer(base.Config(), func() chroma.Rules { return rules }))
 }
 
-// Parse tokenizes doc and splits the token stream into per-line spans. Tokens cross line
-// boundaries — a block comment is one token, a string may contain newlines — so each
-// token's Value is cut on '\n' and its pieces distributed, which is what turns chroma's
-// flat stream into the row-addressed answer the editor asks for.
-//
-// A tokenizer error leaves lines nil: HighlightLine then answers nothing for every row
-// and the buffer renders plain, the same as a profile with no highlighter.
+// Parse tokenizes doc and splits tokens across lines into per-row spans. A tokenizer error
+// leaves no spans, and the buffer renders plain.
 func (h *chromaHighlighter) Parse(doc string) {
 	h.lines = nil
 	h.restart = nil
@@ -289,9 +226,8 @@ func (h *chromaHighlighter) Parse(doc string) {
 		parts := strings.Split(tok.Value, "\n")
 		for i, part := range parts {
 			if i > 0 {
-				// Every '\n' in the token closes the current row. Some lexers append a
-				// trailing newline of their own (Config.EnsureNL), so this can walk one
-				// row past the buffer — the append below is guarded for it.
+				// Each '\n' closes a row; some lexers add a trailing newline, so the row can run one past
+				// the buffer (the append below guards for it).
 				row++
 				if row < len(h.bracketAt) {
 					h.bracketAt[row] = stack
@@ -369,9 +305,8 @@ func rainbowCloser(r rune) (rune, bool) {
 	}
 }
 
-// chromaRestartFamily joins adjacent token leaves that are still part of one string or
-// comment. Coalesce already handles identical leaves; grouping their token hierarchy as
-// well keeps escapes/interpolation attached to the opening delimiter in common lexers.
+// chromaRestartFamily groups adjacent leaves of one string or comment, keeping escapes and
+// interpolation with the opening delimiter.
 func chromaRestartFamily(tt chroma.TokenType) int {
 	if tt.InSubCategory(chroma.LiteralString) {
 		return 1
@@ -406,14 +341,9 @@ func (h *chromaHighlighter) HighlightRestartLine(row int) int {
 	return h.restart[row]
 }
 
-// chromaExts are the extensions gote hands to Chroma. A curated list rather than every
-// filename pattern Chroma knows: these are what a scan-mode gote actually opens, and
-// adding a profile is one line. Anything not listed keeps rendering plain.
-//
-// Two exclusions are deliberate. ".md"/".markdown" use gote's structural Markdown
-// highlighter. Files Chroma matches by whole name rather than extension — Makefile,
-// Dockerfile — currently resolve to literal editing because this seam is path-extension
-// based; they still list and edit normally.
+// chromaExts are the extensions gote hands to Chroma; anything else renders plain. Markdown
+// uses gote's own highlighter, and whole-name files (Makefile, Dockerfile) are not matched
+// by extension, so they edit literally.
 var chromaExts = []string{
 	".go", ".py", ".rb", ".rs", ".java", ".lua", ".php", ".pl", ".r",
 	".js", ".jsx", ".ts", ".tsx",

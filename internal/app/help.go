@@ -11,9 +11,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// helpScreen is the pushed "?" overlay: a scrollable doc listing gote's shortcuts,
-// grouped. Summoned with ? while nothing is capturing text, or alt+? from anywhere —
-// the editor included, since a modified key passes the capture gate. esc pops back.
+// helpScreen is the "?" overlay: gote's shortcuts, grouped, in a scrollable page. ? opens
+// it when nothing captures text; alt+? works anywhere, the editor included.
 func (s *homeScreen) helpScreen() *components.DocScreen {
 	return components.NewDocScreen(components.DocOpts{
 		Title: "gote · shortcuts",
@@ -24,10 +23,8 @@ func (s *homeScreen) helpScreen() *components.DocScreen {
 	})
 }
 
-// clickHelp names the two modifier-click gestures. They are described rather than listed
-// as bindings because they are configured (click_definition / click_context) and because
-// a terminal may claim either one before gote sees it — so the line says what gote is
-// listening for, not what will certainly happen.
+// clickHelp describes the two modifier-click gestures in prose: they are configurable, and
+// a terminal may claim either before gote sees it.
 func clickHelp(sh *core.Shared) string {
 	if sh == nil {
 		return ""
@@ -46,35 +43,18 @@ func clickHelp(sh *core.Shared) string {
 	return "mouse: " + strings.Join(parts, " · ") + "\n"
 }
 
-// disabledKey restates a binding with the setting that turned it off. A locked key is
-// LISTED here rather than dropped: this overlay is the complete reference, and a binding
-// that silently vanished would read as a gote bug rather than as a configuration the user
-// chose — while one left unmarked would promise a key that does nothing.
-//
-// The keycodes are carried over so the entry still matches, which is what lets a caller
-// pass the result anywhere the live binding would have gone.
+// disabledKey restates a binding with the setting that disabled it. Locked keys are listed
+// and marked rather than dropped, since this page is the complete reference. The keycodes
+// carry over so the entry still matches.
 func disabledKey(b key.Binding, why string) key.Binding {
 	h := b.Help()
 	return key.NewBinding(key.WithKeys(b.Keys()...),
 		key.WithHelp(h.Key, h.Desc+" — off ("+why+")"))
 }
 
-// disabledKeys is disabledKey over a group, for a whole section that one setting silences.
-func disabledKeys(why string, binds ...key.Binding) []key.Binding {
-	out := make([]key.Binding, 0, len(binds))
-	for _, b := range binds {
-		out = append(out, disabledKey(b, why))
-	}
-	return out
-}
-
-// helpText renders the overlay's body. This is the COMPLETE reference, not the overflow
-// from the deliberately four-entry contextual bar, so anything omitted there must live
-// here. The editor section comes from the live editor's own
-// HelpBindings, so its chords are stated once (in bubblestack).
-//
-// The key column is 19 wide because "ctrl+alt+backspace" is 18 — every label here spells
-// its modifier out rather than using ⌥, so the widest entry sets the column.
+// helpText renders the complete reference (the bar shows only four entries). The editor
+// section comes from the editor's own HelpBindings. The key column fits
+// "ctrl+alt+backspace".
 func (s *homeScreen) helpText() string {
 	var b strings.Builder
 	writeSection := func(name string, binds []key.Binding) {
@@ -85,12 +65,8 @@ func (s *homeScreen) helpText() string {
 		}
 		b.WriteString("\n")
 	}
-	// Navigation is built from the same helpers the bar builds itself from
-	// (ModularScreen.HelpView, ListPanel.PanelHelp), so rebinding any of them reaches
-	// this overlay rather than leaving it quietly stale. The first three are the entries
-	// the bar still shows; they are listed anyway so this page stands alone. The last three
-	// are not on the bar — "/" and the g/G jumps are commands rather than navigation, and
-	// the esc toggle is gote's own (editorRelease) — so this is their only home.
+	// Built from the same helpers as the bar so rebinds reach this page. "/", g/G and the esc
+	// toggle are not on the bar, so this is their only listing.
 	writeSection("navigation", []key.Binding{
 		core.PaneHint(),
 		core.Hint("back", core.Keys.Back),
@@ -99,15 +75,11 @@ func (s *homeScreen) helpText() string {
 		core.Hint("filter", s.docsPanel.List().KeyMap.Filter),
 		core.Hint("top/bottom", core.Keys.Top, core.Keys.Bottom),
 	})
-	// The quit row is assembled from the shared keymap rather than spelled out, so
-	// rebinding core.Keys.Quit reaches this overlay too. ctrl+c is not in that keymap —
-	// the router answers it directly (bubblestack/core/router_keys.go) — so it is named
-	// here alongside. The description is gote's own: quitting dirty prompts first.
+	// From the shared keymap so rebinding Quit reaches here; ctrl+c is the router's own.
 	quitKey := core.Hint("quit (confirms unsaved changes)",
 		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
-	// The panel lock and a missing language server silence keys rather than remove them,
-	// so the entries are marked with the setting responsible (disabledKey) instead of being
-	// dropped from the page.
+	// Keys silenced by the panel lock or a missing language server are marked with the
+	// responsible setting (disabledKey).
 	panelLock, lspOff := "", ""
 	if !s.panelToggles {
 		panelLock = "single_file_mode.allow_panel_toggle"
@@ -134,15 +106,9 @@ func (s *homeScreen) helpText() string {
 	if !s.minimal {
 		b.WriteString("[ / ]: previous/next document outside text entry; Actions switches Open between list and tabs.\n\n")
 	}
-	// These act on the selected row, so they are the docs list's keys rather than the
-	// screen's — and, off the bar, this is the only place they are written down.
-	// The language-server section. These fire from the editor (they all carry a
-	// modifier, so they reach this screen ahead of the pane) and do nothing anywhere
-	// else, which is why they are their own group rather than more "general" rows.
-	// Two gates over one section. symbolsKey is listed here because alt+o is one of the
-	// editor's modified chords, but what it opens is a panel, so the lock is its nearer
-	// cause and takes precedence. jumpBackKey is marked by NEITHER: find-in-files pushes
-	// onto the same stack (jumpToLocation), so ctrl+o outlives the language server.
+	// Language-server keys fire from the editor only. The outline key opens a panel, so the
+	// panel lock takes precedence over the LSP gate; jump-back is never marked, since
+	// find-in-files uses the same stack.
 	outlineOff := lspOff
 	if panelLock != "" {
 		outlineOff = panelLock
@@ -152,9 +118,7 @@ func (s *homeScreen) helpText() string {
 		mark(hoverKey, lspOff), mark(symbolsKey, outlineOff), mark(referencesKey, lspOff),
 		mark(formatKey, lspOff),
 	})
-	// One prose line rather than a mark on each of the ~15 rows in the three sections
-	// below: they describe keys INSIDE panels this launch cannot summon, so the fact worth
-	// stating once is that the panels are unreachable, not that each of their keys is.
+	// One line instead of marking the ~15 keys inside panels this launch cannot open.
 	if panelLock != "" {
 		b.WriteString("The outline, bottom panel and find-in-files sections below are off for this launch\n" +
 			"(" + panelLock + "); their keys are kept here for reference.\n\n")

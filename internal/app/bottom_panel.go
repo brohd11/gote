@@ -16,9 +16,8 @@ const (
 	bottomTabsWidth = 2 + len("Diag") + 2 + len("Search")
 )
 
-// bottomDock is one ModularScreen panel with two retained children. Each child draws
-// its ordinary full frame; the dock lays its compact selector over the bottom border,
-// leaving the descriptive top title and the child's viewport geometry untouched.
+// bottomDock is one panel holding two children, each drawing its own frame; the dock
+// draws its tab selector over the bottom border.
 type bottomDock struct {
 	tabs          *components.TabBar
 	diagnostics   *diagnosticsPanel

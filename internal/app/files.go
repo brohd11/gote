@@ -14,9 +14,8 @@ import (
 
 // Document operations driven from the docs list: opening, renaming and deleting files.
 
-// filePanelOpts wires the folder view. It is the same set of verbs the flat docs list
-// has — open, rename, delete — pointed at one directory instead of a whole scan:
-// the panel owns walking into folders, gote owns what a FILE row means.
+// filePanelOpts wires the folder view with the flat list's verbs (open, rename, delete);
+// the panel walks folders and gote handles file rows.
 func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 	root := docsRoot(c)
 	return components.FilePanelOpts{
@@ -47,11 +46,8 @@ func (s *homeScreen) descendFolder(sh *core.Shared) core.Action {
 	return s.filePanel.SetDir(sh, e.Path)
 }
 
-// fileKey is the folder view's row keys, docsKey's counterpart: the same ctrl+r rename and
-// ctrl+d delete, over an entry instead of a seeded DocFile. Root is the entry's own
-// directory, which is what makes the rename box open on a bare name here — in the flat
-// list the name it prefills carries the path down from the scan root, because that is the
-// context that list shows.
+// fileKey is the folder view's ctrl+r rename and ctrl+d delete. Root is the entry's own
+// directory, so the rename box opens on a bare name.
 func (s *homeScreen) fileKey(sh *core.Shared, k string, e components.FileEntry) (core.Action, bool) {
 	if e.IsDir {
 		return core.Action{}, false
@@ -78,15 +74,12 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 	return s.openDoc(sh, di.doc.Path)
 }
 
-// openDoc switches the editor pane to path and moves focus to it. An already-open doc is
-// a switch, not an open: Ctx.OpenDoc hands back the existing editor and the pane swap
-// leaves it exactly as it stands — unsaved edits, cursor, scroll and undo history all
-// intact — because EditorScreen reads its file only on the first Init.
+// openDoc switches the editor pane to path and focuses it. An open doc is just switched
+// to, keeping its edits, caret and history (editors read their file only once).
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
-	// Asked BEFORE OpenDoc, which memoizes — afterwards every doc looks open. A buffer new
-	// to the open set has to be seeded by hand while the reader holds the pane, or its
-	// async load reaches nothing (seedForPreview).
+	// Asked before OpenDoc, which registers the doc. A newly opened doc must be seeded by hand
+	// while the reader holds the pane (seedForPreview).
 	_, was := c.Doc(path)
 	ed := c.OpenDoc(path, s.editorOpts(c))
 	s.seedForPreview(ed, path, !was || c.unread(path))
@@ -122,14 +115,9 @@ func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 	return core.Async(tea.Batch(cmd, focus))
 }
 
-// rowLineEdit builds a floating line edit sitting exactly over the selected docs row —
-// for renaming. Anchor math: the docs panel is
-// column 0 row 0 of the layout, so its outer top-left is (0, BodyY); RowY gives the row
-// WITHIN the panel (its border, and its filter line when one is live), and the LineEdit
-// anchor sits one row above the row it covers, since it draws its own top border there.
-// The panel owns that offset rather than this file assuming it: the filter line makes it
-// vary, and it used to cancel against the border exactly. x=0 and the live sidebar
-// width land the box's borders exactly on the panel's own.
+// rowLineEdit builds a line edit over the selected docs row for renaming. The docs panel
+// is at (0, BodyY); RowY gives the row within the panel, and the anchor is one row above
+// (the box draws its own top border). The box spans the sidebar width.
 func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
 	pane := s.docsPane()
@@ -142,10 +130,8 @@ func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	return edit
 }
 
-// docsKey is the docs panel's OnKey (ListPanelOpts.OnKey): ctrl+r renames the selected
-// doc, ctrl+d deletes it. The hook fires only while the panel is focused and only when it
-// is not running a /-filter, so neither the editor nor a filter query can lose either
-// chord. Reporting false hands the key back to the list when there is no document.
+// docsKey is the docs panel's OnKey: ctrl+r renames, ctrl+d deletes. It only fires while
+// the panel is focused and not filtering.
 func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Action, bool) {
 	di, ok := it.(docItem)
 	if !ok {
@@ -160,9 +146,8 @@ func (s *homeScreen) docsKey(sh *core.Shared, k string, it list.Item) (core.Acti
 	return core.Action{}, false
 }
 
-// renameFile pushes a row-anchored line edit prefilled with the
-// doc's path relative to its origin root — so editing the directory part moves the file
-// as well as renaming it.
+// renameFile opens a rename box prefilled with the doc's path relative to its root, so
+// editing the directory part moves the file.
 func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
 	rel := docRel(doc)
 	edit := s.rowLineEdit(sh, "new name",
@@ -171,17 +156,10 @@ func (s *homeScreen) renameFile(sh *core.Shared, doc DocFile) core.Action {
 	return core.Push(edit)
 }
 
-// submitRename is the rename box's OnDone: resolve the typed path against the doc's
-// own root, move the file, then catch the app up with where it now lives. Blank input
-// and an unchanged name cancel quietly. Errors surface as a popup swapped in over the
-// line edit, so the overlay's stack depth holds.
-//
-// A doc that is OPEN needs three things pointed at the new path, and each is the only
-// home of one fact: the editor knows where to save (SetPath, which also moves its title
-// and re-picks the highlighter for a changed extension), the ctx keys the open set by
-// path (RekeyDoc — the same call a save-as makes), and the screen tracks which doc the
-// pane is showing. The buffer itself is never touched, so unsaved edits and undo
-// history survive a rename exactly as they survive a save-as.
+// submitRename moves the file to the typed path (relative to the doc's root); blank or
+// unchanged input cancels. Errors replace the box with a popup. An open doc is repointed
+// three ways: the editor (SetPath), the open set (RekeyDoc) and the pane's current path.
+// The buffer and its history are untouched.
 func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string) core.Action {
 	name = strings.TrimSpace(name)
 	if name == "" || name == rel {
@@ -213,9 +191,8 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 	return core.Seq(core.Pop(), act, core.PropagateAll(ReseedMsg{}))
 }
 
-// docRel is how a doc is named to the user in the boxes that act on it: its path
-// relative to the origin root, so two "notes.md" in different folders of a scan are told
-// apart. An unrelatable root falls back to the base name — a doc always has one.
+// docRel names a doc relative to its root (so two notes.md are distinguishable), falling
+// back to its base name.
 func docRel(doc DocFile) string {
 	rel, err := filepath.Rel(doc.Root, doc.Path)
 	if err != nil {
@@ -224,14 +201,8 @@ func docRel(doc DocFile) string {
 	return rel
 }
 
-// deleteFile raises the delete confirm. A y/n overlay rather than the rename box's
-// silent submit, because this is the one docs-list verb that destroys something: rename
-// is protected by renameDoc refusing an occupied target, but a delete has nothing to
-// refuse. The shape is dirtyPopup's — an overlay DialogScreen with the shared
-// confirm/cancel hints — and not CreatePopup, which builds an acknowledgement.
-//
-// An open doc gets a second line: deleting the file closes its buffer, so unsaved edits
-// go with it, and that is worth saying before the y rather than after.
+// deleteFile asks for confirmation (a y/n overlay, unlike rename's silent submit, since
+// delete destroys). An open doc gets a second line: its buffer closes too.
 func (s *homeScreen) deleteFile(sh *core.Shared, doc DocFile) core.Action {
 	body := "delete " + docRel(doc) + "?"
 	if _, open := Of(sh).Doc(doc.Path); open {
@@ -246,15 +217,8 @@ func (s *homeScreen) deleteFile(sh *core.Shared, doc DocFile) core.Action {
 	})
 }
 
-// submitDelete is the confirm's OnYes: remove the file, then catch the app up with a
-// document that no longer exists. Errors surface as a popup swapped in over the confirm,
-// so the overlay's stack depth holds (submitRename's precedent).
-//
-// A doc that is OPEN has to leave the open set as well as the disk, or the Open list
-// would keep a row for a file nothing can save — and when it is also the doc in the
-// editor pane, the pane has to move off it, exactly as ctrl+x moves it (showDoc, shared
-// with editorExit). Focus needs no touching: the confirm pops back to the docs list,
-// which is where the key came from.
+// submitDelete removes the file and catches up: an open doc leaves the open set, and the
+// pane moves off it as ctrl+x would. Errors replace the confirm with a popup.
 func (s *homeScreen) submitDelete(sh *core.Shared, doc DocFile) core.Action {
 	if err := deleteDoc(doc.Path); err != nil {
 		return core.Replace(errPopup("delete", err))

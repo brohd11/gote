@@ -8,9 +8,8 @@ import (
 	"go.lsp.dev/uri"
 )
 
-// The persistent outline is refreshed by editing rather than by an explicit user
-// request, so it has its own request slot. A background documentSymbol fetch must never
-// evict a definition, hover, format, completion, or semantic-token request.
+// The outline has its own request slot: a background refresh must never evict a request
+// the user made.
 type lspOutlineRequest struct {
 	id      uint64
 	path    string
@@ -77,48 +76,19 @@ func (m *lspManager) takeOutline() *lspOutlineRequest {
 // describes the same editor generation the result names.
 func (m *lspManager) startOutline(sessions map[string]*lspSession,
 	pending map[string]lspDocument, request lspOutlineRequest) context.CancelFunc {
-	m.mu.Lock()
-	doc, ok := m.desired[request.path]
-	m.mu.Unlock()
-	if !ok || doc.editSeq != request.editSeq {
-		m.emitOutline(request, lspOutlineResult{})
+	doc, session, err := m.flushForRequest(sessions, pending, request.path, request.editSeq, nil)
+	if session == nil {
+		m.emitOutline(request, lspOutlineResult{err: err})
 		return nil
-	}
-	session := sessions[doc.key()]
-	if session == nil || session.server == nil {
-		m.emitOutline(request, lspOutlineResult{})
-		return nil
-	}
-	if session.sent[doc.path] != doc.version {
-		if err := session.server.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-			TextDocument: protocol.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(doc.path)},
-				Version:                doc.version,
-			},
-			ContentChanges: []protocol.TextDocumentContentChangeEvent{
-				&protocol.TextDocumentContentChangeWholeDocument{Text: doc.text},
-			},
-		}); err != nil {
-			m.failSession(session, err)
-			clearPendingSession(pending, session.key)
-			m.emitOutline(request, lspOutlineResult{err: err})
-			return nil
-		}
-		session.sent[doc.path] = doc.version
-		delete(pending, doc.path)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), lspRequestLimit)
 	server, path := session.server, doc.path
-	m.workers.Add(1)
-	go func() {
-		defer m.workers.Done()
+	return m.goRequest(lspRequestLimit, func(ctx context.Context) {
 		answer, err := server.DocumentSymbol(ctx, &protocol.DocumentSymbolParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(path)},
 		})
 		m.emitOutline(request, lspOutlineResult{symbols: projectSymbols(answer), err: err})
-	}()
-	return cancel
+	})
 }
 
 func (m *lspManager) emitOutline(request lspOutlineRequest, result lspOutlineResult) {

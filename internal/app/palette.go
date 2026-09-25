@@ -9,24 +9,14 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-// The syntax palette both highlighters draw from. It lives here rather than in either of
-// them because they share it: highlight_chroma.go colors source tokens and
-// highlight_markdown.go colors document structure, and the two must not disagree about a
-// slot they both use (a keyword and a **strong** run are the same purple). Each file
-// still owns its own styles — this file resolves colors and hands them over.
+// The syntax palette shared by both highlighters, so a slot they both use (keyword and
+// **strong**) is one color. Each file builds its own styles from it.
 //
-// Not theme-derived. The framework palette in bubblestack/core repaints with the theme
-// and the detected background; syntax colors deliberately do not, because the editor
-// bakes styles into editor.Spans when a document is parsed and nothing re-parses on a
-// theme change. Constant colors are what makes that safe, and Config.SyntaxColors is how
-// a user who dislikes them says so.
+// It is not theme-derived: spans bake their styles at parse time and nothing re-parses on
+// a theme change. Config.SyntaxColors is how users change it.
 
-// defaultSyntaxColors is the palette a fresh config.yml is written with, and the
-// fallback for any slot whose configured value does not parse.
-//
-// These colors are used on 256-color and true-color terminals. A terminal
-// reporting only 16 colors uses basicSyntaxColors directly; the rich palette
-// does not need to quantize into the same hues as that separate palette.
+// defaultSyntaxColors is written to a fresh config and backs any unparseable slot. It is
+// for 256-color terminals; 16-color terminals use basicSyntaxColors.
 func defaultSyntaxColors() SyntaxColors {
 	return SyntaxColors{
 		Brackets: []string{"178", "176", "32"},
@@ -51,10 +41,8 @@ func defaultSyntaxColors() SyntaxColors {
 	}
 }
 
-// basicSyntaxColors is the eight-slot ANSI palette gote shipped before the config key
-// existed, and what SyntaxColors.BasicColors selects. These are the colors the terminal's
-// own scheme defines, so they follow it — the one thing a 256-color palette cannot do,
-// and the whole reason the opt-out is here.
+// basicSyntaxColors is the ANSI palette that BasicColors selects: the terminal's own
+// colors, which follow its scheme.
 func basicSyntaxColors() SyntaxColors {
 	return SyntaxColors{
 		Brackets: []string{"3", "5", "4"},
@@ -79,10 +67,8 @@ func basicSyntaxColors() SyntaxColors {
 	}
 }
 
-// syntaxPalette is one resolved palette: the color for every slot the highlighters draw.
-// applyChromaPalette and applyMarkdownPalette each take one and build their own styles
-// from it, which is how the two files stay in agreement without importing each other's
-// vars.
+// syntaxPalette is one resolved palette. Both apply functions build their styles from one,
+// which keeps the two highlighters in agreement.
 type syntaxPalette struct {
 	brackets []color.Color
 	keyword  color.Color
@@ -105,11 +91,8 @@ type syntaxPalette struct {
 	mdList     color.Color
 }
 
-// parseSyntaxColor accepts the two spellings a config value may take — an ANSI index
-// 0-255 ("133") or a hex literal ("#af5faf", "#a5f") — and reports whether it took.
-// The check is gote's own rather than lipgloss.Color's because lipgloss answers an
-// unparseable string with a no-op color, which renders the token invisible instead of
-// wrong: a typo would silently erase every comment in the buffer.
+// parseSyntaxColor accepts an ANSI index ("133") or hex ("#af5faf", "#a5f"). gote checks
+// itself because lipgloss renders an unparseable color invisibly, which would erase text.
 func parseSyntaxColor(s string) (color.Color, bool) {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "#") {
@@ -128,11 +111,9 @@ func parseSyntaxColor(s string) (color.Color, bool) {
 	return lipgloss.Color(s), true
 }
 
-// syntaxColorSlots is the config's color fields in a fixed order, as pointers so both
-// callers can walk two SyntaxColors in lockstep: normalizeSyntaxColors repairs a loaded
-// value against the defaults, resolveSyntaxColors reads them. Adding a slot means adding
-// it here, to the struct, and to the two apply functions — the compiler catches the last
-// two and this list is what the first depends on.
+// syntaxColorSlots lists the config's color fields in fixed order, as pointers so two
+// SyntaxColors can be walked in step. A new slot goes here, in the struct and in both apply
+// functions.
 func syntaxColorSlots(sc *SyntaxColors) []*string {
 	return []*string{
 		&sc.Keyword, &sc.Type, &sc.Func, &sc.String, &sc.Number,
@@ -142,14 +123,9 @@ func syntaxColorSlots(sc *SyntaxColors) []*string {
 	}
 }
 
-// normalizeSyntaxColors replaces every empty or unparseable slot with its default, the
-// same per-key tolerance GitGutter gets: a typo in one color should not cost the user
-// their palette, let alone their editor. Repairing cfg rather than only the resolved
-// colors means the next SaveConfig writes a file that parses.
-//
-// The fallback is always the 256 default even when BasicColors is set, so toggling the
-// flag off again returns the user to the colors their file actually names. BasicColors is
-// applied at resolve time instead — see resolveSyntaxColors.
+// normalizeSyntaxColors replaces empty or unparseable slots with defaults, so one typo
+// does not cost the palette and the next save writes valid values. It always uses the
+// 256 defaults, so turning BasicColors off restores the file's colors.
 func normalizeSyntaxColors(sc *SyntaxColors) {
 	def := defaultSyntaxColors()
 	got, want := syntaxColorSlots(sc), syntaxColorSlots(&def)
@@ -168,9 +144,8 @@ func normalizeSyntaxColors(sc *SyntaxColors) {
 	}
 }
 
-// resolveSyntaxColors turns the configured strings into colors. BasicColors discards the
-// rest of sc for the built-in ANSI palette; it is not a fallback the other keys feed
-// into, because a user asking for their terminal's own colors means all of them.
+// resolveSyntaxColors turns the configured strings into colors. BasicColors replaces all
+// of them with the ANSI palette.
 func resolveSyntaxColors(sc SyntaxColors) syntaxPalette {
 	def := defaultSyntaxColors()
 	bracketsEnabled := sc.Brackets == nil || len(sc.Brackets) > 0
@@ -184,9 +159,7 @@ func resolveSyntaxColors(sc SyntaxColors) syntaxPalette {
 			sc.Brackets = []string{}
 		}
 	}
-	// Every slot still resolves through its default: applySyntaxPalette is reachable
-	// without LoadConfig's normalization (init below, and tests), so the guard belongs
-	// on both paths rather than only the one that reads a file.
+	// Resolve through the defaults here too: init and tests reach this without LoadConfig.
 	col := func(v, fallback string) color.Color {
 		if c, ok := parseSyntaxColor(v); ok {
 			return c
@@ -221,14 +194,9 @@ func resolveSyntaxColors(sc SyntaxColors) syntaxPalette {
 	}
 }
 
-// paletteSlots is the slot registry: every config key paired with the style it produces,
-// in the order syntaxColorSlots walks. It is the bridge between the config's vocabulary
-// and the styles, which is what lets `gote colors` print a legend and what lets a semantic
-// token name a slot by the same string the user types in config.yml.
-//
-// The styles are reached through pointers to the package vars rather than copied, because
-// a caller may re-apply the palette after this list is built and a copy would go on
-// showing the palette that was replaced.
+// paletteSlots pairs every config key with its style, in syntaxColorSlots' order, for the
+// `gote colors` legend and for mapping semantic tokens to slots by name. Styles are
+// pointers to the package vars so re-applied palettes show through.
 func paletteSlots() []struct {
 	key   string
 	style *lipgloss.Style
@@ -257,9 +225,7 @@ func paletteSlots() []struct {
 	}
 }
 
-// slotStyle resolves a config slot name to its style. It is how a semantic token type,
-// having been mapped to a slot name, becomes a color — and why that mapping is written in
-// slot names rather than in colors of its own.
+// slotStyle resolves a config slot name to its style.
 func slotStyle(key string) (lipgloss.Style, bool) {
 	for _, slot := range paletteSlots() {
 		if slot.key == key {
@@ -269,10 +235,8 @@ func slotStyle(key string) (lipgloss.Style, bool) {
 	return lipgloss.Style{}, false
 }
 
-// slotStylePtrs is slotStyle's answer as the reference an editor.Span holds, rebuilt with
-// the palette so the pointers it hands out never change under spans already carrying them.
-// paletteSlots points at the mutable package vars themselves, which is exactly what a span
-// must not reference.
+// slotStylePtrs are the style pointers spans hold, rebuilt with the palette so existing
+// spans keep theirs (paletteSlots points at mutable vars, which spans must not).
 var slotStylePtrs map[string]*lipgloss.Style
 
 func rebuildSlotStylePtrs() {
@@ -288,9 +252,8 @@ func slotStylePtr(key string) (*lipgloss.Style, bool) {
 	return st, ok
 }
 
-// syntaxColorsForProfile selects the runtime palette without modifying the saved
-// configuration. Colorless output is left to the renderer; Unknown lets callers
-// without a terminal profile retain the configured palette.
+// syntaxColorsForProfile picks the runtime palette for a color profile without touching
+// the saved config. Unknown keeps the configured palette.
 func syntaxColorsForProfile(sc SyntaxColors, profile colorprofile.Profile) SyntaxColors {
 	if profile == colorprofile.ANSI {
 		sc.BasicColors = true
@@ -307,7 +270,6 @@ func applySyntaxPalette(sc SyntaxColors) {
 	rebuildSlotStylePtrs() // after both: it copies what they just installed
 }
 
-// The defaults are installed at init so that a caller which never loads a config — a
-// test, or the fenced-code renderer reached before Ctx.New — still highlights with the
-// palette gote means to ship rather than with nil colors.
+// Install the defaults at init, for callers that never load a config (tests, fenced
+// code before Ctx.New).
 func init() { applySyntaxPalette(defaultSyntaxColors()) }

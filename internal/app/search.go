@@ -18,17 +18,13 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"go.lsp.dev/protocol"
 )
 
 const searchResultLimit = 10_000
 
-// ctrl+alt+f, not alt+shift+f: shift+f is where the editor's word-forward alt+f lives one
-// modifier over, and the pair reads better as ctrl+f (this buffer) / ctrl+alt+f (every
-// file). It arrives as an ESC-prefixed control byte, so it needs the terminal's option-as-meta
-// setting — the same requirement every other alt chord here already has.
+// ctrl+alt+f pairs with ctrl+f (this buffer / every file). It needs option-as-meta, like
+// every alt chord.
 var findFilesKey = key.NewBinding(key.WithKeys("ctrl+alt+f"), key.WithHelp("ctrl+alt+f", "find in files"))
 
 type searchEntry struct {
@@ -40,32 +36,26 @@ type searchEntry struct {
 }
 
 type searchPanel struct {
-	*components.ScrollContainer
-	entries        []searchEntry
-	lines          []string
-	owners, starts []int
-	headings       []bool
-	selected       int
-	width, height  int
-	root           string
-	status         string
-	onSelect       func(*core.Shared, searchEntry) core.Action
+	entryList[searchEntry]
+	root string
 }
 
 func newSearchPanel(pick func(*core.Shared, searchEntry) core.Action) *searchPanel {
-	p := &searchPanel{ScrollContainer: components.NewScrollContainer("Search"), selected: -1, onSelect: pick, status: "No search run."}
-	p.SetKeyHints(false)
+	p := &searchPanel{entryList: newEntryList("Search", pick)}
+	p.status = "No search run."
+	p.statusGap, p.mutedHeading = true, true
+	p.group = func(e searchEntry) string { return e.path }
+	p.heading = func(path string) string {
+		if rel, err := filepath.Rel(p.root, path); err == nil {
+			return rel
+		}
+		return path
+	}
+	p.row = func(e searchEntry) string {
+		return fmt.Sprintf("%d:%d  %s", e.line+1, e.column+1, strings.TrimSpace(e.text))
+	}
 	p.reflow()
 	return p
-}
-
-func (p *searchPanel) SetSize(width, height int) {
-	changed := width != p.width
-	p.width, p.height = width, height
-	p.ScrollContainer.SetSize(width, height)
-	if changed {
-		p.reflow()
-	}
 }
 
 func (p *searchPanel) setSearching(query, root string) {
@@ -95,116 +85,6 @@ func (p *searchPanel) setResult(query, root string, entries []searchEntry, trunc
 		}
 	}
 	p.reflow()
-}
-
-func (p *searchPanel) reflow() {
-	offset := p.ScrollOffset()
-	p.lines, p.owners, p.starts, p.headings = nil, nil, nil, nil
-	width := max(1, min(p.TextWidth(), p.width-4))
-	appendText := func(text string, owner int, heading bool) {
-		for _, line := range strings.Split(ansi.Hardwrap(ansi.Wrap(ansi.Strip(text), width, ""), width, true), "\n") {
-			p.lines = append(p.lines, line)
-			p.owners = append(p.owners, owner)
-			p.headings = append(p.headings, heading)
-		}
-	}
-	if p.status != "" {
-		appendText(p.status, -1, false)
-		if len(p.entries) > 0 {
-			appendText("", -1, false)
-		}
-	}
-	last := ""
-	for i, entry := range p.entries {
-		if entry.path != last {
-			if i > 0 {
-				appendText("", -1, false)
-			}
-			name := entry.path
-			if rel, err := filepath.Rel(p.root, entry.path); err == nil {
-				name = rel
-			}
-			appendText(name, -1, true)
-			last = entry.path
-		}
-		p.starts = append(p.starts, len(p.lines))
-		appendText(fmt.Sprintf("%d:%d  %s", entry.line+1, entry.column+1, strings.TrimSpace(entry.text)), i, false)
-	}
-	p.paint()
-	p.ScrollTo(offset)
-}
-
-func (p *searchPanel) paint() {
-	lines := append([]string(nil), p.lines...)
-	selected := lipgloss.NewStyle().Reverse(true)
-	muted := lipgloss.NewStyle().Foreground(core.MutedColor)
-	for i, owner := range p.owners {
-		if p.headings[i] {
-			lines[i] = muted.Render(lines[i])
-		}
-		if owner >= 0 && owner == p.selected {
-			lines[i] = selected.Render(lines[i])
-		}
-	}
-	p.SetLines(lines)
-}
-
-func (p *searchPanel) selectEntry(index int) {
-	if len(p.entries) == 0 {
-		return
-	}
-	p.selected = max(0, min(index, len(p.entries)-1))
-	p.paint()
-	row := p.starts[p.selected]
-	if row < p.ScrollOffset() || row >= p.ScrollOffset()+p.VisibleRows() {
-		p.ScrollTo(row)
-	}
-}
-
-func (p *searchPanel) activate(sh *core.Shared) core.Action {
-	if p.selected < 0 || p.selected >= len(p.entries) || p.onSelect == nil {
-		return core.Action{}
-	}
-	return p.onSelect(sh, p.entries[p.selected])
-}
-
-func (p *searchPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bool) {
-	if !p.Focused() {
-		return core.Action{}, false
-	}
-	if click, ok := msg.(tea.MouseClickMsg); ok {
-		if click.Button == tea.MouseLeft && click.Mod == 0 && click.X >= 2 && click.X < p.width-2 && click.Y >= 1 && click.Y < p.height-1 {
-			row := click.Y - 1 + p.ScrollOffset()
-			if row >= 0 && row < len(p.owners) && p.owners[row] >= 0 && click.X-2 < ansi.StringWidth(p.lines[row]) {
-				p.selectEntry(p.owners[row])
-				return p.activate(sh), true
-			}
-		}
-		return core.Action{}, true
-	}
-	if km, ok := msg.(tea.KeyPressMsg); ok {
-		k := km.String()
-		switch {
-		case core.MatchKey(k, core.Keys.Up):
-			p.selectEntry(p.selected - 1)
-		case core.MatchKey(k, core.Keys.Down):
-			p.selectEntry(p.selected + 1)
-		case k == "home" || core.MatchKey(k, core.Keys.Top):
-			p.selectEntry(0)
-		case k == "end" || core.MatchKey(k, core.Keys.Bottom):
-			p.selectEntry(len(p.entries) - 1)
-		case core.MatchKey(k, core.Keys.Select):
-			return p.activate(sh), true
-		default:
-			return p.ScrollContainer.UpdatePanel(sh, msg)
-		}
-		return core.Action{}, true
-	}
-	return p.ScrollContainer.UpdatePanel(sh, msg)
-}
-
-func (p *searchPanel) PanelHelp() []key.Binding {
-	return []key.Binding{core.Hint("jump", core.Keys.Select)}
 }
 
 type findFilesRequest struct {

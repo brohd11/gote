@@ -4,56 +4,45 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	"github.com/brohd11/goutil/strutil"
 
 	"charm.land/bubbles/v2/list"
 	"go.lsp.dev/protocol"
 )
 
-// Position-driven language-server features and the jump stack they navigate with.
-// Everything here shares one shape: ask the manager for something at the caret, and act
-// on the single result that comes back through homeScreen.Receive.
+// Caret-driven language-server features and the jump stack: ask the manager about the
+// caret, then act on the result that comes back through homeScreen.Receive.
 
 // jumpLimit caps the back-stack. Deep enough that a chain of definitions stays
 // retraceable, shallow enough that it never becomes a second document history.
 const jumpLimit = 32
 
-// jumpSite is a place worth coming back to: a document and a caret in it. Nothing else
-// in gote records one — the router's stack tracks screens, and the open set tracks
-// buffers without their cursors — so this is the whole of gote's location history.
+// jumpSite is a document and caret worth returning to: gote's only location history.
 type jumpSite struct {
 	path string
 	pos  editor.Position
 }
 
-// lspFeatureReady reports whether a caret-driven request can be made at all: a manager
-// exists, a document is open in the editor pane, and the pane has the keys. It is
-// completionAvailable's counterpart, and deliberately does not consult the server's
-// capabilities — that check belongs to the manager, which knows what was advertised.
+// lspFeatureReady reports whether a caret request can be made now: a manager, a document
+// in the editor pane, and the pane focused. Capabilities are the manager's to check.
 func (s *homeScreen) lspFeatureReady(sh *core.Shared) bool {
 	return sh != nil && Of(sh).lsp != nil && s.currentPath != "" &&
 		s.fullPreview == nil && s.editorPanel.Focused()
 }
 
-// lspEnabled reports whether this launch has a language-server manager at all — the one
-// question the menu builders ask, as distinct from lspFeatureReady's "can a request be
-// made right now". A menu row is about whether the feature exists, not about where the
-// caret happens to be.
+// lspEnabled reports whether this launch has a language-server manager at all, which is
+// what menu rows depend on.
 func lspEnabled(sh *core.Shared) bool {
 	return sh != nil && Of(sh).lsp != nil
 }
 
-// lspDisabledReason names the config key that left this launch without a manager, for
-// the messages and help rows that report the absence. Three keys can produce the same
-// nil manager (see Ctx.newWithColorProfile), and a message that always blamed auto-lsp
-// would send the user to edit a key that is already true.
-//
-// It answers only for a launch that HAS no manager; the caller checks that first.
+// lspDisabledReason names the config key that left this launch without a manager (three
+// can), so messages point at the right one. Only for launches with no manager.
 func lspDisabledReason(c *Ctx) string {
 	switch {
 	case c == nil:
@@ -67,10 +56,8 @@ func lspDisabledReason(c *Ctx) string {
 	}
 }
 
-// requestAt issues one on-demand request for the caret's position. A refusal is
-// reported as a status rather than silently: pressing a key and getting nothing back is
-// indistinguishable from a hang, and the two reasons a request is refused — no server
-// yet, or this server does not do that — are both worth saying out loud.
+// requestAt issues an on-demand request at the caret, reporting a refusal (no server yet,
+// or unsupported) rather than doing nothing.
 func (s *homeScreen) requestAt(sh *core.Shared, kind lspRequestKind) core.Action {
 	if !s.lspFeatureReady(sh) {
 		return core.Action{}
@@ -90,10 +77,8 @@ func (s *homeScreen) requestAt(sh *core.Shared, kind lspRequestKind) core.Action
 	return core.Action{}
 }
 
-// applyRequestResult routes one on-demand answer. Results are dropped when a newer
-// request has replaced this one or the buffer moved on beneath it — the same three
-// guards applyCompletionResult uses — except for a jump, whose whole point is to leave
-// the document the request was made in.
+// applyRequestResult routes an on-demand answer, dropping stale ones as
+// applyCompletionResult does, except jumps, which are meant to leave the document.
 func (s *homeScreen) applyRequestResult(sh *core.Shared, result *lspRequestResult) core.Action {
 	if result == nil || result.id == 0 || result.id != s.lspRequestID {
 		return core.Action{}
@@ -140,9 +125,8 @@ func (s *homeScreen) applyDefinition(sh *core.Shared, result *lspRequestResult) 
 	return core.Push(s.locationPicker(sh, "Definitions", "definitions", result.locations))
 }
 
-// jumpToLocation is the single door every jump goes through — definition, a picked
-// reference, an outline row. It records where the caret was before moving it, so
-// ctrl+o always has somewhere to go back to.
+// jumpToLocation is every jump's single path (definition, reference, outline), recording
+// the prior caret so ctrl+o can return.
 func (s *homeScreen) jumpToLocation(sh *core.Shared, target lspLocation) core.Action {
 	if target.Path == "" {
 		return core.SetStatus("that definition is not in a file")
@@ -177,10 +161,8 @@ func (s *homeScreen) jumpBack(sh *core.Shared) core.Action {
 	return s.travel(sh, site.path, site.pos, nil)
 }
 
-// travelTo moves to an LSP range. The UTF-16 conversion needs the destination's text,
-// which is why the target keeps its protocol range this far down rather than being
-// converted at the projection: only the same-file case has a buffer in hand right now,
-// and the cross-file case converts later, in reveal, once the file has been read.
+// travelTo moves to an LSP range, keeping it in UTF-16 until a buffer with the text is at
+// hand (reveal converts it for other files once read).
 func (s *homeScreen) travelTo(sh *core.Shared, path string, target protocol.Range) core.Action {
 	pos := editor.Position{Line: int(target.Start.Line), Column: int(target.Start.Character)}
 	if path == s.currentPath {
@@ -189,12 +171,9 @@ func (s *homeScreen) travelTo(sh *core.Shared, path string, target protocol.Rang
 	return s.travel(sh, path, pos, &target)
 }
 
-// travel puts the editor pane on path and the caret at pos. A document already open is
-// revealed immediately; a new one has to be read off disk first, and that read is
-// asynchronous — so the destination is parked in pendingJump and retried from
-// finishHomeUpdate until the buffer has the line. This is the same "observe what the
-// update actually did" discipline updateCompletionAfterParent follows, and it is why a
-// jump into an unopened file lands on the right line rather than on line one.
+// travel shows path in the editor pane with the caret at pos. An unopened file loads
+// asynchronously, so the target waits in pendingJump and is retried from finishHomeUpdate
+// until the line exists.
 func (s *homeScreen) travel(sh *core.Shared, path string, pos editor.Position,
 	target *protocol.Range) core.Action {
 	if path == s.currentPath {
@@ -208,17 +187,14 @@ func (s *homeScreen) travel(sh *core.Shared, path string, pos editor.Position,
 	s.pendingRange = target
 	s.applyPendingJump()
 	if !wasOpen && !insideRoot(c, path) {
-		// A definition in a dependency is a file from another workspace: reconciling it
-		// starts a second server session rooted at ITS module. That is correct, but it
-		// is also a background process the user did not ask for by name.
+		// A definition in a dependency starts a second server session rooted there; say so.
 		return core.Seq(act, core.SetStatus("opened "+shortPath(c, path)+" (outside this root)"))
 	}
 	return act
 }
 
-// reveal moves the caret and, when the server gave a range worth showing, highlights it.
-// The highlight is how a jump says what it landed on: the caret alone leaves the user
-// hunting for which identifier on the line was meant.
+// reveal moves the caret and highlights the server's range, showing what the jump landed
+// on.
 func (s *homeScreen) reveal(pos editor.Position, target *protocol.Range) bool {
 	if target != nil {
 		if r, ok := lspRangeToEditor(s.editor, *target); ok && s.editor.SelectRange(r) {
@@ -228,10 +204,8 @@ func (s *homeScreen) reveal(pos editor.Position, target *protocol.Range) bool {
 	return s.editor.Reveal(pos)
 }
 
-// applyPendingJump retries a jump into a buffer that was still loading. It runs from
-// finishHomeUpdate, so it gets a try after every message until the file's read lands.
-// It gives up once the buffer has content but not the line asked for — a stale answer
-// against a file that changed on disk should cost one wrong caret, not a permanent retry.
+// applyPendingJump retries a jump into a loading buffer after each message, giving up once
+// the buffer has content but not the line.
 func (s *homeScreen) applyPendingJump() {
 	if s.pendingJump == nil {
 		return
@@ -252,30 +226,23 @@ func insideRoot(c *Ctx, path string) bool {
 	if root == "" {
 		return true
 	}
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	_, ok := strutil.RelUnder(root, path)
+	return ok
 }
 
-// shortPath names a file for a row or a status line: relative to the document root when
-// it lives there, and otherwise with the home directory folded back to ~. A jump into a
-// dependency produces paths long enough to fill a terminal on their own.
+// shortPath names a file relative to the document root, or with ~ for home.
 func shortPath(c *Ctx, path string) string {
 	if root := docsRoot(c); root != "" {
-		if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+		if rel, ok := strutil.RelUnder(root, path); ok {
 			return rel
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if rel, err := filepath.Rel(home, path); err == nil && !strings.HasPrefix(rel, "..") {
-			return filepath.Join("~", rel)
-		}
-	}
-	return path
+	home, _ := os.UserHomeDir()
+	return strutil.ContractHome(path, home)
 }
 
-// fileLine reads one line out of a file that has no open buffer. The scanner is capped
-// because a location list must not be able to pull a huge generated file into memory to
-// print one row of it.
+// fileLine reads one line from an unopened file, with a capped scanner so a huge file is
+// never loaded whole.
 func fileLine(path string, line int) string {
 	file, err := os.Open(path)
 	if err != nil {
@@ -292,10 +259,8 @@ func fileLine(path string, line int) string {
 	return ""
 }
 
-// locationPicker is the list several jump targets are offered through — the several
-// definitions of an interface method, or every reference to a symbol. It is a pushed
-// PickerScreen rather than a popup because the list can be long and wants the /-filter,
-// the g/G jumps and the breadcrumb that come with a screen.
+// locationPicker offers several jump targets as a pushed picker (lists can be long and
+// want filtering).
 func (s *homeScreen) locationPicker(sh *core.Shared, title, crumb string, locations []lspLocation) *components.PickerScreen {
 	items := make([]list.Item, 0, len(locations))
 	for _, location := range locations {
@@ -312,9 +277,8 @@ func (s *homeScreen) locationPicker(sh *core.Shared, title, crumb string, locati
 	return components.NewPicker(items, components.PickerOpts{Title: title, Crumb: crumb})
 }
 
-// locationPreview is the source line a location row shows. An open buffer answers from
-// memory — and answers with the user's unsaved edits, which is what they are looking at
-// — while anything else is read off disk once, at the moment the list is built.
+// locationPreview is a location row's source line: from the open buffer (with unsaved
+// edits) or read from disk once.
 func locationPreview(c *Ctx, target lspLocation) string {
 	line := int(target.Range.Start.Line)
 	if ed, ok := c.Doc(target.Path); ok && ed != nil {
