@@ -76,6 +76,32 @@ func TestLanguagePairProfiles(t *testing.T) {
 	}
 }
 
+func TestLanguagePairAdjacency(t *testing.T) {
+	for _, path := range []string{"main.go", "player.gd", "config.yaml", "notes.md"} {
+		for _, tc := range []struct {
+			name, content, key, want string
+			keys                     []string
+		}{
+			{"quote after word", "this", "\"", "this\"", []string{"end"}},
+			{"quote before word", "this", "\"", "\"this", nil},
+			{"quote inside brackets", "[]", "\"", "[\"\"]", []string{"right"}},
+			{"bracket before word", "this", "[", "[this", nil},
+			{"bracket inside word", "this", "[", "th[is", []string{"right", "right"}},
+			{"bracket after word", "this", "[", "this[]", []string{"end"}},
+			{"quote wraps selection", "abc", "\"", "a\"b\"c", []string{"right", "shift+right"}},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				ed := editorForLanguage(path, tc.content)
+				pressEditor(ed, tc.keys...)
+				pressEditor(ed, tc.key)
+				if got := ed.Text(); got != tc.want {
+					t.Fatalf("text = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
+}
+
 func TestUnknownLanguageEditsLiterally(t *testing.T) {
 	ed := editorForLanguage("scratch.unknown", "")
 	pressEditor(ed, "(", "enter")
