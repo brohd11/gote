@@ -49,6 +49,7 @@ var (
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
 	descendKey = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "enter selected folder (folder view)"))
 	upKey      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "up a folder"))
+	hiddenKey  = key.NewBinding(key.WithKeys("."), key.WithHelp(".", "show or hide dot files (folder view)"))
 	// Language tools share Alt+Shift, keeping plain Alt chords available for
 	// editing and navigation. Completion retains Ctrl+Space.
 	definitionKey = altShiftKey("g", "go to definition")
@@ -107,6 +108,7 @@ type homeScreen struct {
 	sidebarSplits        map[string][]float64 // adjusted vertical shares, keyed by visible pane composition
 	editorFlex           float64              // editor's share when the preview flex column is present; zero uses half
 	flat                 bool                 // the docs slot shows the flat scan (true) or the folder explorer
+	showHidden           bool                 // session-only dot-file visibility in the folder view
 	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
 	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
 	indentGuides         bool                 // config-selected leading-indent visualization for every buffer
@@ -359,9 +361,14 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
-		if core.MatchKey(k, descendKey) && s.sidebar && !s.flat && s.filePanel.Focused() &&
+		if s.sidebar && !s.flat && s.filePanel.Focused() &&
 			!s.modular.Filtering() && !s.modular.Resizing() {
-			return s, s.descendFolder(sh)
+			switch {
+			case core.MatchKey(k, descendKey):
+				return s, s.descendFolder(sh)
+			case core.MatchKey(k, hiddenKey):
+				return s, s.toggleHidden()
+			}
 		}
 		if core.MatchKey(k, bottomKey) {
 			if !s.panelToggles {

@@ -29,7 +29,7 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 		TitleColor: s.fileTitleColor,
 		KeepColor:  true, // git state is what the reader wants on the row they are pointing at; the frame's rule still says which row that is
 		OnDir:      func(*core.Shared, string) core.Action { return core.Async(s.refreshDocsGit()) },
-		Include:    includeDoc(c),
+		Include:    s.includeDoc(c),
 		OnSelect:   func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
 		OnKey:      s.fileKey,
 		OnError:    func(_ *core.Shared, err error) core.Action { return core.Push(errPopup("open folder", err)) },
@@ -44,6 +44,16 @@ func (s *homeScreen) descendFolder(sh *core.Shared) core.Action {
 		return core.Action{}
 	}
 	return s.filePanel.SetDir(sh, e.Path)
+}
+
+// toggleHidden refreshes the current folder without changing its directory or focus.
+func (s *homeScreen) toggleHidden() core.Action {
+	s.showHidden = !s.showHidden
+	s.filePanel.Refresh()
+	if s.showHidden {
+		return core.SetStatus("hidden files shown")
+	}
+	return core.SetStatus("hidden files off")
 }
 
 // fileKey is the folder view's ctrl+r rename and ctrl+d delete. Root is the entry's own

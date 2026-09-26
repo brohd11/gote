@@ -129,12 +129,12 @@ func docsRoot(c *Ctx) string {
 	return ""
 }
 
-// includeDoc is the folder view's Include, applying ScanDocs' rules per directory so both
-// views show the same files.
-func includeDoc(c *Ctx) func(string, fs.DirEntry) bool {
+// includeDoc applies the folder view's live dot-file visibility and existing file and
+// dependency-directory filters independently of the flat scan.
+func (s *homeScreen) includeDoc(c *Ctx) func(string, fs.DirEntry) bool {
 	return func(path string, d fs.DirEntry) bool {
 		name := d.Name()
-		if strings.HasPrefix(name, ".") {
+		if !s.showHidden && strings.HasPrefix(name, ".") {
 			return false
 		}
 		if d.IsDir() {

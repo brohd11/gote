@@ -129,7 +129,7 @@ func (s *homeScreen) helpText() string {
 		core.Hint("toggle fold", core.Keys.Toggle),
 		core.Hint("filter", s.outlinePanel.List().KeyMap.Filter),
 	})
-	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey,
+	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey, hiddenKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
 	b.WriteString("Git colors: ")
 	for i, entry := range []struct {

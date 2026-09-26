@@ -223,7 +223,7 @@ func TestFolderViewNavigationKeys(t *testing.T) {
 }
 
 func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
-	for _, state := range []string{"filter", "editor", "flat", "hidden", "resizing"} {
+	for _, state := range []string{"filter", "editor", "open", "flat", "hidden", "resizing"} {
 		t.Run(state, func(t *testing.T) {
 			root := scanTree(t)
 			model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
@@ -237,6 +237,11 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 				model, _ = model.Update(keyMsg("/"))
 			case "editor":
 				s.modular.FocusSlot(s.editorSlot())
+			case "open":
+				s.modular.FocusSlot(1)
+				if !s.openPanel.Focused() {
+					t.Fatal("expected Open panel focus")
+				}
 			case "flat":
 				model, _ = model.Update(altKey('t'))
 			case "hidden":
@@ -247,22 +252,99 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 			before := s.editor.Text()
 			model, _ = model.Update(keyMsg("d"))
 			model, _ = model.Update(keyMsg("x"))
+			model, _ = model.Update(keyMsg("."))
+			if s.showHidden {
+				t.Fatalf("hidden toggle fired while %s", state)
+			}
 			if s.filePanel.Dir() != filepath.Join(root, "sub") {
 				t.Fatalf("folder navigation fired while %s", state)
 			}
 			if state == "filter" {
-				if got := s.filePanel.List().FilterInput.Value(); got != "dx" {
-					t.Fatalf("filter input = %q, want dx", got)
+				if got := s.filePanel.List().FilterInput.Value(); got != "dx." {
+					t.Fatalf("filter input = %q, want dx.", got)
 				}
 				model.Update(keyMsg("backspace"))
-				if got := s.filePanel.List().FilterInput.Value(); got != "d" {
+				if got := s.filePanel.List().FilterInput.Value(); got != "dx" {
 					t.Fatalf("Backspace should edit the filter, got %q", got)
 				}
 			}
 			if state == "editor" || state == "hidden" {
-				if s.editor.Text() == before || !strings.Contains(s.editor.Text(), "dx") {
-					t.Fatal("d and x should reach the editor")
+				if s.editor.Text() == before || !strings.Contains(s.editor.Text(), "dx.") {
+					t.Fatal("d, x and . should reach the editor")
 				}
+			}
+		})
+	}
+}
+
+func TestFolderViewHiddenToggle(t *testing.T) {
+	for _, restricted := range []bool{false, true} {
+		name := "text files"
+		if restricted {
+			name = "extensions"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := scanTree(t)
+			writeSearchFile(t, root, ".hidden.md", "hidden\n")
+			writeSearchFile(t, root, ".secret/note.md", "nested\n")
+			writeSearchFile(t, root, ".binary.bin", "\x00\x01\x02")
+			writeSearchFile(t, root, ".other.txt", "text\n")
+			cfg := DefaultConfig()
+			cfg.FolderView = true
+			if restricted {
+				cfg.Extensions = []string{"md"}
+			}
+			s, sh := newHomeCfg(t, cfg, Options{Mode: ModeScan, Dir: root})
+			flatBefore := strings.Join(rowTitles(s.docsPanel.List()), "\n")
+			for _, row := range []string{".hidden.md", ".secret/"} {
+				if hasRow(rowTitles(s.filePanel.List()), row) {
+					t.Fatalf("%s visible at startup", row)
+				}
+			}
+			s.Update(sh, keyMsg("."))
+			rows := rowTitles(s.filePanel.List())
+			if !hasRow(rows, ".hidden.md") || !hasRow(rows, ".secret/") {
+				t.Fatalf("hidden entries missing after toggle: %v", rows)
+			}
+			if hasRow(rows, "node_modules/") || hasRow(rows, ".binary.bin") ||
+				hasRow(rows, ".other.txt") == restricted {
+				t.Fatalf("toggle changed existing filters: %v", rows)
+			}
+			selectRow(t, s.filePanel.List(), ".secret/")
+			s.Update(sh, keyMsg("d"))
+			selectRow(t, s.filePanel.List(), "..")
+			s.Update(sh, keyMsg("."))
+			if s.showHidden || s.filePanel.Dir() != filepath.Join(root, ".secret") {
+				t.Fatal("toggle on .. should hide entries without leaving the current folder")
+			}
+			s.Update(sh, keyMsg("x"))
+			if hasRow(rowTitles(s.filePanel.List()), ".secret/") {
+				t.Fatal("hidden directory reappeared after navigation")
+			}
+			s.Update(sh, keyMsg("."))
+			s.Update(sh, altKey('t'))
+			if got := strings.Join(rowTitles(s.docsPanel.List()), "\n"); got != flatBefore {
+				t.Fatal("toggle changed the flat list")
+			}
+			s.Update(sh, altKey('t'))
+			s.Receive(sh, ReseedMsg{})
+			if !hasRow(rowTitles(s.filePanel.List()), ".hidden.md") {
+				t.Fatal("view change or refresh lost hidden visibility")
+			}
+			vault := t.TempDir()
+			writeSearchFile(t, vault, ".vault.md", "vault\n")
+			Of(sh).Config.Vaults["hidden-test"] = VaultConfig{Path: vault}
+			s.activateVault(sh, "hidden-test")
+			if s.filePanel.Dir() != vault || !hasRow(rowTitles(s.filePanel.List()), ".vault.md") {
+				t.Fatal("vault switch lost hidden visibility")
+			}
+			s.Update(sh, keyMsg("."))
+			if _, ok := s.filePanel.Selected(); ok {
+				t.Fatal("hiding the only file should leave an empty listing")
+			}
+			s.Update(sh, keyMsg("."))
+			if entry, ok := s.filePanel.Selected(); !ok || entry.Name != ".vault.md" {
+				t.Fatal("toggle in an empty listing should restore a valid selection")
 			}
 		})
 	}
@@ -327,7 +409,7 @@ func TestFolderViewInHelp(t *testing.T) {
 	root := scanTree(t)
 	s, _ := newScanHome(t, root)
 	help := s.helpText()
-	for _, want := range []string{"alt+t", "folder view", "alt+r", "row density"} {
+	for _, want := range []string{"alt+t", "folder view", "alt+r", "row density", ".", "show or hide dot files (folder view)"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("missing %q from the ? overlay:\n%s", want, help)
 		}

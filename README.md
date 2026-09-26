@@ -72,6 +72,9 @@ open on the folder view instead — it only picks the starting view, the scan ru
 In folder view, `d` enters the selected folder (including `..`) and `x` goes up, bounded by
 the scan or vault root. Enter still opens folders and documents; `d` does nothing on a
 document. Backspace uses the normal Back/filter behavior.
+While the folder panel is focused, `.` shows or hides dot files and directories, except
+while typing a filter. Hidden entries start off; the toggle lasts for the session and
+keeps the existing file-type and dependency-folder filters.
 
 Both docs views color names by Git status: staged green, untracked bright green,
 modified yellow, conflicts/deletions red, and ignored gray. Clean files use the normal
