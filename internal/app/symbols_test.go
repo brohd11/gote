@@ -33,7 +33,7 @@ func TestOutlinePanelLayoutModesAndMinimal(t *testing.T) {
 	}
 
 	s.setOpenDocsTabs(sh, true)
-	s.Update(sh, keyMsg("alt+o"))
+	s.Update(sh, keyMsg("alt+shift+o"))
 	if !s.outlineVisible || s.panelSlot(s.docsPane()) != 0 || s.panelSlot(s.outlinePanel) != 1 ||
 		s.panelSlot(s.openPanel) != noFocus || s.panelSlot(s.editorPanel) != 3 {
 		t.Fatalf("tab outline slots = docs %d outline %d open %d editor %d",
@@ -60,7 +60,7 @@ func TestOutlinePanelLayoutModesAndMinimal(t *testing.T) {
 	minimal, msh := newHomeCfg(t, minimalCfg(), Options{Mode: ModeFile, File: path})
 	Of(msh).close()
 	Of(msh).lsp = nil
-	minimal.Update(msh, keyMsg("alt+o"))
+	minimal.Update(msh, keyMsg("alt+shift+o"))
 	if minimal.sidebar || !minimal.sideColumnVisible() || minimal.panelSlot(minimal.outlinePanel) != 0 ||
 		minimal.panelSlot(minimal.editorPanel) != 1 {
 		t.Fatalf("minimal outline layout = sidebar %v outline %d editor %d",
@@ -102,7 +102,7 @@ func TestOutlineResultTracksCaretFoldsAndJumps(t *testing.T) {
 		t.Fatalf("folded method selected %q, want its visible class", node.ID)
 	}
 
-	// Outline navigation owns a normal jump, including the ctrl+o return site.
+	// Outline navigation owns a normal jump, including the alt+shift+b return site.
 	s.modular.FocusSlot(s.panelSlot(s.outlinePanel))
 	s.outlinePanel.UpdatePanel(sh, keyMsg("space"))
 	s.outlinePanel.Select(s.outlineNodes[0].Children[0].ID)

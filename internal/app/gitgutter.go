@@ -185,13 +185,17 @@ func (s *homeScreen) loadBaseline(path string) tea.Cmd {
 	}
 	s.gutter.loading = path
 	return func() tea.Msg {
-		dir, ok := repo.RepoRoot(path)
-		if !ok {
-			return core.PropagateAll(baselineMsg{path: path, state: repo.BaselineNone})
-		}
-		base, state, _ := repo.HeadBlob(dir, path)
+		base, state, _ := readGitBaseline(path)
 		return core.PropagateAll(baselineMsg{path: path, base: base, state: state})
 	}
+}
+
+func readGitBaseline(path string) (string, repo.Baseline, error) {
+	dir, ok := repo.RepoRoot(path)
+	if !ok {
+		return "", repo.BaselineNone, nil
+	}
+	return repo.HeadBlob(dir, path)
 }
 
 // applyBaseline stores a finished read, dropping one for a doc the pane has left.
@@ -235,23 +239,11 @@ func diffMarkers(baseline, buf string) map[int]editor.Sign {
 	if baseline == buf {
 		return nil
 	}
-	var in interner
-	oldEnc, oldOff := in.encode(strings.Split(baseline, "\n"))
-	newEnc, _ := in.encode(strings.Split(buf, "\n"))
-
 	last := bufLines(buf) - 1
 	out := make(map[int]editor.Sign)
-	delta := 0 // how far the new side has drifted from the old, in lines
-	for _, e := range udiff.Strings(oldEnc, newEnc) {
-		from, ok1 := oldOff[e.Start]
-		to, ok2 := oldOff[e.End]
-		if !ok1 || !ok2 {
-			continue // an edit off a line boundary can't be placed; never seen in practice
-		}
-		dels := to - from
-		adds := utf8.RuneCountInString(e.New)
-		block := from + delta // where this edit lands in the BUFFER's numbering
-		delta += adds - dels
+	for _, change := range lineChanges(strings.Split(baseline, "\n"), strings.Split(buf, "\n")) {
+		dels, adds := change.oldEnd-change.oldStart, change.newEnd-change.newStart
+		block := change.newStart
 
 		switch {
 		case adds > 0:
@@ -273,6 +265,33 @@ func diffMarkers(baseline, buf string) map[int]editor.Sign {
 		}
 	}
 	return out
+}
+
+// lineChange is a pair of half-open, zero-based line ranges. The gutter uses
+// editor lines (including its trailing empty line); the diff viewer keeps newline
+// endings so a missing final newline is shown as a real change.
+type lineChange struct {
+	oldStart, oldEnd int
+	newStart, newEnd int
+}
+
+func lineChanges(oldLines, newLines []string) []lineChange {
+	var in interner
+	oldEnc, oldOff := in.encode(oldLines)
+	newEnc, _ := in.encode(newLines)
+	var changes []lineChange
+	delta := 0
+	for _, e := range udiff.Strings(oldEnc, newEnc) {
+		from, ok1 := oldOff[e.Start]
+		to, ok2 := oldOff[e.End]
+		if !ok1 || !ok2 {
+			continue
+		}
+		adds := utf8.RuneCountInString(e.New)
+		changes = append(changes, lineChange{from, to, from + delta, from + delta + adds})
+		delta += adds - (to - from)
+	}
+	return changes
 }
 
 // interner assigns each distinct line a rune above ASCII, shared by both sides, so the

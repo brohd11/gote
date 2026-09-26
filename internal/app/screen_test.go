@@ -2643,9 +2643,9 @@ func TestEscClearsAnAppliedFilterBeforeLeaving(t *testing.T) {
 func TestEscFallsBackWhenTheRememberedPaneIsGone(t *testing.T) {
 	s, sh := newHome(t)
 
-	s.Update(sh, altKey('o')) // outline on; flat order [docs, open, outline, editor]
+	s.Update(sh, keyMsg("alt+shift+o")) // outline on; flat order [docs, open, outline, editor]
 	if !s.outlineVisible {
-		t.Fatal("alt+o should have shown the outline")
+		t.Fatal("alt+shift+o should have shown the outline")
 	}
 	for i := 0; i < 2 && paneName(s) != "outline"; i++ {
 		s.Update(sh, keyMsg("shift+tab"))
@@ -2657,9 +2657,9 @@ func TestEscFallsBackWhenTheRememberedPaneIsGone(t *testing.T) {
 	if got := paneName(s); got != "editor" {
 		t.Fatalf("esc should have reached the editor, got %s", got)
 	}
-	s.Update(sh, altKey('o')) // and now the remembered pane is gone
+	s.Update(sh, keyMsg("alt+shift+o")) // and now the remembered pane is gone
 	if s.outlineVisible {
-		t.Fatal("alt+o should have hidden the outline")
+		t.Fatal("alt+shift+o should have hidden the outline")
 	}
 
 	s.Update(sh, keyMsg("esc"))

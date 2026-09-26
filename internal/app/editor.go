@@ -27,6 +27,7 @@ func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
 		Search:          true,
 		ContextMenu:     true,
 		ContextItems:    s.editorContextItems,
+		OnSignClick:     s.gitSignClick,
 		IndentGuides:    s.indentGuides,
 		ResolveLanguage: editorLanguageForPath,
 	}

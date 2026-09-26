@@ -6,7 +6,7 @@ import (
 	"github.com/brohd11/bubblestack/core"
 )
 
-// Find references (alt+n), shown through locationPicker like multiple definitions.
+// Find references (alt+shift+r), shown through locationPicker like multiple definitions.
 
 func (s *homeScreen) applyReferences(sh *core.Shared, result *lspRequestResult) core.Action {
 	switch len(result.locations) {

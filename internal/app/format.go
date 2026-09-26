@@ -8,7 +8,7 @@ import (
 	"github.com/brohd11/goutil/strutil"
 )
 
-// Format document (alt+m): organize imports then format, as one undo step. Organizing
+// Format document (alt+shift+m): organize imports then format, as one undo step. Organizing
 // imports is a code action because gopls's formatting leaves the import block alone.
 
 // applyFormat installs the server's edits, unless the buffer changed since the request

@@ -117,7 +117,7 @@ type ModeDefaults struct {
 type SingleFileConfig struct {
 	ModeDefaults `yaml:",inline"`
 	// AllowPanelToggle keeps the bottom panel and outline reachable. False drops their menu
-	// rows and disables alt+\, alt+o and ctrl+alt+f (find in files opens the panel). The ?
+	// rows and disables alt+\, alt+shift+o and ctrl+alt+f (find in files opens the panel). The ?
 	// overlay still lists them, marked off with this key's name.
 	AllowPanelToggle bool `yaml:"allow_panel_toggle"`
 }

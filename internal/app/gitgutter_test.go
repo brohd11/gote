@@ -301,7 +301,7 @@ func TestHomeGutterMarksARealRepo(t *testing.T) {
 	}
 }
 
-// TestHomeGutterToggleDraws: alt+g turning the column back ON must fill it, not raise an
+// TestHomeGutterToggleDraws: turning the column back ON must fill it, not raise an
 // empty one. The screen's key handlers return straight out of Update, past the tail where
 // refreshGutter otherwise runs, so the toggle has to carry its own baseline read — and
 // nothing here calls refreshGutter to cover for it.

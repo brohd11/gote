@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The hover tooltip: alt+h at the caret, or the context menu's Hover row (a right press
+// The hover tooltip: alt+shift+h at the caret, or the context menu's Hover row (a right press
 // has already moved the caret to the click). There is no pointer hover: bubblestack uses
 // cell motion, which sends no motion without a held button.
 

@@ -162,12 +162,21 @@ skipping hidden, dependency, and build directories. Results appear asynchronousl
 the Search tab. Use `ctrl+f` to search the current editor buffer instead.
 
 In either bottom view, Up/Down selects entries and Enter or a click jumps to the
-location; `ctrl+o` returns. Messages wrap in full, Page Up/Down and the mouse wheel
+location; `alt+shift+b` returns. Messages wrap in full, Page Up/Down and the mouse wheel
 scroll, and Escape returns focus to the editor while leaving the panel open. Diagnostics
 cover all open files, current file first. The panel toggles sit on punctuation (`alt+\`
 and `alt+|`) precisely so they stay clear of the editor's word motions: `alt+b` and
 `alt+f` are what a terminal sends for `alt+left` and `alt+right`, and both keep moving
 the cursor by a word.
+
+Click a git gutter marker or press **Alt+Shift+D** in the editor to inspect a unified
+diff against HEAD, including unsaved edits. The shortcut opens the changed section
+at the cursor or within its three context lines, and works with the gutter hidden.
+Removed lines are red and additions are green; deletion ticks reveal removed text.
+The popup wraps long lines and scrolls with Up/Down, Page Up/Down, or the mouse wheel
+over the popup. Esc (or Alt+Shift+D again) closes it. Scrolling outside, typing,
+outside clicks, and pane/document or layout changes dismiss it and continue the
+original action. Alt+D and the editor's word-motion shortcuts keep their existing uses.
 
 The Actions
 and editor context menus independently toggle the diagnostics and git gutters and can
@@ -205,17 +214,18 @@ The gutter defaults replace the old `git_gutter: on|off|auto` key, whose `auto` 
 per-mode split in code. A config still carrying `git_gutter` loads fine and ignores it;
 `gote config` drops it on the next rewrite.
 
-The rest of the language-server features are caret-driven, and every one of them is on a
-modified key so it fires while you are typing in the editor:
+Language tools use Alt+Shift shortcuts, while completion keeps Ctrl+Space. The old
+Alt+G/H/O/N/M and Ctrl+O bindings are freed; Alt+B still moves by words and Alt+R
+still changes folder density. These shortcuts work while typing in the editor:
 
 | Key | |
 | --- | --- |
-| `alt+g` | go to definition — jumps, or lists them when there is more than one |
-| `ctrl+o` | jump back, through as many jumps as you made |
-| `alt+h` | hover info for the symbol at the cursor |
-| `alt+o` | show or hide the document outline |
-| `alt+n` | find references |
-| `alt+m` | format the document, organizing imports first |
+| `alt+shift+g` | go to definition — jumps, or lists them when there is more than one |
+| `alt+shift+b` | jump back, through as many jumps as you made |
+| `alt+shift+h` | hover info for the symbol at the cursor |
+| `alt+shift+o` | show or hide the document outline |
+| `alt+shift+r` | find references |
+| `alt+shift+m` | format the document, organizing imports first |
 | `ctrl+space` | completion |
 
 Signature help needs no key: it appears above the cursor when you open an argument list
@@ -240,7 +250,7 @@ The editor menu carries the same features as rows, which is the fallback when a 
 swallows both.
 
 There is no pointer-hover tooltip. Reporting mouse motion with no button held would put
-an event through the update loop for every cell the pointer crosses; `alt+h` and the
+an event through the update loop for every cell the pointer crosses; `alt+shift+h` and the
 menu's Hover info row — which acts on the cell you right-clicked — cover it without that.
 
 Set `format_on_save: true` to format on every `ctrl+s`. The reformat lands just after the
@@ -294,11 +304,11 @@ single_file_mode:
 ```
 
 With `allow_panel_toggle: false` (the default) the launch is taken at its word: `alt+\`,
-`alt+o` and `ctrl+alt+f` do nothing, and the panel rows leave the Actions and right-click
+`alt+shift+o` and `ctrl+alt+f` do nothing, and the panel rows leave the Actions and right-click
 menus. Find in files is locked with them because a result opens the bottom panel whether
 or not it was asked for. The `?` overlay still lists every locked key, marked off and
 naming the setting — a binding that silently vanished would read as a bug rather than a
-choice. Set it to `true` and `alt+o` adds the outline and `alt+\` the diagnostics panel,
+choice. Set it to `true` and `alt+shift+o` adds the outline and `alt+\` the diagnostics panel,
 still without restoring the breadcrumb or help bar.
 
 `default_allow_lsp: false` denies this launch a language server, which takes every

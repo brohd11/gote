@@ -73,7 +73,7 @@ func TestRetargetClickAppliesTheConfiguredModifiers(t *testing.T) {
 }
 
 // TestJumpAcrossFilesAndBack: a jump into another document moves the pane and the caret,
-// and ctrl+o returns to exactly the caret it left — the whole contract of the back-stack.
+// and alt+shift+b returns to exactly the caret it left — the whole contract of the back-stack.
 func TestJumpAcrossFilesAndBack(t *testing.T) {
 	s, sh := newHome(t)
 	from, fromEditor := seedDoc(t, s, sh, "from.py", "one\ntwo\nthree\n")
@@ -104,7 +104,7 @@ func TestJumpAcrossFilesAndBack(t *testing.T) {
 		t.Fatalf("jumping back raised %#v", act.Msg)
 	}
 	if s.currentPath != from {
-		t.Fatalf("ctrl+o left the pane on %q, want %q", s.currentPath, from)
+		t.Fatalf("alt+shift+b left the pane on %q, want %q", s.currentPath, from)
 	}
 	if got := s.editor.CursorPosition(); got != (editor.Position{Line: 1, Column: 2}) {
 		t.Fatalf("caret after going back = %+v, want where the jump started", got)

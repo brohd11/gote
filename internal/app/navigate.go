@@ -126,7 +126,7 @@ func (s *homeScreen) applyDefinition(sh *core.Shared, result *lspRequestResult) 
 }
 
 // jumpToLocation is every jump's single path (definition, reference, outline), recording
-// the prior caret so ctrl+o can return.
+// the prior caret so alt+shift+b can return.
 func (s *homeScreen) jumpToLocation(sh *core.Shared, target lspLocation) core.Action {
 	if target.Path == "" {
 		return core.SetStatus("that definition is not in a file")
@@ -146,7 +146,7 @@ func (s *homeScreen) pushJump() {
 	}
 }
 
-// jumpBack (ctrl+o) returns to the most recent recorded site. It records nothing itself:
+// jumpBack (alt+shift+b) returns to the most recent recorded site. It records nothing itself:
 // the stack is a trail out and back, not a ring the user can loop around in.
 func (s *homeScreen) jumpBack(sh *core.Shared) core.Action {
 	if len(s.jumps) == 0 {

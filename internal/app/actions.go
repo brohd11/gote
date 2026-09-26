@@ -65,11 +65,11 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 	if lsp {
 		extra = append(extra,
 			components.Item{
-				Name: "Find references", Desc: "every use of the symbol at the cursor (alt+n)",
+				Name: "Find references", Desc: "every use of the symbol at the cursor (alt+shift+r)",
 				Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqReferences) },
 			},
 			components.Item{
-				Name: "Format document", Desc: "organize imports and reformat the buffer (alt+m)",
+				Name: "Format document", Desc: "organize imports and reformat the buffer (alt+shift+m)",
 				Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqFormat) },
 			},
 			components.Item{
@@ -87,7 +87,7 @@ func (s *homeScreen) outlineActionItem() components.Item {
 		verb = "Hide"
 	}
 	return components.Item{
-		Name: verb + " outline", Desc: "toggle the document-symbol panel (alt+o)",
+		Name: verb + " outline", Desc: "toggle the document-symbol panel (alt+shift+o)",
 		Pick: func(sh *core.Shared) core.Action { return core.Seq(core.Pop(), s.toggleOutline(sh)) },
 	}
 }

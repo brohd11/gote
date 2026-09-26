@@ -55,7 +55,7 @@ func TestSingleFilePanelLockKeys(t *testing.T) {
 	if s.panelToggles {
 		t.Fatal("the shipped single_file_mode should lock the panels")
 	}
-	for _, k := range []string{"alt+\\", "alt+o", "ctrl+alt+f"} {
+	for _, k := range []string{"alt+\\", "alt+shift+o", "ctrl+alt+f"} {
 		if _, act := s.Update(sh, keyMsg(k)); act.Msg != nil {
 			t.Errorf("%s should be inert while the panels are locked, got %T", k, act.Msg)
 		}
@@ -89,9 +89,9 @@ func TestSingleFilePanelUnlockKeys(t *testing.T) {
 	if !s.bottomVisible {
 		t.Error("alt+\\ should open the bottom panel when the panels are unlocked")
 	}
-	s.Update(sh, keyMsg("alt+o"))
+	s.Update(sh, keyMsg("alt+shift+o"))
 	if !s.outlineVisible {
-		t.Error("alt+o should open the outline when the panels are unlocked")
+		t.Error("alt+shift+o should open the outline when the panels are unlocked")
 	}
 }
 
@@ -230,7 +230,7 @@ func TestLSPDisabledReason(t *testing.T) {
 
 // TestSingleFileHelpMarksLockedKeys: the ? overlay LISTS a locked key with the setting
 // responsible rather than dropping it — a binding that silently vanished would read as a
-// gote bug. ctrl+o is marked by neither gate: find-in-files pushes onto the same jump
+// gote bug. alt+shift+b is marked by neither gate: find-in-files pushes onto the same jump
 // stack, so it outlives the language server.
 func TestSingleFileHelpMarksLockedKeys(t *testing.T) {
 	cfg := DefaultConfig()
@@ -238,7 +238,7 @@ func TestSingleFileHelpMarksLockedKeys(t *testing.T) {
 	s, _ := newHomeCfg(t, cfg, Options{Mode: ModeFile, File: soloFile(t)})
 	text := s.helpText()
 
-	for _, k := range []string{"alt+\\", "alt+o", "ctrl+alt+f"} {
+	for _, k := range []string{"alt+\\", "alt+shift+o", "ctrl+alt+f"} {
 		if !strings.Contains(text, k) {
 			t.Errorf("the overlay dropped %q instead of marking it:\n%s", k, text)
 		}
@@ -250,8 +250,8 @@ func TestSingleFileHelpMarksLockedKeys(t *testing.T) {
 		t.Error("no silenced language-server key named the LSP setting")
 	}
 	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "ctrl+o") && strings.Contains(line, "off (") {
-			t.Errorf("ctrl+o survives without a language server and must not be marked off: %q", line)
+		if strings.Contains(line, "alt+shift+b") && strings.Contains(line, "off (") {
+			t.Errorf("alt+shift+b survives without a language server and must not be marked off: %q", line)
 		}
 	}
 

@@ -49,14 +49,14 @@ var (
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
 	descendKey = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "enter selected folder (folder view)"))
 	upKey      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "up a folder"))
-	// The language-server keys carry a modifier so they fire while typing, the only place they
-	// mean anything. alt+g/h/o/n/m are the alt letters left free; ctrl+o is vim's jump-back.
-	definitionKey = key.NewBinding(key.WithKeys("alt+g"), key.WithHelp("alt+g", "go to definition"))
-	jumpBackKey   = key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back"))
-	hoverKey      = key.NewBinding(key.WithKeys("alt+h"), key.WithHelp("alt+h", "hover info"))
-	symbolsKey    = key.NewBinding(key.WithKeys("alt+o"), key.WithHelp("alt+o", "toggle outline"))
-	referencesKey = key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "find references"))
-	formatKey     = key.NewBinding(key.WithKeys("alt+m"), key.WithHelp("alt+m", "format document"))
+	// Language tools share Alt+Shift, keeping plain Alt chords available for
+	// editing and navigation. Completion retains Ctrl+Space.
+	definitionKey = altShiftKey("g", "go to definition")
+	jumpBackKey   = altShiftKey("b", "jump back")
+	hoverKey      = altShiftKey("h", "hover info")
+	symbolsKey    = altShiftKey("o", "toggle outline")
+	referencesKey = altShiftKey("r", "find references")
+	formatKey     = altShiftKey("m", "format document")
 )
 
 // ctrl+p's preview modes: a side pane beside the editor, so it can be read against the
@@ -111,6 +111,7 @@ type homeScreen struct {
 	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
 	indentGuides         bool                 // config-selected leading-indent visualization for every buffer
 	gitGutter            bool                 // draw change markers against HEAD (see gitgutter.go)
+	gitDiff              *gitDiffUI           // anchored, scrollable diff; nil also cancels pending opens
 	diagnosticsGutter    bool                 // independently toggle the LSP marker column
 	gutter               gutter               // the baseline and last-drawn markers behind them
 	gutterDebounce       time.Duration        // internal test seam; production uses gitGutterDebounce
@@ -126,7 +127,7 @@ type homeScreen struct {
 	semanticSeq          int                  // and the edit generation it named, so one edit asks once
 	semanticGen          int                  // debounce generation: a later edit supersedes a pending tick
 	completion           completionUI         // parent-owned, input-transparent LSP completion popup
-	hover                hoverUI              // the passive alt+h / context-menu tooltip
+	hover                hoverUI              // the passive alt+shift+h / context-menu tooltip
 	signature            signatureUI          // the passive parameter hint, above the caret
 	lspRequestID         uint64               // the on-demand request whose answer this screen is waiting for
 	outlineVisible       bool
@@ -139,7 +140,7 @@ type homeScreen struct {
 	outlineScheduledPath string
 	outlineScheduledSeq  int
 	outlineGeneration    int
-	jumps                []jumpSite // ctrl+o's back-stack of caret locations (navigate.go)
+	jumps                []jumpSite // alt+shift+b's back-stack of caret locations (navigate.go)
 	pendingJump          *jumpSite  // a jump waiting on its destination buffer's file read
 	pendingRange         *protocol.Range
 	sh                   *core.Shared // stashed by Init/SetSize for rebuilds and the crumb
@@ -321,6 +322,15 @@ func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 // always returns the same homeScreen.
 func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, result core.Action) {
 	defer func() { result.Cmd = tea.Batch(result.Cmd, s.syncDocsGit()) }()
+	defer func() {
+		if result.Msg != nil {
+			s.closeGitDiff()
+		}
+		s.dismissInvalidGitDiff()
+	}()
+	if act, handled := s.gitDiffInput(sh, msg); handled {
+		return s, act
+	}
 	s.notePane()
 	if act, handled := s.documentTabInput(sh, msg); handled {
 		return s, s.finishHomeUpdate(sh, act)
@@ -409,8 +419,7 @@ func (s *homeScreen) languageServerKey(sh *core.Shared, k string) (core.Action, 
 	case core.MatchKey(k, symbolsKey):
 		s.closeCompletion()
 		if !s.panelToggles {
-			// Claimed and dropped, not passed on: alt+o must not reach the editor as a
-			// word motion just because the outline is locked away.
+			// Consume the shortcut even when the launch mode locks the outline away.
 			return core.Action{}, true
 		}
 		return s.toggleOutline(sh), true
@@ -493,7 +502,8 @@ func (s *homeScreen) View(sh *core.Shared) string {
 	}
 	body = s.viewCompletion(sh, body)
 	body = s.viewSignature(sh, body)
-	return s.viewHover(sh, body)
+	body = s.viewHover(sh, body)
+	return s.viewGitDiff(sh, body)
 }
 
 func (s *homeScreen) HelpView(sh *core.Shared) string {
@@ -508,6 +518,7 @@ func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 	s.refreshDiagnostics()
 	s.refreshPreview() // the pane's new width re-wraps the render
 	if resized {
+		s.closeGitDiff()
 		// A height-only resize moves both viewports, so re-sync once, but only on a real resize:
 		// the router re-lays out every message and would undo a hand-scrolled pane.
 		s.previewAt = -1
@@ -550,6 +561,12 @@ func (s *homeScreen) CrumbLabel(short bool) string {
 // and lose the editor state.
 func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) {
 	defer func() { result.Cmd = tea.Batch(result.Cmd, s.syncDocsGit()) }()
+	defer func() {
+		if result.Msg != nil {
+			s.closeGitDiff()
+		}
+		s.dismissInvalidGitDiff()
+	}()
 	if act, handled := s.receiveDocsGit(payload); handled {
 		return act
 	}
@@ -559,6 +576,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	case ReseedMsg, tea.FocusMsg:
 		defer func() { result.Cmd = tea.Batch(result.Cmd, s.refreshDocsGit()) }()
 	case tea.BlurMsg:
+		s.closeGitDiff()
 		s.idleDocsGit()
 	}
 	defer s.refreshDiagnostics()
@@ -576,6 +594,8 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	case baselineMsg:
 		s.applyBaseline(msg)
 		return core.Action{}
+	case gitDiffBaselineMsg:
+		return s.applyGitDiffBaseline(sh, msg)
 	case gutterRefreshMsg:
 		s.applyGutterRefresh(msg)
 		return core.Action{}

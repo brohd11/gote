@@ -13,6 +13,7 @@ import (
 // a pushed modal.
 func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
 	s.closeCompletion()
+	s.closeGitDiff()
 	dirty := s.dirtyDocs(sh)
 	if len(dirty) == 0 {
 		return core.Action{}, false

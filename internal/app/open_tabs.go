@@ -63,6 +63,7 @@ func (s *homeScreen) togglePanes(sh *core.Shared, change func()) tea.Cmd {
 	s.closeCompletion()
 	s.closeHover()
 	s.closeSignature()
+	s.closeGitDiff()
 	change()
 	s.rebuildModular(sh, noFocus)
 	if s.panelSlot(focus) == noFocus {

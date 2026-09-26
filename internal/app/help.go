@@ -160,6 +160,11 @@ func (s *homeScreen) helpText() string {
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel form")),
 	})
 	writeSection("editor", s.editor.HelpBindings())
+	writeSection("git diff", []key.Binding{gitDiffKey})
+	b.WriteString("Click a git marker to inspect its hunk against HEAD (including unsaved edits).\n" +
+		"The shortcut also accepts the hunk's three context lines. Up/Down and PgUp/PgDn scroll; Esc closes.\n" +
+		"Wheel over the popup scrolls it; wheel outside closes it and scrolls the panel.\n" +
+		"Typing, outside clicks, pane/document changes and layout changes close it.\n\n")
 	b.WriteString(clickHelp(s.sh) + "\n")
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()
