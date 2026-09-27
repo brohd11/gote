@@ -395,7 +395,7 @@ func (c *Ctx) buffer(id string) (*editor.Screen, bool) {
 	return entry.editor, true
 }
 
-// bufferInfo returns the Open-list metadata for id.
+// bufferInfo returns the open-buffer metadata for id.
 func (c *Ctx) bufferInfo(id string) (DocFile, bool) {
 	entry, ok := c.open.get(id)
 	if !ok {
@@ -458,7 +458,7 @@ func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 	c.assignGroup(newPath)
 }
 
-// OpenDocs lists the open buffers in opening order, for the open-docs list.
+// OpenDocs lists the open buffers in opening order.
 func (c *Ctx) OpenDocs() []DocFile { return c.open.docs() }
 
 // CloseDoc removes id from the open set (unknown ids are ignored) and returns the buffer

@@ -33,9 +33,6 @@ import (
 func testConfig() Config {
 	cfg := DefaultConfig()
 	cfg.AutoLSP = false
-	// Most screen tests predate the tab default and exercise the four-pane list layout.
-	// Tests of startup configuration use DefaultConfig directly.
-	cfg.OpenDocsView = "list"
 	return cfg
 }
 
@@ -48,7 +45,6 @@ func newHome(t *testing.T) (*homeScreen, *core.Shared) {
 func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 	t.Helper()
 	cfg := DefaultConfig()
-	cfg.OpenDocsView = "list"
 	return newHomeCfg(t, cfg, opts)
 }
 
@@ -57,7 +53,6 @@ func newHomeWith(t *testing.T, opts Options) (*homeScreen, *core.Shared) {
 // about the lock.
 func minimalCfg() Config {
 	cfg := DefaultConfig()
-	cfg.OpenDocsView = "list"
 	cfg.SingleFile.AllowPanelToggle = true
 	return cfg
 }
@@ -70,7 +65,6 @@ func newHomeRouter(t *testing.T, opts Options) (tea.Model, *homeScreen, *core.Sh
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	cfg := DefaultConfig()
-	cfg.OpenDocsView = "list"
 	sh := core.NewShared(New("test", cfg, opts))
 	r := core.NewRouter(sh, []core.TabEntry{
 		{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},
@@ -121,11 +115,7 @@ func focusedPane(s *homeScreen, sh *core.Shared) string {
 	return "editor"
 }
 
-// TestHomePaneNavigation walks gote's actual grid — [[docs, open], [editor]], so
-// flat order [docs, open, editor] — with the pane cycle, and confirms the editor
-// types a tab once focus is on it. This is the whole point of the change: before
-// it, the editor's capture ate every key including tab, so the pane could only be
-// left through the ctrl+x exit hook and tab did nothing at all.
+// TestHomePaneNavigation cycles between Docs and the editor, skipping the tab bar.
 func TestHomePaneNavigation(t *testing.T) {
 	s, sh := newHome(t)
 
@@ -134,13 +124,9 @@ func TestHomePaneNavigation(t *testing.T) {
 	if got := focusedPane(s, sh); got != "list" {
 		t.Fatalf("focus should start on the docs list, got %s", got)
 	}
-	s.Update(sh, paneNext) // docs → open, still a list
-	if got := focusedPane(s, sh); got != "list" {
-		t.Fatalf("the first step should land on the open list, got %s", got)
-	}
-	s.Update(sh, paneNext) // open → editor
+	s.Update(sh, paneNext) // docs → editor
 	if got := focusedPane(s, sh); got != "editor" {
-		t.Fatalf("the second step should reach the editor pane, got %s", got)
+		t.Fatalf("the first step should reach the editor pane, got %s", got)
 	}
 
 	// The editor now owns tab. Read the result off the render, which is all the app
@@ -165,7 +151,6 @@ func TestHomePaneNavigation(t *testing.T) {
 	}
 	// Round again to the editor, and the buffer typed into it is still there.
 	s.Update(sh, paneNext)
-	s.Update(sh, paneNext)
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the cycle should return to the editor, got %s", got)
 	}
@@ -176,19 +161,20 @@ func TestHomePaneNavigation(t *testing.T) {
 
 func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 	s, sh := newHome(t)
-	s.setOpenDocsTabs(sh, false)
 
 	// The initial focus is the Docs pane, so both nudges move its trailing
-	// boundaries: the sidebar/editor seam and the Docs/Open seam.
+	// boundaries: the sidebar/editor seam and the Docs/Outline seam.
+	s.toggleOutline(sh)
+	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
 	s.modular.SetResizing(true)
 	s.modular.Nudge(5, 4)
 	s.modular.SetResizing(false)
 	if s.sidebarW != sidebarWidth+5 {
 		t.Fatalf("saved sidebar width = %d, want %d", s.sidebarW, sidebarWidth+5)
 	}
-	rows := s.sidebarSplits["docs/open"]
+	rows := s.sidebarSplits["docs/outline"]
 	if len(rows) != 2 || rows[0] <= 0.5 || rows[1] >= 0.5 {
-		t.Fatalf("saved Docs/Open split = %v, want the Docs pane enlarged", rows)
+		t.Fatalf("saved Docs/Outline split = %v, want the Docs pane enlarged", rows)
 	}
 
 	s.setSidebar(false)
@@ -215,7 +201,7 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 	s.setSidebar(false)
 	s.setPreview(previewPane)
 	state = s.modular.ResizeState()
-	if weights := state.Splits["main"].Weights; len(weights) != 2 || math.Abs(weights[0]/(weights[0]+weights[1])-wantFlex) > 1e-9 {
+	if weights := state.Splits["editors"].Weights; len(weights) != 2 || math.Abs(weights[0]/(weights[0]+weights[1])-wantFlex) > 1e-9 {
 		t.Fatalf("editor flex after rebuilds = %v, want leading share %g", weights, wantFlex)
 	}
 }
@@ -228,10 +214,9 @@ func TestHomeShiftTabLeavesEditor(t *testing.T) {
 	s, sh := newHome(t)
 
 	shiftTab := keyMsg("shift+tab")
-	s.Update(sh, shiftTab) // docs → open
-	s.Update(sh, shiftTab) // open → editor
+	s.Update(sh, shiftTab) // docs → editor
 	if got := focusedPane(s, sh); got != "editor" {
-		t.Fatalf("two shift+tab steps should reach the editor pane, got %s", got)
+		t.Fatalf("shift+tab should reach the editor pane, got %s", got)
 	}
 
 	s.Update(sh, keyMsg("hi"))
@@ -240,10 +225,9 @@ func TestHomeShiftTabLeavesEditor(t *testing.T) {
 		t.Fatalf("shift+tab must escape the capturing editor pane, got %s", got)
 	}
 
-	// Back to the editor (the cycle wraps through both lists) and type on: the two
+	// Back to the editor (the cycle wraps through Docs) and type on: the two
 	// runes must be adjacent. A tab would have expanded to editorTabWidth spaces
 	// between them, exactly as TestHomePaneNavigation asserts for bare tab.
-	s.Update(sh, shiftTab)
 	s.Update(sh, shiftTab)
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the cycle should return to the editor, got %s", got)
@@ -336,8 +320,8 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	if s.currentPath != a {
 		t.Fatalf("the pane should switch to the remaining doc %q, got %q", a, s.currentPath)
 	}
-	if v := stripANSI(s.View(sh)); strings.Contains(v, "b.txt") || !strings.Contains(v, "• a.txt") {
-		t.Fatalf("the pane should show %q's editor and the dot should follow it, render:\n%s", a, v)
+	if v := stripANSI(s.View(sh)); strings.Contains(v, "b.txt") || !strings.Contains(v, "a.txt") {
+		t.Fatalf("the pane should show %q's editor and tab, render:\n%s", a, v)
 	}
 
 	s.modular.FocusSlot(s.editorSlot()) // the exit focused the docs list; go back
@@ -346,7 +330,7 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	if s.currentPath != "" || len(c.OpenDocs()) != 0 {
 		t.Fatalf("the last exit should clear everything: path %q, open %v", s.currentPath, c.OpenDocs())
 	}
-	if !strings.Contains(stripANSI(s.View(sh)), "unsaved_1") {
+	if s.currentName != "unsaved_1" || s.editor.Text() != "" {
 		t.Fatalf("the pane should show the next fresh unsaved buffer, render:\n%s", stripANSI(s.View(sh)))
 	}
 }
@@ -357,10 +341,9 @@ func TestTypingPromotesStartupBuffer(t *testing.T) {
 	ed := s.editor
 
 	if got := c.OpenDocs(); len(got) != 0 {
-		t.Fatalf("the untouched startup buffer must stay out of Open, got %+v", got)
+		t.Fatalf("the untouched startup buffer must stay out of the tab bar, got %+v", got)
 	}
 	// Reach the editor and try two no-op edits first: neither changes the buffer.
-	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("left"))
 	s.Update(sh, keyMsg("backspace"))
@@ -371,12 +354,12 @@ func TestTypingPromotesStartupBuffer(t *testing.T) {
 	s.Update(sh, keyMsg("draft"))
 	got := c.OpenDocs()
 	if len(got) != 1 || got[0].Name != "unsaved_1" || got[0].Path != "" || got[0].ID != s.currentID {
-		t.Fatalf("the first edit should create the unsaved_1 Open row, got %+v", got)
+		t.Fatalf("the first edit should create the unsaved_1 tab, got %+v", got)
 	}
 	if tracked, _ := c.buffer(got[0].ID); tracked != ed {
 		t.Fatal("promotion must retain the exact startup editor")
 	}
-	if marks := openMarks(s); !reflect.DeepEqual(marks, []string{"• unsaved_1 (*)"}) {
+	if marks := openMarks(s); marks != "unsaved_1 (*)" {
 		t.Fatalf("the promoted row should be current and dirty, got %v", marks)
 	}
 	if len(c.Files) != 0 {
@@ -407,8 +390,8 @@ func TestCtrlNRetainsMultipleUnsavedBuffers(t *testing.T) {
 	if len(got) != 2 || got[0].Name != "unsaved_1" || got[1].Name != "unsaved_2" {
 		t.Fatalf("unsaved buffers should retain creation order, got %+v", got)
 	}
-	if marks := openMarks(s); !reflect.DeepEqual(marks, []string{"unsaved_1 (*)", "• unsaved_2"}) {
-		t.Fatalf("the Open rows should preserve dirty and current state, got %v", marks)
+	if marks := openMarks(s); marks != "unsaved_1 (*)  unsaved_2" {
+		t.Fatalf("the tabs should preserve dirty markers and opening order, got %v", marks)
 	}
 
 	s.switchBuffer(sh, got[0].ID)
@@ -486,7 +469,6 @@ func TestCtrlNLeavesFullPreviewForNewEditor(t *testing.T) {
 
 func TestPastePromotesStartupBuffer(t *testing.T) {
 	s, sh := newHome(t)
-	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, tea.PasteMsg{Content: "pasted\ntext"})
 
@@ -1112,8 +1094,8 @@ func TestReaderRendersLiveBuffer(t *testing.T) {
 	if v := stripANSI(doc.View(sh)); !strings.Contains(v, "• bullet") {
 		t.Fatalf("the reader should render the live buffer, got:\n%s", v)
 	}
-	if !strings.Contains(doc.Title, "a.md") {
-		t.Errorf("the reader should name the doc, got %q", doc.Title)
+	if doc.Title != "" {
+		t.Errorf("the reader should leave the filename to the tab bar, got %q", doc.Title)
 	}
 }
 
@@ -1156,7 +1138,7 @@ func TestReaderKeepsTheSidebar(t *testing.T) {
 	s.Update(sh, altP)
 
 	view := stripANSI(s.View(sh))
-	if !strings.Contains(view, "Docs") || !strings.Contains(view, "Open") {
+	if !strings.Contains(view, "Docs") || !strings.Contains(view, "a.md") {
 		t.Fatalf("the sidebar should stand beside the reader, frame:\n%s", view)
 	}
 	if !strings.Contains(view, "Title") || strings.Contains(view, "# Title") {
@@ -1697,7 +1679,6 @@ func TestQuitGate(t *testing.T) {
 
 	// Focus the editor pane and dirty the scratch buffer.
 	s.Update(sh, keyMsg("shift+tab"))
-	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("x"))
 
 	if names := s.dirtyDocs(sh); len(names) != 1 || names[0] != "unsaved_1" {
@@ -1787,7 +1768,6 @@ func TestHelpKey(t *testing.T) {
 	}
 
 	// Into the editor pane: ? is text now, so the buffer goes dirty.
-	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("shift+tab"))
 	s.Update(sh, keyMsg("?"))
 	if !s.editor.Dirty() {
@@ -2033,7 +2013,7 @@ func TestSaveUnsavedBufferBecomesNormalDocument(t *testing.T) {
 	}
 	docs := Of(sh).OpenDocs()
 	if len(docs) != 1 || docs[0].ID != path || docs[0].Path != path || docs[0].Name != "saved.md" {
-		t.Fatalf("the Open row should be rekeyed to the real file, got %+v", docs)
+		t.Fatalf("the open buffer should be rekeyed to the real file, got %+v", docs)
 	}
 	if files := Of(sh).Files; len(files) != 1 || files[0].Path != path {
 		t.Fatalf("the saved file should appear in Docs after reseed, got %+v", files)
@@ -2165,7 +2145,7 @@ func TestDeleteRemovesFile(t *testing.T) {
 // TestDeleteOpenDoc: deleting the doc the editor pane is showing takes it out of the open
 // set and moves the pane off it — onto the next open doc, and onto a fresh scratch buffer
 // when that was the only one. A file with no buffer left holding it is the point: without
-// the close, the Open list would keep a row for a document that no longer exists.
+// the close, the tab bar would keep a tab for a document that no longer exists.
 func TestDeleteOpenDoc(t *testing.T) {
 	model, s, sh, dir := renameFixture(t, "old.md", "body")
 
@@ -2192,7 +2172,7 @@ func TestDeleteOpenDoc(t *testing.T) {
 		t.Fatal("the deleted doc must leave the open set")
 	}
 	if len(c.OpenDocs()) != 0 {
-		t.Fatalf("the Open list should be empty, got %+v", c.OpenDocs())
+		t.Fatalf("the open-buffer collection should be empty, got %+v", c.OpenDocs())
 	}
 	if s.editor == ed || s.currentPath != "" {
 		t.Fatalf("the pane should have swapped to a scratch buffer, currentPath = %q", s.currentPath)
@@ -2468,24 +2448,15 @@ func TestHomeEditorMenuQuitGate(t *testing.T) {
 	}
 }
 
-// openMarks names each Open-list row as the sidebar prints it: the title with its flag.
-func openMarks(s *homeScreen) []string {
-	out := []string{}
-	for _, it := range s.openPanel.List().VisibleItems() {
-		row, ok := it.(docItem)
-		if !ok {
-			continue
-		}
-		out = append(out, row.Title()+row.Mark())
-	}
-	return out
+// openMarks reads the labels and markers emitted by the document bar.
+func openMarks(s *homeScreen) string {
+	s.refreshOpenTabs(s.sh)
+	row := stripANSI(s.openTabs.View(false))
+	return strings.TrimSpace(row)
 }
 
-// TestOpenListFlagsDirtyBuffers is the point of the feature: the sidebar is the only place
-// unsaved work in a buffer that is NOT on screen is visible. The flag has to track the
-// buffer live — nothing rebuilds the open list per keystroke — and it has to survive the
-// pane switching to another doc.
-func TestOpenListFlagsDirtyBuffers(t *testing.T) {
+// TestOpenTabsFlagDirtyBuffers keeps unsaved changes visible on background tabs.
+func TestOpenTabsFlagDirtyBuffers(t *testing.T) {
 	s, sh := newHome(t)
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.txt")
@@ -2493,7 +2464,7 @@ func TestOpenListFlagsDirtyBuffers(t *testing.T) {
 
 	s.openDoc(sh, a)
 	s.openDoc(sh, b)
-	if got := openMarks(s); !reflect.DeepEqual(got, []string{"a.txt", "• b.txt"}) {
+	if got := openMarks(s); got != "a.txt  b.txt" {
 		t.Fatalf("setup: two clean buffers should carry no flags, got %v", got)
 	}
 
@@ -2501,34 +2472,31 @@ func TestOpenListFlagsDirtyBuffers(t *testing.T) {
 	if !s.editor.Dirty() {
 		t.Fatal("setup: typing should have dirtied the buffer on screen")
 	}
-	// No reseed, no SetItems: the row answers from the buffer on every render.
-	if got := openMarks(s); !reflect.DeepEqual(got, []string{"a.txt", "• b.txt (*)"}) {
+	// Each render refreshes tab markers from the live buffer.
+	if got := openMarks(s); got != "a.txt  b.txt (*)" {
 		t.Fatalf("the edited buffer should be flagged without a rebuild, got %v", got)
 	}
 
 	s.openDoc(sh, a)
-	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt", "b.txt (*)"}) {
+	if got := openMarks(s); got != "a.txt  b.txt (*)" {
 		t.Fatalf("a dirty buffer must stay flagged once the pane leaves it, got %v", got)
 	}
-	// And it reaches the pixels: the flag is pinned past the suffix column, at the right
-	// of everything the row prints.
+	// The background tab keeps its marker in the composed screen too.
 	for _, line := range strings.Split(stripANSI(s.View(sh)), "\n") {
 		if strings.Contains(line, "b.txt") && !strings.Contains(strings.TrimRight(line, " │"), "(*)") {
-			t.Fatalf("the flag should reach the rendered sidebar row: %q", line)
+			t.Fatalf("the flag should reach the rendered tab row: %q", line)
 		}
 	}
 }
 
-// TestOpenListFlagClearsWhenBufferGoesClean: the flag is the buffer's own dirty state, so
-// it drops the moment the buffer is clean again — here by undoing back to the loaded
-// text — with no rebuild of the list in between.
-func TestOpenListFlagClearsWhenBufferGoesClean(t *testing.T) {
+// TestOpenTabsFlagClearsWhenBufferGoesClean checks markers after undo.
+func TestOpenTabsFlagClearsWhenBufferGoesClean(t *testing.T) {
 	s, sh := newHome(t)
 	path := filepath.Join(t.TempDir(), "a.txt")
 
 	s.openDoc(sh, path)
 	s.Update(sh, keyMsg("x"))
-	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt (*)"}) {
+	if got := openMarks(s); got != "a.txt (*)" {
 		t.Fatalf("setup: the edited buffer should be flagged, got %v", got)
 	}
 
@@ -2536,7 +2504,7 @@ func TestOpenListFlagClearsWhenBufferGoesClean(t *testing.T) {
 	if s.editor.Dirty() {
 		t.Fatal("setup: undoing the only edit should leave the buffer clean")
 	}
-	if got := openMarks(s); !reflect.DeepEqual(got, []string{"• a.txt"}) {
+	if got := openMarks(s); got != "a.txt" {
 		t.Fatalf("a clean buffer must lose its flag, got %v", got)
 	}
 }
@@ -2559,8 +2527,6 @@ func paneName(s *homeScreen) string {
 		return "docs"
 	case s.filePanel:
 		return "files"
-	case s.openPanel:
-		return "open"
 	case s.outlinePanel:
 		return "outline"
 	case s.previewPanel:
@@ -2576,25 +2542,21 @@ func paneName(s *homeScreen) string {
 func TestEscTogglesEditorAndLastPane(t *testing.T) {
 	s, sh := newHome(t)
 
-	s.Update(sh, keyMsg("shift+tab")) // docs → open
-	if got := paneName(s); got != "open" {
-		t.Fatalf("the cycle should reach the Open list, got %s", got)
-	}
-	s.Update(sh, keyMsg("shift+tab")) // open → editor
+	s.Update(sh, keyMsg("shift+tab")) // docs → editor
 	if got := paneName(s); got != "editor" {
 		t.Fatalf("the cycle should reach the editor, got %s", got)
 	}
 
 	s.Update(sh, keyMsg("esc"))
-	if got := paneName(s); got != "open" {
-		t.Fatalf("esc should hand the keys back to Open, the pane they came from, got %s", got)
+	if got := paneName(s); got != "docs" {
+		t.Fatalf("esc should hand the keys back to Docs, the pane they came from, got %s", got)
 	}
 	s.Update(sh, keyMsg("esc"))
 	if got := paneName(s); got != "editor" {
 		t.Fatalf("esc should toggle back to the editor, got %s", got)
 	}
 	s.Update(sh, keyMsg("esc"))
-	if got := paneName(s); got != "open" {
+	if got := paneName(s); got != "docs" {
 		t.Fatalf("the toggle should keep alternating, got %s", got)
 	}
 }

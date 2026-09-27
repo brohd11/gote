@@ -13,6 +13,54 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func TestDocumentTabColorsFollowGroupFocus(t *testing.T) {
+	s, sh := groupHome(t)
+	a, _ := seedDoc(t, s, sh, "a.md", "# A")
+	b, _ := seedDoc(t, s, sh, "b.md", "# B")
+	s.openDoc(sh, b)
+	s.moveTab(sh, 1)
+	left, right := s.groups()[0], s.groups()[1]
+	if left.currentID != a {
+		t.Fatal("split lost first document")
+	}
+	assertTabs := func(want *editorGroup) {
+		t.Helper()
+		s.View(sh)
+		for _, g := range s.groups() {
+			background := core.MutedColor
+			if g == want {
+				background = core.FocusedColor
+			}
+			label := " " + g.currentName
+			if g.fullPreview != nil {
+				label += " [P]"
+			}
+			label += " "
+			styled := lipgloss.NewStyle().Foreground(core.OnFocusedColor).Background(background).Bold(true).Render(label)
+			if got := g.openTabs.View(false); !strings.Contains(got, styled) {
+				t.Fatalf("group %s has incorrect focus color: %q", g.currentName, got)
+			}
+		}
+	}
+	assertTabs(right)
+	s.modular.FocusSlot(s.panelSlot(left.editorPanel))
+	assertTabs(left)
+	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
+	assertTabs(nil)
+	s.modular.FocusSlot(s.panelSlot(right.editorPanel))
+	s.setPreview(previewPane)
+	s.modular.FocusSlot(s.panelSlot(s.previewPanel))
+	assertTabs(nil)
+	s.toggleBottom(sh)
+	s.modular.FocusSlot(s.panelSlot(s.bottom))
+	assertTabs(nil)
+	s.modular.FocusSlot(s.panelSlot(right.editorPanel))
+	s.toggleFullPreview()
+	assertTabs(right)
+	s.modular.FocusSlot(s.panelSlot(left.editorPanel))
+	assertTabs(left)
+}
+
 func tabTestHome(t *testing.T) (tea.Model, *homeScreen, *core.Shared) {
 	t.Helper()
 	model, s, sh := newHomeRouter(t, Options{})
@@ -26,107 +74,82 @@ func TestOpenDocsViewConfig(t *testing.T) {
 	for _, value := range []string{"", "list", "tabs", "unknown"} {
 		t.Run(value, func(t *testing.T) {
 			cfg := writeConfig(t, "open_docs_view: "+value+"\n")
-			want := "tabs"
-			if value == "list" {
-				want = "list"
-			}
-			if cfg.OpenDocsView != want {
-				t.Fatalf("view = %q, want %q", cfg.OpenDocsView, want)
-			}
 			cfg.AutoLSP = false
 			c := New("test", cfg, Options{})
 			defer c.close()
 			sh := core.NewShared(c)
 			s := NewHomeScreen(sh).(*homeScreen)
-			if s.tabsVisible() != (want == "tabs") {
-				t.Fatal("startup ignored configured view")
+			if !s.tabsVisible() {
+				t.Fatal("legacy view setting disabled tabs")
 			}
 		})
 	}
 }
 
 func TestDocumentKeysThroughRouter(t *testing.T) {
-	for _, tabs := range []bool{false, true} {
-		t.Run(map[bool]string{false: "list", true: "tabs"}[tabs], func(t *testing.T) {
-			model, s, sh := tabTestHome(t)
-			// Filtering requires a document; an empty Docs pane has no action row.
-			dir, err := DocsDir()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("notes\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			s.Receive(sh, ReseedMsg{})
-			s.setOpenDocsTabs(sh, tabs)
-			s.newUnsavedBuffer(sh)
-			firstID, firstEditor := s.currentID, s.editor
-			model, _ = model.Update(keyMsg("A"))
-			position := firstEditor.CursorPosition()
-			s.newUnsavedBuffer(sh)
-			secondID := s.currentID
-			model, _ = model.Update(keyMsg("alt+9"))
-			if s.currentID != firstID || s.editor != firstEditor || !s.editorPanel.Focused() {
-				t.Fatal("Alt+9 did not switch from the editor")
-			}
-			if s.editor.CursorPosition() != position || s.editor.Text() != "A" {
-				t.Fatal("switch reset buffer or cursor")
-			}
-			model, _ = model.Update(keyMsg("alt+9"))
-			if s.currentID != secondID {
-				t.Fatal("previous did not wrap")
-			}
-			model, _ = model.Update(keyMsg("alt+0"))
-			if s.currentID != firstID {
-				t.Fatal("next did not wrap")
-			}
-			model, _ = model.Update(keyMsg("["))
-			model, _ = model.Update(keyMsg("]"))
-			if s.currentID != firstID || !strings.Contains(s.editor.Text(), "[]") {
-				t.Fatal("brackets were stolen from editor")
-			}
-			s.modular.FocusSlot(s.panelSlot(s.docsPane()))
-			model, _ = model.Update(keyMsg("]"))
-			if s.currentID != secondID {
-				t.Fatal("bare bracket did not navigate outside text capture")
-			}
-			s.modular.FocusSlot(s.panelSlot(s.docsPane()))
-			model, _ = model.Update(keyMsg("/"))
-			if !s.modular.Filtering() {
-				t.Fatal("test filter was not started")
-			}
-			model, _ = model.Update(keyMsg("["))
-			if s.currentID != secondID || !s.modular.Filtering() {
-				t.Fatal("bracket escaped filter")
-			}
-		})
+	model, s, sh := tabTestHome(t)
+	// Filtering requires a document; an empty Docs pane has no action row.
+	dir, err := DocsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.Receive(sh, ReseedMsg{})
+	s.newUnsavedBuffer(sh)
+	firstID, firstEditor := s.currentID, s.editor
+	model, _ = model.Update(keyMsg("A"))
+	position := firstEditor.CursorPosition()
+	s.newUnsavedBuffer(sh)
+	secondID := s.currentID
+	model, _ = model.Update(keyMsg("alt+9"))
+	if s.currentID != firstID || s.editor != firstEditor || !s.editorPanel.Focused() {
+		t.Fatal("Alt+9 did not switch from the editor")
+	}
+	if s.editor.CursorPosition() != position || s.editor.Text() != "A" {
+		t.Fatal("switch reset buffer or cursor")
+	}
+	model, _ = model.Update(keyMsg("alt+9"))
+	if s.currentID != secondID {
+		t.Fatal("previous did not wrap")
+	}
+	model, _ = model.Update(keyMsg("alt+0"))
+	if s.currentID != firstID {
+		t.Fatal("next did not wrap")
+	}
+	model, _ = model.Update(keyMsg("["))
+	model, _ = model.Update(keyMsg("]"))
+	if s.currentID != firstID || !strings.Contains(s.editor.Text(), "[]") {
+		t.Fatal("brackets were stolen from editor")
+	}
+	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
+	model, _ = model.Update(keyMsg("]"))
+	if s.currentID != secondID {
+		t.Fatal("bare bracket did not navigate outside text capture")
+	}
+	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
+	model, _ = model.Update(keyMsg("/"))
+	if !s.modular.Filtering() {
+		t.Fatal("test filter was not started")
+	}
+	model, _ = model.Update(keyMsg("["))
+	if s.currentID != secondID || !s.modular.Filtering() {
+		t.Fatal("bracket escaped filter")
 	}
 }
 
-func TestOpenTabsTogglePreservesStateAndGeometry(t *testing.T) {
+func TestOpenTabsGeometryAndFocus(t *testing.T) {
 	_, s, sh := tabTestHome(t)
-	s.setOpenDocsTabs(sh, false)
 	s.newUnsavedBuffer(sh)
 	s.Update(sh, keyMsg("A"))
 	ed, id, position := s.editor, s.currentID, s.editor.CursorPosition()
-	s.sidebarW, s.editorFlex = 34, 0.6
-	s.sidebarSplits["docs/open"] = []float64{0.7, 0.3}
+	s.sidebarW = 34
 	s.setPreview(previewPane)
 	s.toggleBottom(sh)
-	s.modular.FocusSlot(s.panelSlot(s.openPanel))
-	s.setOpenDocsTabs(sh, true)
 	s.View(sh)
-	if !s.editorPanel.Focused() || s.openPanel.Focused() {
-		t.Fatal("removed Open panel kept focus")
-	}
 	if s.openTabs.h != 1 || s.openTabs.x != 34 || s.openTabs.y != sh.BodyY() {
 		t.Fatalf("tab geometry = %+v", s.openTabs)
-	}
-	if s.panelSlot(s.openPanel) != noFocus {
-		t.Fatal("Open list still occupies a slot")
-	}
-	if s.editor != ed || s.currentID != id || s.editor.CursorPosition() != position {
-		t.Fatal("toggle replaced editor state")
 	}
 	// Pane traversal skips the non-focusable bar.
 	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
@@ -134,34 +157,17 @@ func TestOpenTabsTogglePreservesStateAndGeometry(t *testing.T) {
 	if !s.editorPanel.Focused() {
 		t.Fatal("tab bar became a keyboard focus stop")
 	}
-	// Tab mode adds one row and removes the editor's title chrome.
+	s.setSidebar(false)
 	s.View(sh)
-	_, y, _ := s.editor.CursorAnchor()
-	s.setOpenDocsTabs(sh, false)
-	s.View(sh)
-	_, listY, _ := s.editor.CursorAnchor()
-	titleRows := lipgloss.Height(core.RenderTitleBar(s.currentName))
-	if y != listY+1-titleRows {
-		t.Fatalf("cursor anchor did not account for hidden title: tabs=%d list=%d", y, listY)
+	if s.openTabs.x != 0 || s.openTabs.w != 100 || s.openTabs.h != 1 || s.editorSlot() != 1 {
+		t.Fatal("hidden sidebar also hid or misplaced tabs")
 	}
-	if s.sidebarW != 34 || s.sidebarSplits["docs/open"][0] != 0.7 || s.editorFlex != 0.6 {
-		t.Fatal("toggle changed pane proportions")
-	}
-	if s.editor != ed || s.editor.Text() != "A" {
-		t.Fatal("toggle lost edits")
+	if s.editor != ed || s.currentID != id || s.editor.CursorPosition() != position || s.editor.Text() != "A" {
+		t.Fatal("layout rebuild lost editor state")
 	}
 	s.Update(sh, keyMsg("ctrl+z"))
 	if s.editor.Text() != "" {
-		t.Fatal("toggle lost undo history")
-	}
-	s.setOpenDocsTabs(sh, true)
-	s.setSidebar(false)
-	s.View(sh)
-	if s.openTabs.x != 0 || s.openTabs.w != 100 || s.openTabs.h != 1 {
-		t.Fatal("hidden sidebar also hid or narrowed tabs")
-	}
-	if s.editorSlot() != 1 {
-		t.Fatal("editor slot not resolved in sidebar-free tab layout")
+		t.Fatal("layout rebuild lost undo history")
 	}
 }
 
@@ -172,7 +178,6 @@ func TestOpenTabsMouseAndPreview(t *testing.T) {
 	s.Update(sh, keyMsg("A"))
 	s.newUnsavedBuffer(sh)
 	secondID := s.currentID
-	s.setOpenDocsTabs(sh, true)
 	s.toggleFullPreview()
 	model.View()
 	row := ansi.Strip(s.openTabs.View(false))
@@ -197,14 +202,7 @@ func TestOpenTabsMouseAndPreview(t *testing.T) {
 	if _, handled := s.documentTabInput(sh, tea.MouseReleaseMsg{X: x, Y: s.openTabs.y, Button: tea.MouseLeft}); handled {
 		t.Fatal("bar swallowed another pane's release")
 	}
-	reader := s.fullPreview
-	s.setOpenDocsTabs(sh, false)
-	if s.fullPreview != reader {
-		t.Fatal("view toggle replaced the reader")
-	}
-	if !strings.Contains(s.fullPreview.Title, "preview") {
-		t.Fatal("list view did not restore reader label")
-	}
+
 }
 
 func TestOpenTabsSavedNamesAndClose(t *testing.T) {
@@ -220,7 +218,6 @@ func TestOpenTabsSavedNamesAndClose(t *testing.T) {
 		}
 		s.openDoc(sh, path)
 	}
-	s.setOpenDocsTabs(sh, true)
 	s.SetSize(sh, 300, 30)
 	s.View(sh)
 	row := ansi.Strip(s.openTabs.View(false))
@@ -246,7 +243,6 @@ func TestOpenTabsHideEditorTitlesAcrossBufferSwitches(t *testing.T) {
 	firstID := s.currentID
 	s.newUnsavedBuffer(sh)
 	secondID := s.currentID
-	s.setOpenDocsTabs(sh, true)
 	for _, id := range []string{firstID, secondID} {
 		s.switchBuffer(sh, id)
 		model.View()
@@ -260,42 +256,16 @@ func TestOpenTabsHideEditorTitlesAcrossBufferSwitches(t *testing.T) {
 			t.Fatal("first-row click or popup anchor retained the old title offset")
 		}
 	}
-	s.setOpenDocsTabs(sh, false)
-	for _, id := range []string{firstID, secondID} {
-		s.switchBuffer(sh, id)
-		if !strings.Contains(ansi.Strip(s.editor.View(sh)), s.currentName) {
-			t.Fatal("list mode did not restore retained editor title")
-		}
-	}
 }
 
 func TestOpenTabsActionsAndMinimal(t *testing.T) {
-	model, s, sh := tabTestHome(t)
-	for _, want := range []bool{true, false} {
-		s.modular.FocusSlot(s.panelSlot(s.docsPane()))
-		model, _ = model.Update(keyMsg("a"))
-		model = choosePickerRow(t, model, "Editor Settings")
-		view := "list"
-		if want {
-			view = "tabs"
+	_, s, sh := tabTestHome(t)
+	for _, name := range pickerLabels(s.editorSettingsMenu()) {
+		if strings.Contains(name, "Show open documents as") {
+			t.Fatal("obsolete view toggle remains in Actions")
 		}
-		model = choosePickerRow(t, model, "Show open documents as "+view)
-		if model.(core.Router).Top() != s || s.tabsVisible() != want {
-			t.Fatal("Actions did not toggle and dismiss")
-		}
-		if Of(sh).Config.OpenDocsView != "list" {
-			t.Fatal("session toggle rewrote startup preference")
-		}
-	}
-	path, err := ConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("session toggle wrote a config file")
 	}
 	s.minimal = true
-	s.setOpenDocsTabs(sh, true)
 	if s.tabsVisible() {
 		t.Fatal("minimal launch showed tabs")
 	}

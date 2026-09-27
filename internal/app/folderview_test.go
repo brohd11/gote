@@ -225,7 +225,7 @@ func TestFolderViewNavigationKeys(t *testing.T) {
 }
 
 func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
-	for _, state := range []string{"filter", "editor", "open", "flat", "hidden", "resizing"} {
+	for _, state := range []string{"filter", "editor", "flat", "hidden", "resizing"} {
 		t.Run(state, func(t *testing.T) {
 			root := scanTree(t)
 			model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
@@ -239,11 +239,6 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 				model, _ = model.Update(keyMsg("/"))
 			case "editor":
 				s.modular.FocusSlot(s.editorSlot())
-			case "open":
-				s.modular.FocusSlot(1)
-				if !s.openPanel.Focused() {
-					t.Fatal("expected Open panel focus")
-				}
 			case "flat":
 				model, _ = model.Update(altKey('f'))
 			case "hidden":
@@ -480,7 +475,7 @@ func TestFileViewShortcutEmptyListsAndDirectories(t *testing.T) {
 
 func TestFileViewShortcutRespectsInputAndFocus(t *testing.T) {
 	for _, folder := range []bool{false, true} {
-		for _, state := range []string{"editor", "open", "filter", "resizing", "hidden", "bottom"} {
+		for _, state := range []string{"editor", "filter", "resizing", "hidden", "bottom"} {
 			t.Run(fmt.Sprintf("folder=%v/%s", folder, state), func(t *testing.T) {
 				model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: scanTree(t), Depth: 3, DepthSet: true})
 				defer Of(sh).close()
@@ -492,8 +487,6 @@ func TestFileViewShortcutRespectsInputAndFocus(t *testing.T) {
 				switch state {
 				case "editor":
 					s.modular.FocusSlot(s.editorSlot())
-				case "open":
-					s.modular.FocusSlot(s.panelSlot(s.openPanel))
 				case "filter":
 					model, _ = model.Update(keyMsg("/"))
 					model, _ = model.Update(keyMsg("no"))

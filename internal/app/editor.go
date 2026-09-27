@@ -34,8 +34,8 @@ func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
 	}
 }
 
-// installScratch puts a fresh untracked scratch editor in the pane, previewing its
-// unsaved_N title; its Open row waits for the first edit or ctrl+n.
+// installScratch puts a fresh untracked scratch editor in the pane. Its tab waits
+// for the first edit or ctrl+n.
 func (s *homeScreen) installScratch(c *Ctx) {
 	id, name := c.newUnsavedIdentity()
 	opts := s.editorOpts(c)
@@ -59,7 +59,6 @@ func (s *homeScreen) newUnsavedBuffer(sh *core.Shared) core.Action {
 		s.configureSignColumns()
 	}
 	s.gutter = gutter{}
-	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	cmd := tea.Batch(s.paneChild(), s.enforcePreview(), s.modular.FocusSlot(s.editorSlot()))
 	return core.Seq(closePreview, core.Async(cmd))
 }
@@ -75,7 +74,6 @@ func (s *homeScreen) promoteEditedScratch(sh *core.Shared) {
 		return
 	}
 	c.trackUnsaved(s.currentID, s.currentName, s.editor)
-	s.openPanel.SetItems(openDocItems(c, s.currentID))
 }
 
 // editorContextItems are gote's view toggles on the editor's right-click menu, rebuilt per

@@ -277,10 +277,7 @@ func (s *homeScreen) restoreSession(c *Ctx) bool {
 	}
 	s.currentID, s.currentPath, s.currentName = active, active, docName(active)
 	s.editor = ed
-	// Seeded here because nothing else does it before the first pick, and a restored
-	// session that showed an empty Open list would look like it had failed.
 	s.restoreGroups(c, session)
-	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	return true
 }
 

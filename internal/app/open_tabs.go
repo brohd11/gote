@@ -20,6 +20,7 @@ var (
 // input without introducing a keyboard-focus stop for the bar.
 type documentTabBar struct {
 	*components.TabBar
+	group      *editorGroup
 	x, y, w, h int
 	mouseDown  bool
 }
@@ -30,7 +31,11 @@ func (p *documentTabBar) SetSize(w, h int) {
 	p.TabBar.SetSize(w, h)
 }
 
-func (s *homeScreen) tabsVisible() bool { return (s.openDocsTabs || len(s.groups()) > 1) && !s.minimal }
+func (p *documentTabBar) View(bool) string {
+	return p.TabBar.View(p.group != nil && p.group.editorPanel != nil && p.group.editorPanel.Focused())
+}
+
+func (s *homeScreen) tabsVisible() bool { return !s.minimal }
 
 func (s *homeScreen) readerTitle() string {
 	if s.tabsVisible() {
@@ -70,39 +75,6 @@ func (s *homeScreen) togglePanes(sh *core.Shared, change func()) tea.Cmd {
 		focus = s.editorPanel
 	}
 	return s.modular.FocusSlot(s.panelSlot(focus))
-}
-
-func (s *homeScreen) setOpenDocsTabs(sh *core.Shared, tabs bool) core.Action {
-	if s.minimal || len(s.groups()) > 1 || tabs == s.openDocsTabs {
-		return core.Action{}
-	}
-	cmd := s.togglePanes(sh, func() {
-		s.openDocsTabs = tabs
-		s.openTabs.mouseDown = false
-		if s.fullPreview != nil {
-			// Change title chrome without replacing the reader and losing its scroll.
-			s.fullPreview.Title = s.readerTitle()
-		}
-	})
-	s.refreshOpenTabs(sh)
-	s.previewAt = -1
-	s.refreshPreview()
-	s.syncPreviewScroll()
-	return core.Async(cmd)
-}
-
-func (s *homeScreen) openDocsViewItem() components.Item {
-	view := "tabs"
-	if s.openDocsTabs {
-		view = "list"
-	}
-	return components.Item{
-		Name: "Show open documents as " + view,
-		Desc: "change the Open view for this session",
-		Pick: func(sh *core.Shared) core.Action {
-			return s.setOpenDocsTabs(sh, !s.openDocsTabs)
-		},
-	}
 }
 
 func (s *homeScreen) refreshOpenTabs(sh *core.Shared) {

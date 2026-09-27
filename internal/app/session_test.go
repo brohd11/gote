@@ -364,7 +364,6 @@ func TestCorruptSessionsFileIsSurvivable(t *testing.T) {
 func restoredHome(t *testing.T, dir string) (*homeScreen, *core.Shared) {
 	t.Helper()
 	cfg := DefaultConfig()
-	cfg.OpenDocsView = "list"
 	sh := core.NewShared(New("test", cfg, Options{Mode: ModeScan, Dir: dir}))
 	s := NewHomeScreen(sh).(*homeScreen)
 	s.gitDocs.timer = noDocsGitTimer

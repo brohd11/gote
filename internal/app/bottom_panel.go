@@ -87,7 +87,7 @@ func (p *bottomDock) View(focused bool) string {
 	if row < 0 || p.width < 2 {
 		return background
 	}
-	return core.Composite(background, p.tabs.View(false), 1, row)
+	return core.Composite(background, p.tabs.View(focused), 1, row)
 }
 
 func (p *bottomDock) Focus() {

@@ -19,8 +19,6 @@ type Config struct {
 	// FolderView starts the sidebar in the folder view instead of the flat scan list (the
 	// alt+t preset); the scan still runs.
 	FolderView bool `yaml:"folder_view"`
-	// OpenDocsView selects the startup presentation; Actions changes only the session.
-	OpenDocsView string `yaml:"open_docs_view"`
 	// IndentGuides makes the editor visualize complete leading indent levels. It is
 	// off by default so existing configs retain the uncluttered rendering.
 	IndentGuides bool `yaml:"indent_guides"`
@@ -145,10 +143,9 @@ type VaultConfig struct {
 // directories. Default names the home store it already resolves to, to show the key.
 func DefaultConfig() Config {
 	return Config{
-		ScanDepth:    5,
-		OpenDocsView: "tabs",
-		AutoLSP:      true,
-		Project:      ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
+		ScanDepth: 5,
+		AutoLSP:   true,
+		Project:   ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
 		SingleFile: SingleFileConfig{
 			ModeDefaults:     ModeDefaults{GitGutter: true, DiagnosticsGutter: false, AllowLSP: true},
 			AllowPanelToggle: false,
@@ -276,9 +273,6 @@ func LoadConfig() (Config, error) {
 		return DefaultConfig(), err
 	}
 	normalizeExtensions(&cfg)
-	if cfg.OpenDocsView != "tabs" && cfg.OpenDocsView != "list" {
-		cfg.OpenDocsView = "tabs"
-	}
 	if cfg.ScanDepth <= 0 {
 		cfg.ScanDepth = 5
 	}

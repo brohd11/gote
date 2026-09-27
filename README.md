@@ -37,16 +37,15 @@ terminal's option-as-meta setting.
 
 ### Multi Document
 
-Open documents can appear in the sidebar list or in a tab bar above the editor.
-Use **Actions → Editor Settings → Show open documents as tabs/list** to switch for the current session.
-Tabs are the default; set `open_docs_view: list` in `~/.gote/config.yml` to put open
-documents back in the sidebar.
+Open documents appear in a tab bar above each editor group. The former Open sidebar
+list and `open_docs_view` setting have been removed; existing `open_docs_view` entries
+are ignored.
 
-**Alt+9 / Alt+0** switch to the previous/next open document while editing, in either
-view, within the active editor group. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
+**Alt+9 / Alt+0** switch to the previous/next open document while editing
+within the active editor group. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
 show `(*)` for unsaved changes, `(!)` for changes on disk, `(!*)` for both, and
 `[P]` on the current document in full preview. The same change markers appear in
-the Open list and editor title.
+the editor title in single-file mode.
 
 **Alt+T** moves the current tab right. At the rightmost group it creates a
 new side-by-side group, provided the source has at least two tabs. **Ctrl+T** moves
@@ -61,9 +60,8 @@ remaining tabs to a neighbor. Group tabs, selections, widths, and the active gro
 restore with the project or vault; unsaved buffers are not restored.
 
 The Markdown side preview follows the active document. Full preview replaces only
-that group's editor. Multiple groups always show tab bars; the single-group list/tabs
-preference returns when the split closes. Splits are unavailable in minimal single-file
-mode. **Actions → Editor groups** also provides both move actions and group closing.
+that group's editor. Tab bars remain visible when the split closes. Splits are
+unavailable in minimal single-file mode. **Actions → Editor groups** also provides both move actions and group closing.
 
 When the terminal regains focus, gote checks loaded open documents for changes on
 disk. Clean buffers reload automatically, preserving the cursor and scroll position
@@ -71,11 +69,14 @@ where possible and clearing undo history. Dirty buffers keep your edits. Saving
 checks the file again and asks for acknowledgement before overwriting external
 changes (or recreating a deleted file). Cancelling keeps your buffer and its marker.
 Click a tab to open it; overflow arrows scroll the bar without changing documents.
-Tab mode omits the duplicate filename header in the editor and full preview.
+Tabs replace the filename header in the editor and full preview.
 The bar remains visible with the sidebar hidden. Single-file mode starts minimal.
 
+Unfocused editors keep their syntax colors and hide the caret. Their scrollbars and
+selected tab backgrounds use the muted theme color; the focused group keeps the accent.
+
 `esc` toggles between the editor and the pane you were last in. Leaving the editor hands
-the keys back to the docs list, the Open list, the outline, the preview column or the
+the keys back to the docs list, the outline, the preview column or the
 bottom panel — whichever held them last — and `esc` there returns to the editor. With
 nothing yet to remember, and when the remembered pane has since been closed, it falls back
 to the docs list; with the sidebar hidden and nowhere else to go, it brings the sidebar
@@ -85,9 +86,9 @@ Default mode shows a sidebar with docs in a location folder and open documents i
 `gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
 The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
 
-Press `ctrl+n` to create a pathless buffer in the Open list. New buffers use the first
+Press `ctrl+n` to create a pathless buffer in a new tab. New buffers use the first
 available `unsaved_N` name, so closing or saving one releases its number; typing or
-pasting into the empty startup buffer adds it to Open the same way. `ctrl+s` gives an
+pasting into the empty startup buffer adds its tab the same way. `ctrl+s` gives an
 unsaved buffer a filename, after which it is listed and managed like any other document.
 This shortcut is intentionally unavailable in the chrome-less single-document mode.
 
@@ -263,9 +264,8 @@ Signature help needs no key: it appears above the cursor when you open an argume
 and follows the parameter you are on. Gote sends each request only where the server said
 it can answer; unsupported outline panels show an unavailable message.
 
-The outline is a filterable tree in the sidebar and starts hidden. In tab mode it sits
-below Docs; in list mode the order is Docs, Open, Outline. Nested server symbols keep
-their hierarchy. Enter or a click jumps to a symbol, left/right and space fold branches,
+The outline is a filterable tree below Docs in the sidebar and starts hidden.
+Nested server symbols keep their hierarchy. Enter or a click jumps to a symbol, left/right and space fold branches,
 and the selection follows the enclosing symbol while you edit. The panel refreshes after
 document switches and settled edits. A server without document-symbol support leaves an
 unavailable message in the panel instead of failing the session.

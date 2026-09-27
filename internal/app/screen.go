@@ -13,7 +13,7 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-// sidebarWidth is the fixed cell width of the docs/open column; the editor flexes.
+// sidebarWidth is the fixed cell width of the docs column; the editor flexes.
 const sidebarWidth = 30
 
 // The home screen's own keys. Panel toggles carry a modifier, so they fire even while
@@ -71,8 +71,7 @@ const (
 // raises it, and the home screen reseeds and rebuilds its lists on receipt.
 type ReseedMsg struct{}
 
-// homeScreen is gote's root screen: a ModularScreen with a hideable sidebar (docs and open
-// lists) beside the editor. It rebuilds its inner ModularScreen on layout toggles but
+// homeScreen is gote's root screen: a ModularScreen with a hideable Docs sidebar beside the editor. It rebuilds its inner ModularScreen on layout toggles but
 // keeps the panels (so list state and buffers survive) and stays the same instance, so the
 // router never re-Inits it over a dirty buffer.
 type homeScreen struct {
@@ -92,9 +91,7 @@ type homeScreen struct {
 	modular              *components.ModularScreen
 	docsPanel            *components.CompactListPanel
 	filePanel            *components.FilePanel // the folder view alt+f swaps into the docs slot
-	openPanel            *components.CompactListPanel
 	outlinePanel         *components.TreePanel
-	openDocsTabs         bool
 	panelSlots           map[components.Panel]int
 	lastPane             components.Panel            // the non-editor pane esc hands the keys back to
 	previewPanel         *components.ScrollContainer // the live preview pane
@@ -147,7 +144,7 @@ var _ core.Crumber = (*homeScreen)(nil)
 var _ core.ChromeMasker = (*homeScreen)(nil)
 var _ core.QuitGater = (*homeScreen)(nil)
 
-// NewHomeScreen builds the root screen: the docs list, an empty Open list, and a scratch
+// NewHomeScreen builds the root screen: the docs list, document tabs, and a scratch
 // buffer. ModeFile builds the same screen minimally (sidebar unreachable, chrome masked,
 // the given file in the editor), reusing the editor pane's wiring.
 func NewHomeScreen(sh *core.Shared) core.Screen {
@@ -156,7 +153,6 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Which view the sidebar opens on is the config's (folder_view); alt+f moves it from
 	// there and nothing writes the choice back.
 	s := &homeScreen{sh: sh, editorGroup: &editorGroup{weight: 1}, sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
-		openDocsTabs:  c.Config.OpenDocsView == "tabs",
 		sidebarSplits: make(map[string][]float64), outlineDataSeq: -1, outlineScheduledSeq: -1,
 		indentGuides: c.Config.IndentGuides,
 	}
@@ -166,15 +162,11 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	s.gutterDebounce = gitGutterDebounce
 	c.groups, c.activeGroup = []*editorGroup{s.editorGroup}, s.editorGroup
 
-	// Both sidebar lists are bordered so the focused pane is visible among three. No Help: the
+	// The Docs list is bordered so the focused pane is visible. No Help: the
 	// ? overlay documents rename; OnKey still fires it.
 	s.docsPanel = components.NewCompactListPanel(s.docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect: s.pickDoc,
 		OnKey:    s.docsKey,
-		Border:   true,
-	})
-	s.openPanel = components.NewCompactListPanel(nil, "Open", components.ListPanelOpts{
-		OnSelect: s.pickDoc,
 		Border:   true,
 	})
 	s.outlinePanel = s.newOutlinePanel()
@@ -199,7 +191,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	s.launchPreview = c.Preview && minimal && s.previewable()
 	s.initGroupPanels(c)
 	s.previewPanel = components.NewScrollContainer("preview")
-	// A bare "preview" on the edge, matching the two bordered list panels beside it —
+	// A bare "preview" on the edge, matching the bordered Docs panel beside it —
 	// the pane's keys are in the help bar (PanelHelp) where the rest of the screen's are.
 	s.previewPanel.SetKeyHints(false)
 	// Wired once; the hooks are rebuilt per click because the directory a relative link
@@ -629,7 +621,6 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	case core.MsgThemeChanged:
 		core.StyleList(s.docsPanel.List())
 		core.StyleList(s.filePanel.List())
-		core.StyleList(s.openPanel.List())
 		core.StyleList(s.outlinePanel.List())
 		for _, g := range s.groups() {
 			s.withGroup(g, func() tea.Cmd { s.refreshDiagnosticSigns(); return nil })
@@ -672,7 +663,6 @@ func (s *homeScreen) reseed(sh *core.Shared) core.Action {
 	c.Seed()
 	s.docsPanel.SetItems(s.docRows(c))
 	s.filePanel.Refresh()
-	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	if c.lsp != nil {
 		active := c.lsp.Reconcile(c)
 		s.refreshDiagnosticSigns()

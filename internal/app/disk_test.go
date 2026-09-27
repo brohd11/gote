@@ -60,11 +60,6 @@ func TestFocusMarksDirtyDocsAndTabs(t *testing.T) {
 	if s.editor.Text() != "!first" {
 		t.Fatal("focus overwrote edits")
 	}
-	row := openDocItems(Of(sh), s.currentID)[0].(docItem)
-	if row.Mark() != " (!*)" {
-		t.Fatalf("Open mark = %q", row.Mark())
-	}
-	s.setOpenDocsTabs(sh, true)
 	if view := stripANSI(s.View(sh)); !strings.Contains(view, "(!*)") {
 		t.Fatalf("tabs missing conflict marker: %s", view)
 	}

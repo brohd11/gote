@@ -21,7 +21,6 @@ func groupHome(t *testing.T) (*homeScreen, *core.Shared) {
 	Of(sh).lsp = nil
 	t.Cleanup(Of(sh).close)
 	s.gitGutter = false
-	s.setOpenDocsTabs(sh, true)
 	return s, sh
 }
 

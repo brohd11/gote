@@ -29,7 +29,6 @@ func setTestDiagnostics(c *Ctx, path string, entries ...lspDiagnostic) {
 // path, and still float the file being edited to the top.
 func TestDiagnosticsPanelListsTheWholeProject(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.OpenDocsView = "list"
 	s, sh := newHomeCfg(t, cfg, Options{})
 	c := Of(sh)
 	defer c.close()

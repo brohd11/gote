@@ -20,7 +20,7 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 		})
 	}
 	extra = append(extra, components.Item{
-		Name: "Editor Settings", Desc: "change the open-document view and git gutter",
+		Name: "Editor Settings", Desc: "change the git gutter",
 		Pick: func(*core.Shared) core.Action { return core.Push(s.editorSettingsMenu()) },
 	})
 	if lspEnabled(sh) {
@@ -59,10 +59,6 @@ func actionsSubmenu(title string, items ...components.Item) *components.PickerSc
 
 func (s *homeScreen) editorSettingsMenu() *components.PickerScreen {
 	var items []components.Item
-	// Minimal mode has no Open view; multiple groups require tabs.
-	if !s.minimal && len(s.groups()) == 1 {
-		items = append(items, s.openDocsViewItem())
-	}
 	items = append(items, components.Item{
 		Name: "Toggle git gutter", Desc: "show or hide changes against HEAD",
 		Pick: func(*core.Shared) core.Action {

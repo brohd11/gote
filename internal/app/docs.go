@@ -14,12 +14,12 @@ import (
 	"github.com/brohd11/goutil/textfile"
 )
 
-// DocFile describes a disk-backed Docs row or a retained Open row. ID is populated only
-// for Open rows; Path is populated only once the buffer has a filesystem identity.
+// DocFile describes a disk-backed Docs row or an open buffer. ID is populated only
+// for open buffers; Path is populated only once the buffer has a filesystem identity.
 type DocFile struct {
 	ID   string // open-buffer identity; empty on disk-backed Docs rows
 	Name string // base name, shown in the list
-	Path string // absolute load/save target; empty for an unsaved Open row
+	Path string // absolute load/save target; empty for an unsaved buffer
 	Root string // origin root used to render stable relative path context
 }
 
@@ -176,14 +176,10 @@ func sortDocs(docs []DocFile) {
 }
 
 // docItem adapts a DocFile to a list row. current marks the doc in the editor with a dot.
-// dirty, set only on the Open list, is a probe rather than a bool so each render reads the
-// buffer's current state.
 type docItem struct {
-	doc         DocFile
-	current     bool
-	dirty       func() bool
-	diskChanged func() bool
-	titleColor  func(string) color.Color
+	doc        DocFile
+	current    bool
+	titleColor func(string) color.Color
 }
 
 func (i docItem) Title() string {
@@ -199,8 +195,7 @@ func (i docItem) TitleColor() color.Color {
 	return nil
 }
 
-// KeepColor keeps git colors under the cursor on the Docs panel (which sets the color
-// hook); the Open panel keeps the accent.
+// KeepColor preserves git colors under the Docs panel cursor.
 func (i docItem) KeepColor() bool     { return i.titleColor != nil }
 func (i docItem) Description() string { return i.doc.Path }
 func (i docItem) FilterValue() string { return i.doc.Name }
@@ -212,21 +207,6 @@ func (i docItem) identity() string {
 	return i.doc.Path
 }
 
-// Mark flags unsaved changes, like the editor's title bar; MarkItem keeps it visible on a
-// narrow sidebar.
-func (i docItem) Mark() string {
-	dirty := i.dirty != nil && i.dirty()
-	if i.diskChanged != nil && i.diskChanged() {
-		if dirty {
-			return " (!*)"
-		}
-		return " (!)"
-	}
-	if dirty {
-		return " (*)"
-	}
-	return ""
-}
 func (i docItem) SuffixText() string {
 	if i.doc.Path == "" {
 		return ""
@@ -248,22 +228,6 @@ func docItems(docs []DocFile, currentPath string) []list.Item {
 	items := make([]list.Item, 0, len(docs))
 	for _, d := range docs {
 		items = append(items, docItem{doc: d, current: d.Path == currentPath && currentPath != ""})
-	}
-	return items
-}
-
-// openDocItems builds the Open list rows with each buffer's live Dirty method as the
-// probe.
-func openDocItems(c *Ctx, currentID string) []list.Item {
-	docs := c.OpenDocs()
-	items := make([]list.Item, 0, len(docs))
-	for _, d := range docs {
-		item := docItem{doc: d, current: d.ID == currentID && currentID != ""}
-		if ed, ok := c.buffer(d.ID); ok && ed != nil {
-			item.dirty = ed.Dirty
-			item.diskChanged = ed.DiskChanged
-		}
-		items = append(items, item)
 	}
 	return items
 }

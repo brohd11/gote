@@ -32,20 +32,13 @@ func TestOutlinePanelLayoutModesAndMinimal(t *testing.T) {
 		t.Fatal("outline should start hidden")
 	}
 
-	s.setOpenDocsTabs(sh, true)
 	s.Update(sh, keyMsg("alt+shift+o"))
 	if !s.outlineVisible || s.panelSlot(s.docsPane()) != 0 || s.panelSlot(s.outlinePanel) != 1 ||
-		s.panelSlot(s.openPanel) != noFocus || s.panelSlot(s.editorPanel) != 3 {
-		t.Fatalf("tab outline slots = docs %d outline %d open %d editor %d",
-			s.panelSlot(s.docsPane()), s.panelSlot(s.outlinePanel), s.panelSlot(s.openPanel), s.panelSlot(s.editorPanel))
+		s.panelSlot(s.openTabs) != 2 || s.panelSlot(s.editorPanel) != 3 {
+		t.Fatalf("outline slots = docs %d outline %d tabs %d editor %d",
+			s.panelSlot(s.docsPane()), s.panelSlot(s.outlinePanel), s.panelSlot(s.openTabs), s.panelSlot(s.editorPanel))
 	}
 
-	s.setOpenDocsTabs(sh, false)
-	if s.panelSlot(s.docsPane()) != 0 || s.panelSlot(s.openPanel) != 1 ||
-		s.panelSlot(s.outlinePanel) != 2 || s.panelSlot(s.editorPanel) != 3 {
-		t.Fatalf("list outline slots = docs %d open %d outline %d editor %d",
-			s.panelSlot(s.docsPane()), s.panelSlot(s.openPanel), s.panelSlot(s.outlinePanel), s.panelSlot(s.editorPanel))
-	}
 	if !strings.Contains(s.View(sh), "Outline") {
 		t.Fatal("visible outline did not render")
 	}

@@ -122,7 +122,7 @@ func TestActionsSubmenuMembershipAndNavigation(t *testing.T) {
 		want []string
 	}{
 		{"LSP", []string{"⚠ Diagnostics", "Show outline", "Toggle diagnostics gutter", "Find references", "Format document", "Restart language servers"}},
-		{"Editor Settings", []string{"Show open documents as tabs", "Toggle git gutter"}},
+		{"Editor Settings", []string{"Toggle git gutter"}},
 	} {
 		model = choosePickerRow(t, model, tc.name)
 		picker := model.(core.Router).Top().(*components.PickerScreen)
@@ -157,13 +157,6 @@ func TestActionsSubmenuTogglesReturnHome(t *testing.T) {
 		model = choosePickerRow(t, model, name)
 		if model.(core.Router).Top() != s || s.currentID != id || s.editor != ed {
 			t.Fatalf("%s did not dismiss both menus or changed the active document", name)
-		}
-	}
-	for _, name := range []string{"Show open documents as tabs", "Show open documents as list"} {
-		before := s.openDocsTabs
-		selectAction("Editor Settings", name)
-		if s.openDocsTabs == before || !s.editorPanel.Focused() {
-			t.Fatal("view toggle did not change layout and retain editor focus")
 		}
 	}
 	for range 2 {

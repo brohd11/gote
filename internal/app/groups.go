@@ -138,6 +138,7 @@ func (s *homeScreen) initGroupPanels(c *Ctx) {
 		if g.openTabs == nil {
 			g.openTabs = &documentTabBar{TabBar: components.NewTabBar()}
 		}
+		g.openTabs.group = g
 		if g.editorPanel == nil {
 			g.editorPanel = &groupPanel{ScreenPanel: components.NewScreenPanel(g.editor), host: s, group: g}
 		}
@@ -278,7 +279,6 @@ func (s *homeScreen) rebuildGroups(sh *core.Shared) tea.Cmd {
 	target := s.editorGroup
 	s.rebuildLayout(sh)
 	s.groupLayoutDirty = false
-	s.openPanel.SetItems(openDocItems(Of(sh), s.currentID))
 	return s.modular.FocusSlot(s.panelSlot(target.editorPanel))
 }
 

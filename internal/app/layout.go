@@ -34,9 +34,6 @@ func (s *homeScreen) sideColumnPanels() []components.Panel {
 		return nil
 	}
 	panels := []components.Panel{s.docsPane()}
-	if !s.tabsVisible() {
-		panels = append(panels, s.openPanel)
-	}
 	if s.outlineVisible {
 		panels = append(panels, s.outlinePanel)
 	}
@@ -51,8 +48,6 @@ func (s *homeScreen) sidebarSplitKey() string {
 		switch panel {
 		case s.docsPanel, s.filePanel:
 			names = append(names, "docs")
-		case s.openPanel:
-			names = append(names, "open")
 		case s.outlinePanel:
 			names = append(names, "outline")
 		}

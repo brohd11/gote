@@ -101,7 +101,6 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c.SetActive(s.currentID)
 	s.editor = ed
 	s.configureSignColumns()
-	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	// paneChild rather than SetChild: with the reader up, a pick opens INTO the preview —
 	// the pane keeps a reader, rebuilt around the doc that was just picked.
 	cmd := s.paneChild()
@@ -111,7 +110,7 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	return core.Async(tea.Batch(cmd, focus))
 }
 
-// switchBuffer shows an already-retained Open row, including a pathless unsaved one.
+// switchBuffer shows an already-retained buffer, including a pathless unsaved one.
 func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 	c := Of(sh)
 	if owner := c.groupFor(id); owner != nil {
@@ -127,7 +126,6 @@ func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 	c.SetActive(s.currentID)
 	s.editor = ed
 	s.configureSignColumns()
-	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	cmd := tea.Batch(s.paneChild(), s.enforcePreview())
 	focus := s.modular.FocusSlot(s.editorSlot())
 	return core.Async(tea.Batch(cmd, focus))
