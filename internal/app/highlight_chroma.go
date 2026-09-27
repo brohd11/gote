@@ -216,6 +216,8 @@ func (h *chromaHighlighter) Parse(doc string) {
 	stack := h.bracketSeed
 	h.bracketAt[0] = stack
 	family, familyStart := 0, 0
+	isYAML := h.lexer.Config().Name == "YAML"
+	var yamlFlow []yamlFlowFrame
 	for _, tok := range iter.Tokens() {
 		nextFamily := chromaRestartFamily(tok.Type)
 		if nextFamily == 0 || nextFamily != family {
@@ -235,9 +237,15 @@ func (h *chromaHighlighter) Parse(doc string) {
 				if family != 0 && row < len(h.restart) {
 					h.restart[row] = familyStart
 				}
+				if len(yamlFlow) > 0 && row < len(h.restart) {
+					h.restart[row] = min(h.restart[row], yamlFlow[0].row)
+				}
 			}
 			if part == "" || row >= len(h.lines) {
 				continue
+			}
+			if isYAML && tok.Type == chroma.Punctuation {
+				yamlFlow = advanceYAMLFlow(yamlFlow, row, part)
 			}
 			if tok.Type == chroma.Punctuation && len(chBracketStyles) > 0 {
 				h.appendRainbowPart(row, part, style, &stack)

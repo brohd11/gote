@@ -114,8 +114,9 @@ var blockComments = map[string][2]string{
 
 func buildLanguageProfiles() map[string]*languageProfile {
 	// Before the first lexers.Get below, and before anything else in the process can
-	// resolve GDScript: see registerPatchedGDScript for what it repairs.
+	// resolve these languages: see the registration helpers for what they repair.
 	registerPatchedGDScript()
+	registerPatchedYAML()
 	profiles := make(map[string]*languageProfile, len(chromaExts)+2)
 	for _, ext := range chromaExts {
 		lexer := lexers.Match("file" + ext)
