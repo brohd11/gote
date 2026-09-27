@@ -39,7 +39,7 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 		})
 	}
 	return components.NewActionsMenu(selfUpdateHooks(Of(sh).Version),
-		"reload the document list", refreshAction, nil, extra...)
+		"reload the document list and check open files for changes", refreshAction, nil, extra...)
 }
 
 // actionsSubmenu owns navigation: leaf callbacks only perform their action.
@@ -124,10 +124,10 @@ func onOff(on bool) string {
 	return "off"
 }
 
-// refreshAction reseeds the doc list — the action the Actions ▸ Refresh row fires.
-// The home screen does the reload on the broadcast.
+// refreshAction reseeds the doc list and checks open buffers for external changes.
+// The home screen does the list reload on the broadcast.
 func refreshAction(sh *core.Shared) core.Action {
-	return core.PropagateAll(ReseedMsg{})
+	return core.Seq(core.PropagateAll(ReseedMsg{}), core.Async(Of(sh).checkDiskChanges()))
 }
 
 // vaultsItem opens the saved document roots; ad-hoc scans are a CLI launch.

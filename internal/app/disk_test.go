@@ -29,6 +29,106 @@ func openDiskFixture(t *testing.T) (tea.Model, *homeScreen, *core.Shared, string
 	return model, s, sh, dir
 }
 
+func refreshThroughActions(t *testing.T, model tea.Model) tea.Model {
+	t.Helper()
+	model, cmd := model.Update(keyMsg("ctrl+alt+a"))
+	return choosePickerRow(t, pumpModel(model, cmd), "⟳ Refresh")
+}
+
+func TestActionsRefreshChecksRetainedDocuments(t *testing.T) {
+	for _, state := range []string{"clean", "dirty", "deleted"} {
+		t.Run(state, func(t *testing.T) {
+			model, s, sh, dir := openDiskFixture(t)
+			first := s.editor
+			secondPath := filepath.Join(dir, "second.md")
+			writeDiskDoc(t, secondPath, "second")
+			model = pumpModel(model, s.openDoc(sh, secondPath).Cmd)
+			second, activeID := s.editor, s.currentID
+			if state == "dirty" {
+				model, _ = model.Update(keyMsg("!"))
+			}
+			filterList(t, s.docsPanel.List(), "first")
+			writeDiskDoc(t, filepath.Join(dir, "first.md"), "external first")
+			writeDiskDoc(t, filepath.Join(dir, "first-new.md"), "new file")
+			if state == "deleted" {
+				if err := os.Remove(secondPath); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeDiskDoc(t, secondPath, "external second")
+			}
+			refreshThroughActions(t, model)
+			if first.Text() != "external first" || first.Dirty() {
+				t.Fatal("refresh missed the inactive clean buffer")
+			}
+			if s.editor != second || s.currentID != activeID {
+				t.Fatal("refresh changed the active document")
+			}
+			rows := rowTitles(s.docsPanel.List())
+			if len(rows) != 2 || s.docsPanel.List().SelectedItem() == nil {
+				t.Fatalf("refresh lost the filter or failed to rescan the list: %v", rows)
+			}
+			for _, row := range rows {
+				if !strings.Contains(row, "first") {
+					t.Fatalf("refresh lost the filter: %v", rows)
+				}
+			}
+			switch state {
+			case "clean":
+				if second.Text() != "external second" || second.Dirty() || second.DiskChanged() {
+					t.Fatal("refresh did not reload the active clean buffer")
+				}
+			case "dirty":
+				if second.Text() != "!second" || !second.Dirty() || second.ChangeMark() != " (!*)" {
+					t.Fatal("refresh lost local edits or failed to mark the conflict")
+				}
+			case "deleted":
+				if second.Text() != "second" || second.Dirty() || second.ChangeMark() != " (!)" {
+					t.Fatal("refresh lost the deleted file's buffer or failed to mark it")
+				}
+			}
+		})
+	}
+}
+
+func TestActionsRefreshUpdatesPreviews(t *testing.T) {
+	for _, mode := range []string{"side", "full", "single-file"} {
+		t.Run(mode, func(t *testing.T) {
+			var model tea.Model
+			var s *homeScreen
+			var sh *core.Shared
+			var path string
+			if mode == "single-file" {
+				path = filepath.Join(t.TempDir(), "file.md")
+				writeDiskDoc(t, path, "original")
+				model, s, sh = newHomeRouter(t, Options{Mode: ModeFile, File: path, Preview: true})
+				Of(sh).close()
+				Of(sh).lsp = nil
+				s.gitGutter = false
+			} else {
+				model, s, sh, _ = openDiskFixture(t)
+				path = s.currentPath
+				if mode == "full" {
+					model = pumpModel(model, s.toggleFullPreview().Cmd)
+				} else {
+					s.cyclePreview()
+				}
+			}
+			writeDiskDoc(t, path, "updated preview text")
+			refreshThroughActions(t, model)
+			var view string
+			if mode == "side" {
+				view = s.previewPanel.View(false)
+			} else {
+				view = s.fullPreview.View(sh)
+			}
+			if s.editor.Text() != "updated preview text" || !strings.Contains(stripANSI(view), "updated preview text") {
+				t.Fatalf("refresh left the buffer or preview stale: %s", view)
+			}
+		})
+	}
+}
+
 func TestFocusRefreshesInactiveDocumentsBeneathDialog(t *testing.T) {
 	model, s, sh, dir := openDiskFixture(t)
 	first := s.editor
@@ -167,22 +267,30 @@ func TestSaveCompletesAfterSwitchWithoutRekeyingActiveDoc(t *testing.T) {
 }
 
 func TestReloadReconcilesLSPWithoutAnotherKey(t *testing.T) {
-	model, s, sh, dir := openDiskFixture(t)
-	path := filepath.Join(dir, "main.py")
-	writeDiskDoc(t, path, "old_name = 1\n")
-	model = pumpModel(model, s.openDoc(sh, path).Cmd)
-	manager := newLSPManager(DefaultConfig(), "test")
-	// Exercise UI reconciliation without launching a server or waiting for its events.
-	manager.once.Do(func() {})
-	Of(sh).lsp = manager
-	s.lspWaiting = true
-	defer func() { Of(sh).lsp = nil }()
-	manager.Reconcile(Of(sh))
-	previous := manager.desired[path].version
-	writeDiskDoc(t, path, "new_name = 2\n")
-	model, cmd := model.Update(tea.FocusMsg{})
-	pumpModel(model, cmd)
-	if got := manager.desired[path]; got.text != "new_name = 2\n" || got.version <= previous {
-		t.Fatalf("LSP snapshot stale: %+v", got)
+	for _, trigger := range []string{"focus", "refresh"} {
+		t.Run(trigger, func(t *testing.T) {
+			model, s, sh, dir := openDiskFixture(t)
+			path := filepath.Join(dir, "main.py")
+			writeDiskDoc(t, path, "old_name = 1\n")
+			model = pumpModel(model, s.openDoc(sh, path).Cmd)
+			manager := newLSPManager(DefaultConfig(), "test")
+			// Exercise UI reconciliation without launching a server or waiting for its events.
+			manager.once.Do(func() {})
+			Of(sh).lsp = manager
+			s.lspWaiting = true
+			defer func() { Of(sh).lsp = nil }()
+			manager.Reconcile(Of(sh))
+			previous := manager.desired[path].version
+			writeDiskDoc(t, path, "new_name = 2\n")
+			if trigger == "refresh" {
+				refreshThroughActions(t, model)
+			} else {
+				model, cmd := model.Update(tea.FocusMsg{})
+				pumpModel(model, cmd)
+			}
+			if got := manager.desired[path]; got.text != "new_name = 2\n" || got.version <= previous {
+				t.Fatalf("LSP snapshot stale: %+v", got)
+			}
+		})
 	}
 }

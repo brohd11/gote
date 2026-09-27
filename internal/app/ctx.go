@@ -63,12 +63,11 @@ var _ core.Receiver = (*Ctx)(nil)
 // the pane, so async highlight results always have a live target.
 func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
 	var acts []core.Action
-	_, focus := payload.(tea.FocusMsg)
+	if _, focus := payload.(tea.FocusMsg); focus {
+		acts = append(acts, core.Async(c.checkDiskChanges()))
+	}
 	c.open.each(func(entry *openEntry) {
 		ed := entry.editor
-		if focus {
-			acts = append(acts, core.Async(ed.CheckDiskChanges()))
-		}
 		act := ed.Receive(sh, payload)
 		if act.Msg != nil || act.Cmd != nil {
 			acts = append(acts, act)
@@ -82,6 +81,15 @@ func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
 	default:
 		return core.Seq(acts...)
 	}
+}
+
+// checkDiskChanges checks every retained buffer, including inactive documents.
+func (c *Ctx) checkDiskChanges() tea.Cmd {
+	var cmds []tea.Cmd
+	c.open.each(func(entry *openEntry) {
+		cmds = append(cmds, entry.editor.CheckDiskChanges())
+	})
+	return tea.Batch(cmds...)
 }
 
 // Options is the launch the CLI resolves (cmd.resolveOptions); only the chosen mode's
