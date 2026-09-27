@@ -17,19 +17,20 @@ import (
 func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
 	defaults := c.Config.modeDefaults(c.Mode)
 	return editor.Opts{
-		Wrap:            defaults.Wrap,
-		LineNumbers:     defaults.LineNumbers,
-		BaseDir:         docsRoot(c),
-		HideTitle:       s.tabsVisible(),
-		OnExit:          s.editorExit,
-		OnRelease:       s.editorRelease,
-		OnSaved:         s.editorSaved,
-		Search:          true,
-		ContextMenu:     true,
-		ContextItems:    s.editorContextItems,
-		OnSignClick:     s.gitSignClick,
-		IndentGuides:    s.indentGuides,
-		ResolveLanguage: editorLanguageForPath,
+		TrackDiskChanges: true,
+		Wrap:             defaults.Wrap,
+		LineNumbers:      defaults.LineNumbers,
+		BaseDir:          docsRoot(c),
+		HideTitle:        s.tabsVisible(),
+		OnExit:           s.editorExit,
+		OnRelease:        s.editorRelease,
+		OnSaved:          s.editorSaved,
+		Search:           true,
+		ContextMenu:      true,
+		ContextItems:     s.editorContextItems,
+		OnSignClick:      s.gitSignClick,
+		IndentGuides:     s.indentGuides,
+		ResolveLanguage:  editorLanguageForPath,
 	}
 }
 
@@ -41,7 +42,7 @@ func (s *homeScreen) installScratch(c *Ctx) {
 	opts.Title, opts.Crumb = name, name
 	s.currentID, s.currentPath, s.currentName = id, "", name
 	c.SetActive(id)
-	s.editor = editor.New(opts)
+	s.editor = c.newEditor(opts)
 }
 
 // newUnsavedBuffer implements ctrl+n: the untouched startup scratch is promoted, otherwise

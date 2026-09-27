@@ -179,10 +179,11 @@ func sortDocs(docs []DocFile) {
 // dirty, set only on the Open list, is a probe rather than a bool so each render reads the
 // buffer's current state.
 type docItem struct {
-	doc        DocFile
-	current    bool
-	dirty      func() bool
-	titleColor func(string) color.Color
+	doc         DocFile
+	current     bool
+	dirty       func() bool
+	diskChanged func() bool
+	titleColor  func(string) color.Color
 }
 
 func (i docItem) Title() string {
@@ -214,7 +215,14 @@ func (i docItem) identity() string {
 // Mark flags unsaved changes, like the editor's title bar; MarkItem keeps it visible on a
 // narrow sidebar.
 func (i docItem) Mark() string {
-	if i.dirty != nil && i.dirty() {
+	dirty := i.dirty != nil && i.dirty()
+	if i.diskChanged != nil && i.diskChanged() {
+		if dirty {
+			return " (!*)"
+		}
+		return " (!)"
+	}
+	if dirty {
 		return " (*)"
 	}
 	return ""
@@ -253,6 +261,7 @@ func openDocItems(c *Ctx, currentID string) []list.Item {
 		item := docItem{doc: d, current: d.ID == currentID && currentID != ""}
 		if ed, ok := c.buffer(d.ID); ok && ed != nil {
 			item.dirty = ed.Dirty
+			item.diskChanged = ed.DiskChanged
 		}
 		items = append(items, item)
 	}

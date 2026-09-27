@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/charmbracelet/colorprofile"
@@ -60,8 +61,12 @@ var _ core.Receiver = (*Ctx)(nil)
 // the pane, so async highlight results always have a live target.
 func (c *Ctx) Receive(sh *core.Shared, payload any) core.Action {
 	var acts []core.Action
+	_, focus := payload.(tea.FocusMsg)
 	c.open.each(func(entry *openEntry) {
 		ed := entry.editor
+		if focus {
+			acts = append(acts, core.Async(ed.CheckDiskChanges()))
+		}
 		act := ed.Receive(sh, payload)
 		if act.Msg != nil || act.Cmd != nil {
 			acts = append(acts, act)
@@ -313,8 +318,52 @@ func (c *Ctx) OpenDoc(path string, opts editor.Opts) *editor.Screen {
 		return entry.editor
 	}
 	opts.Path = path
-	ed := editor.New(opts)
+	ed := c.newEditor(opts)
 	c.open.addFile(path, c.rootForPath(path), ed)
+	return ed
+}
+
+// newEditor binds save/exit hooks to their owner: an asynchronous write may finish
+// after another document has taken the pane.
+func (c *Ctx) newEditor(opts editor.Opts) *editor.Screen {
+	var ed *editor.Screen
+	onSaved, onExit := opts.OnSaved, opts.OnExit
+	owner := func() *openEntry {
+		var found *openEntry
+		c.open.each(func(entry *openEntry) {
+			if entry.editor == ed {
+				found = entry
+			}
+		})
+		return found
+	}
+	opts.OnSaved = func(sh *core.Shared, path string) core.Action {
+		entry := owner()
+		if entry == nil || entry.id == c.activeID {
+			if onSaved != nil {
+				return onSaved(sh, path)
+			}
+			return core.Action{}
+		}
+		forgetSniffedLanguage(entry.path)
+		forgetSniffedLanguage(path)
+		c.RekeyDoc(entry.id, path, ed)
+		if c.lsp != nil {
+			c.lsp.DidSave(path)
+		}
+		return core.PropagateAll(ReseedMsg{})
+	}
+	opts.OnExit = func(sh *core.Shared) core.Action {
+		if entry := owner(); entry != nil && entry.id != c.activeID {
+			c.CloseDoc(entry.id)
+			return core.PropagateAll(ReseedMsg{})
+		}
+		if onExit != nil {
+			return onExit(sh)
+		}
+		return core.Pop()
+	}
+	ed = editor.New(opts)
 	return ed
 }
 

@@ -122,8 +122,8 @@ func (s *homeScreen) refreshOpenTabs(sh *core.Shared) {
 			label += " · " + filepath.Dir(doc.Path)
 		}
 		var marks []string
-		if ed, ok := c.buffer(doc.ID); ok && ed != nil && ed.Dirty() {
-			marks = append(marks, "(*)")
+		if ed, ok := c.buffer(doc.ID); ok && ed != nil && ed.ChangeMark() != "" {
+			marks = append(marks, strings.TrimSpace(ed.ChangeMark()))
 		}
 		if doc.ID == s.currentID && s.fullPreview != nil {
 			marks = append(marks, "[P]")

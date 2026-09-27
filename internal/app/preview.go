@@ -127,7 +127,7 @@ func (s *homeScreen) paneChild() tea.Cmd {
 // their file, so unsaved edits are never overwritten.
 func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, unread bool) {
 	if unread && s.fullPreview != nil {
-		ed.SetText(fileText(path))
+		_ = ed.LoadFile()
 	}
 }
 

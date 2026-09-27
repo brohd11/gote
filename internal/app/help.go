@@ -166,6 +166,8 @@ func (s *homeScreen) helpText() string {
 		"Wheel over the popup scrolls it; wheel outside closes it and scrolls the panel.\n" +
 		"Typing, outside clicks, pane/document changes and layout changes close it.\n\n")
 	b.WriteString(clickHelp(s.sh) + "\n")
+	b.WriteString("Document marks: (*) unsaved · (!) changed on disk · (!*) both.\n")
+	b.WriteString("Focus reloads clean buffers; saving asks before overwriting external changes.\n")
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()
 }

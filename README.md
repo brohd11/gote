@@ -44,7 +44,15 @@ documents back in the sidebar.
 
 **Alt+9 / Alt+0** switch to the previous/next open document while editing, in either
 view. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
-show `(*)` for unsaved changes and `[P]` on the current document in full preview.
+show `(*)` for unsaved changes, `(!)` for changes on disk, `(!*)` for both, and
+`[P]` on the current document in full preview. The same change markers appear in
+the Open list and editor title.
+
+When the terminal regains focus, gote checks loaded open documents for changes on
+disk. Clean buffers reload automatically, preserving the cursor and scroll position
+where possible and clearing undo history. Dirty buffers keep your edits. Saving
+checks the file again and asks for acknowledgement before overwriting external
+changes (or recreating a deleted file). Cancelling keeps your buffer and its marker.
 Click a tab to open it; overflow arrows scroll the bar without changing documents.
 Tab mode omits the duplicate filename header in the editor and full preview.
 The bar remains visible with the sidebar hidden. Single-file mode starts minimal.

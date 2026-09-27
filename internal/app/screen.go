@@ -1,7 +1,6 @@
 package app
 
 import (
-	"os"
 	"time"
 
 	"github.com/brohd11/bubblestack/components"
@@ -233,7 +232,7 @@ func (s *homeScreen) Init(sh *core.Shared) (initCmd tea.Cmd) {
 	s.sh = sh
 	if s.launchPreview {
 		s.launchPreview = false
-		s.editor.SetText(fileText(s.currentPath))
+		_ = s.editor.LoadFile()
 		s.fullPreview = s.previewScreen()
 		s.modular = s.buildModular() // rebuilt so the bar names the way back to the editor
 		_ = s.editorPanel.SetChild(s.fullPreview)
@@ -247,16 +246,6 @@ func (s *homeScreen) Init(sh *core.Shared) (initCmd tea.Cmd) {
 	}
 	s.lspWaiting = true
 	return tea.Batch(s.modular.Init(sh), c.lsp.WaitCmd())
-}
-
-// fileText reads a document for the launch reader. An unreadable path renders as an empty
-// page — the same thing the editor about to open behind it will show for a new file.
-func fileText(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 // notePane records the focused pane before each message, so esc in the editor can return
@@ -589,6 +578,23 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	defer s.refreshDiagnostics()
 
 	switch msg := payload.(type) {
+	case editor.DiskStateChangedMsg:
+		if msg.Reloaded {
+			Of(sh).open.each(func(entry *openEntry) {
+				if entry.editor == msg.Editor {
+					forgetSniffedLanguage(entry.path)
+				}
+			})
+			if msg.Editor == s.editor {
+				s.closeCompletion()
+				s.closeSignature()
+				s.closeGitDiff()
+				if s.fullPreview != nil {
+					s.fullPreview.Refresh()
+				}
+			}
+		}
+		return s.finishHomeUpdate(sh, core.Action{})
 	case findFilesRequest:
 		return s.beginFindFiles(sh, msg)
 	case findFilesResult:
