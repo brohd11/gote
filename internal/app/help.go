@@ -96,15 +96,15 @@ func (s *homeScreen) helpText() string {
 	// FullHint rather than Hint on the picker: it is the one general key with an alias, and
 	// ctrl+alt+a is the only way to reach it from the editor, so the page must name both.
 	general := []key.Binding{quitKey, sidebarKey, mark(bottomKey, panelLock),
-		mark(findFilesKey, panelLock), flatKey, core.FullHint("actions", core.Keys.Actions),
+		mark(findFilesKey, panelLock), core.FullHint("actions", core.Keys.Actions),
 		previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
-		general = append(general, previousDocumentKey, nextDocumentKey)
+		general = append(general, previousDocumentKey, nextDocumentKey, moveTabLeftKey, moveTabRightKey)
 	}
 	writeSection("general", general)
 	if !s.minimal {
-		b.WriteString("[ / ]: previous/next document outside text entry; Actions switches Open between list and tabs.\n\n")
+		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. Actions → Editor groups can move tabs or close a group.\nActions switches Open between list and tabs when one group remains.\n\n")
 	}
 	// Language-server keys fire from the editor only. The outline key opens a panel, so the
 	// panel lock takes precedence over the LSP gate; jump-back is never marked, since
@@ -129,7 +129,7 @@ func (s *homeScreen) helpText() string {
 		core.Hint("toggle fold", core.Keys.Toggle),
 		core.Hint("filter", s.outlinePanel.List().KeyMap.Filter),
 	})
-	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey, hiddenKey,
+	writeSection("docs list", []key.Binding{renameKey, deleteKey, flatKey, densityKey, descendKey, hiddenKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey())})
 	b.WriteString("Git colors: ")
 	for i, entry := range []struct {

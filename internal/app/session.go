@@ -1,8 +1,10 @@
 package app
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -34,9 +36,18 @@ type Sessions struct {
 // Session is one root's last state. Active is a path rather than a buffer id, so an
 // unsaved buffer — which has an id but no path — simply never becomes one.
 type Session struct {
-	Active  string        `yaml:"active,omitempty"`
-	Updated time.Time     `yaml:"updated,omitempty"`
-	Files   []SessionFile `yaml:"files"`
+	Active      string         `yaml:"active,omitempty"`
+	Updated     time.Time      `yaml:"updated,omitempty"`
+	Files       []SessionFile  `yaml:"files"`
+	Groups      []SessionGroup `yaml:"groups,omitempty"`
+	ActiveGroup int            `yaml:"active_group,omitempty"`
+}
+
+// SessionGroup references the existing file records; buffers are serialized once.
+type SessionGroup struct {
+	Files  []string `yaml:"files"`
+	Active string   `yaml:"active,omitempty"`
+	Weight float64  `yaml:"weight,omitempty"`
 }
 
 // SessionFile is one open document's position: Line and Col (runes) and Top, the line at
@@ -207,6 +218,27 @@ func (c *Ctx) saveSession() error {
 		}
 	}
 
+	for _, g := range c.groups {
+		rec := SessionGroup{Weight: g.weight}
+		for _, id := range g.tabs {
+			if entry, ok := c.open.get(id); ok && entry.path != "" {
+				rec.Files = append(rec.Files, entry.path)
+				if id == g.currentID {
+					rec.Active = entry.path
+				}
+			}
+		}
+		if len(rec.Files) == 0 {
+			continue
+		}
+		if rec.Active == "" {
+			rec.Active = rec.Files[0]
+		}
+		if g == c.activeGroup {
+			session.ActiveGroup = len(session.Groups)
+		}
+		session.Groups = append(session.Groups, rec)
+	}
 	if len(session.Files) == 0 {
 		// Closing every buffer is a decision too. Leaving the old row would reopen files
 		// the user has just finished putting away.
@@ -247,6 +279,7 @@ func (s *homeScreen) restoreSession(c *Ctx) bool {
 	s.editor = ed
 	// Seeded here because nothing else does it before the first pick, and a restored
 	// session that showed an empty Open list would look like it had failed.
+	s.restoreGroups(c, session)
 	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	return true
 }
@@ -272,4 +305,66 @@ func (s *homeScreen) applyRestore(c *Ctx) {
 	if s.editor.Text() != "" {
 		delete(c.restore, s.currentPath)
 	}
+}
+
+// restoreGroups accepts legacy flat sessions, removes vanished/duplicate references,
+// and assigns any unmentioned files to the first group. Extra groups from a newer
+// version merge into the fourth, retaining all documents.
+func (s *homeScreen) restoreGroups(c *Ctx, session Session) {
+	if len(session.Groups) == 0 {
+		return
+	}
+	defaults := s.editorGroup
+	var groups []*editorGroup
+	var active *editorGroup
+	seen := make(map[string]bool)
+	for i, rec := range session.Groups {
+		g := &editorGroup{weight: rec.Weight, gitGutter: defaults.gitGutter, diagnosticsGutter: defaults.diagnosticsGutter}
+		if g.weight <= 0 || math.IsNaN(g.weight) || math.IsInf(g.weight, 0) {
+			g.weight = 1
+		}
+		for _, path := range rec.Files {
+			if _, ok := c.Doc(path); ok && !seen[path] {
+				g.tabs = append(g.tabs, path)
+				seen[path] = true
+			}
+		}
+		if len(g.tabs) == 0 {
+			continue
+		}
+		g.currentID = rec.Active
+		if !slices.Contains(g.tabs, g.currentID) {
+			g.currentID = g.tabs[0]
+		}
+		if len(groups) == maxEditorGroups {
+			dst := groups[maxEditorGroups-1]
+			dst.tabs = append(dst.tabs, g.tabs...)
+			if i == session.ActiveGroup {
+				dst.currentID = g.currentID
+				active = dst
+			}
+			continue
+		}
+		groups = append(groups, g)
+		if i == session.ActiveGroup {
+			active = g
+		}
+	}
+	if len(groups) == 0 {
+		return
+	}
+	for _, f := range session.Files {
+		if !seen[f.Path] {
+			groups[0].tabs = append(groups[0].tabs, f.Path)
+		}
+	}
+	for _, g := range groups {
+		g.currentPath, g.currentName = g.currentID, docName(g.currentID)
+		g.editor, _ = c.Doc(g.currentID)
+	}
+	if active == nil {
+		active = groups[0]
+	}
+	c.groups, c.activeGroup, s.editorGroup = groups, active, active
+	c.SetActive(active.currentID)
 }

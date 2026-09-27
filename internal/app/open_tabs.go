@@ -30,7 +30,7 @@ func (p *documentTabBar) SetSize(w, h int) {
 	p.TabBar.SetSize(w, h)
 }
 
-func (s *homeScreen) tabsVisible() bool { return s.openDocsTabs && !s.minimal }
+func (s *homeScreen) tabsVisible() bool { return (s.openDocsTabs || len(s.groups()) > 1) && !s.minimal }
 
 func (s *homeScreen) readerTitle() string {
 	if s.tabsVisible() {
@@ -73,7 +73,7 @@ func (s *homeScreen) togglePanes(sh *core.Shared, change func()) tea.Cmd {
 }
 
 func (s *homeScreen) setOpenDocsTabs(sh *core.Shared, tabs bool) core.Action {
-	if s.minimal || tabs == s.openDocsTabs {
+	if s.minimal || len(s.groups()) > 1 || tabs == s.openDocsTabs {
 		return core.Action{}
 	}
 	cmd := s.togglePanes(sh, func() {
@@ -106,11 +106,27 @@ func (s *homeScreen) openDocsViewItem() components.Item {
 }
 
 func (s *homeScreen) refreshOpenTabs(sh *core.Shared) {
+	for _, g := range s.groups() {
+		s.withGroup(g, func() tea.Cmd { s.refreshGroupTabs(sh); return nil })
+	}
+}
+
+func (s *homeScreen) groupDocs(c *Ctx) []DocFile {
+	docs := make([]DocFile, 0, len(s.tabs))
+	for _, id := range s.tabs {
+		if doc, ok := c.bufferInfo(id); ok {
+			docs = append(docs, doc)
+		}
+	}
+	return docs
+}
+
+func (s *homeScreen) refreshGroupTabs(sh *core.Shared) {
 	if !s.tabsVisible() {
 		return
 	}
 	c := Of(sh)
-	docs := c.OpenDocs()
+	docs := s.groupDocs(c)
 	names := make(map[string]int)
 	for _, doc := range docs {
 		names[doc.Name]++
@@ -139,7 +155,7 @@ func (s *homeScreen) refreshOpenTabs(sh *core.Shared) {
 }
 
 func (s *homeScreen) stepDocument(sh *core.Shared, delta int) core.Action {
-	docs := Of(sh).OpenDocs()
+	docs := s.groupDocs(Of(sh))
 	if len(docs) == 0 {
 		return core.Action{}
 	}
@@ -170,7 +186,9 @@ func (s *homeScreen) documentTabInput(sh *core.Shared, msg tea.Msg) (core.Action
 		return core.Action{}, false
 	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
-		s.openTabs.mouseDown = false
+		for _, g := range s.groups() {
+			g.openTabs.mouseDown = false
+		}
 		if s.modular.Resizing() {
 			return core.Action{}, false
 		}
@@ -186,7 +204,16 @@ func (s *homeScreen) documentTabInput(sh *core.Shared, msg tea.Msg) (core.Action
 	if !ok || !s.tabsVisible() {
 		return core.Action{}, false
 	}
-	p := s.openTabs
+	for _, g := range s.groups() {
+		if act, handled := s.groupTabInput(sh, msg, mm, g); handled {
+			return act, true
+		}
+	}
+	return core.Action{}, false
+}
+
+func (s *homeScreen) groupTabInput(sh *core.Shared, msg tea.Msg, mm tea.MouseMsg, g *editorGroup) (core.Action, bool) {
+	p := g.openTabs
 	m := mm.Mouse()
 	if _, press := msg.(tea.MouseClickMsg); press {
 		p.mouseDown = false
@@ -210,6 +237,7 @@ func (s *homeScreen) documentTabInput(sh *core.Shared, msg tea.Msg) (core.Action
 		if click.Button == tea.MouseLeft && click.Mod == 0 {
 			s.refreshOpenTabs(sh)
 			if id, _ := p.Click(m.X-p.x, m.Y-p.y); id != "" {
+				s.activateGroup(g)
 				return s.activateTab(sh, id), true
 			}
 		}

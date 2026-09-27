@@ -65,6 +65,7 @@ func (s *homeScreen) cyclePreview() core.Action {
 // (not pushed), so the sidebar stays usable beside it. It renders the live buffer, bound
 // here: a doc switch builds a new reader (paneChild).
 func (s *homeScreen) previewScreen() *components.DocScreen {
+	s.readerEditor = s.editor
 	src := s.editor.Text
 	return components.NewDocScreen(components.DocOpts{
 		// Document first, mode second — the editor's own title bar is the filename, and
@@ -88,7 +89,7 @@ func (s *homeScreen) toggleFullPreview() core.Action {
 	if !s.previewable() {
 		return core.Action{}
 	}
-	// One preview on screen at a time: the ctrl+p column folds away and is restored on
+	// The active group's reader folds away the ctrl+p column, which is restored on
 	// the way out, so alt+p is a look at the document rather than a rearrangement of it.
 	s.previewPrior, s.preview = s.preview, previewOff
 	s.fullPreview = s.previewScreen()
@@ -117,6 +118,9 @@ func (s *homeScreen) paneChild() tea.Cmd {
 	if s.fullPreview == nil {
 		return s.editorPanel.SetChild(s.editor)
 	}
+	if s.readerEditor == s.editor {
+		return nil
+	}
 	s.fullPreview = s.previewScreen()
 	return s.editorPanel.SetChild(s.fullPreview)
 }
@@ -135,6 +139,7 @@ func (s *homeScreen) seedForPreview(ed *editor.Screen, path string, unread bool)
 // (openDoc); URLs go to the browser and other files are revealed in the file manager. A
 // link to a missing file does nothing, rather than creating it on first save.
 func (s *homeScreen) previewLinks() components.LinkHooks {
+	owner := s.editorGroup
 	return components.LinkHooks{
 		Base: s.previewDir(),
 		URL:  func(_ *core.Shared, l components.Link) core.Action { return sysopen.URL(l.Target) },
@@ -143,6 +148,7 @@ func (s *homeScreen) previewLinks() components.LinkHooks {
 			if !l.Exists {
 				return core.Action{}
 			}
+			s.activateGroup(owner)
 			return s.openDoc(sh, l.Path)
 		},
 	}
@@ -184,7 +190,7 @@ func (s *homeScreen) setPreview(mode int) {
 // relayout rebuilds the layout for the preview flags and re-seeds the side pane, focusing
 // the editor (whose on-focus cmd is empty, so it is dropped).
 func (s *homeScreen) relayout() {
-	_ = s.rebuildModular(s.sh, s.editorSlot())
+	_ = s.rebuildGroups(s.sh)
 	s.resetPreviewCache()
 	s.refreshPreview()
 	s.syncPreviewScroll()
@@ -192,7 +198,7 @@ func (s *homeScreen) relayout() {
 
 // previewTarget answers the live pane, or nil when the preview is off.
 func (s *homeScreen) previewTarget() *components.ScrollContainer {
-	if s.preview == previewPane {
+	if s.preview == previewPane && s.fullPreview == nil && s.previewable() {
 		return s.previewPanel
 	}
 	return nil

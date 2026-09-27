@@ -269,10 +269,17 @@ func (s *homeScreen) viewCompletion(sh *core.Shared, body string) string {
 		return body
 	}
 	y := absoluteY - sh.BodyY()
-	s.completion.list.SetMaxWidth(max(min(56, s.w-4), 1))
+	width := s.w
+	if len(s.groups()) > 1 {
+		width = s.editorPanel.w
+	}
+	s.completion.list.SetMaxWidth(max(min(56, width-4), 1))
 	popup.Placement = components.PlacePopupAt(components.PopupAnchor{
 		X: x, Y: y + 1, FlipX: x + 1, FlipY: y,
 	})
+	if len(s.groups()) > 1 {
+		popup.Placement = s.caretPopup(x, y, false)
+	}
 	return popup.ViewOver(body, s.w, s.h)
 }
 

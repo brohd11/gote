@@ -43,10 +43,27 @@ Tabs are the default; set `open_docs_view: list` in `~/.gote/config.yml` to put 
 documents back in the sidebar.
 
 **Alt+9 / Alt+0** switch to the previous/next open document while editing, in either
-view. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
+view, within the active editor group. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
 show `(*)` for unsaved changes, `(!)` for changes on disk, `(!*)` for both, and
 `[P]` on the current document in full preview. The same change markers appear in
 the Open list and editor title.
+
+**Alt+T** moves the current tab right. At the rightmost group it creates a
+new side-by-side group, provided the source has at least two tabs. **Ctrl+T** moves
+the tab left when a group exists there. Up to four groups can be open, each with
+its own tab bar. Moving a tab preserves its edits, undo history, cursor, and scroll.
+A document appears in one group; opening it again focuses that group.
+
+Click an editor or use **Shift+Tab** to change focus. New documents open in the last
+active group, and shortcuts and interactive LSP features follow its selected document.
+An emptied group closes automatically. **Actions → Editor groups → Close editor group** moves its
+remaining tabs to a neighbor. Group tabs, selections, widths, and the active group
+restore with the project or vault; unsaved buffers are not restored.
+
+The Markdown side preview follows the active document. Full preview replaces only
+that group's editor. Multiple groups always show tab bars; the single-group list/tabs
+preference returns when the split closes. Splits are unavailable in minimal single-file
+mode. **Actions → Editor groups** also provides both move actions and group closing.
 
 When the terminal regains focus, gote checks loaded open documents for changes on
 disk. Clean buffers reload automatically, preserving the cursor and scroll position
@@ -74,8 +91,10 @@ pasting into the empty startup buffer adds it to Open the same way. `ctrl+s` giv
 unsaved buffer a filename, after which it is listed and managed like any other document.
 This shortcut is intentionally unavailable in the chrome-less single-document mode.
 
-The sidebar lists the scan flat by default; `alt+t` swaps it for a folder-by-folder view of
-the same tree (`alt+r` there switches row density). Set `folder_view: true` in the config to
+The sidebar lists the scan flat by default; `alt+f` switches the focused Docs pane
+between the flat list and a folder-by-folder view of the same tree (`alt+r` there switches
+row density). View switching is inactive during filter entry; in the editor, `alt+f` keeps
+its word-movement behavior. Set `folder_view: true` in the config to
 open on the folder view instead — it only picks the starting view, the scan runs either way.
 In folder view, `d` enters the selected folder (including `..`) and `x` goes up, bounded by
 the scan or vault root. Enter still opens folders and documents; `d` does nothing on a

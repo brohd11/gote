@@ -49,6 +49,7 @@ func (s *homeScreen) installScratch(c *Ctx) {
 // a new named buffer is created and focused.
 func (s *homeScreen) newUnsavedBuffer(sh *core.Shared) core.Action {
 	c := Of(sh)
+	s.invalidateDocumentTools()
 	closePreview := s.closeFullPreview()
 	if _, tracked := c.buffer(s.currentID); !tracked && s.currentPath == "" && !s.editor.Dirty() {
 		c.trackUnsaved(s.currentID, s.currentName, s.editor)
@@ -164,16 +165,18 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 // editorSaved is the ctrl+s hook: the buffer stays and gote catches up. A save-as rekeys
 // the open set (or ctrl+x would close a stale path), and the reseed updates both lists.
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
+	s.invalidateDocumentTools()
 	c := Of(sh)
 	if s.currentPath == "" {
 		// A first save can happen before typing (and therefore before automatic
 		// promotion). Retain it briefly so rekey can preserve the normal Open slot.
 		c.trackUnsaved(s.currentID, s.currentName, s.editor)
 	}
+	oldPath := s.currentPath
 	c.RekeyDoc(s.currentID, path, s.editor)
 	// Forget both paths: a save can add or remove a shebang, and a save-as onto an existing
 	// path would inherit its cache.
-	forgetSniffedLanguage(s.currentPath)
+	forgetSniffedLanguage(oldPath)
 	forgetSniffedLanguage(path)
 	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 	c.SetActive(path)
@@ -196,7 +199,11 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 		return core.Async(tea.Quit)
 	}
 	c := Of(sh)
+	split := len(c.groups) > 1
 	cmd := s.showBuffer(c, c.CloseDoc(s.currentID))
+	if split {
+		return core.Seq(core.Async(tea.Batch(cmd, s.reconcileGroups(sh), s.rebuildGroups(sh))), core.PropagateAll(ReseedMsg{}))
+	}
 	if !s.sidebar {
 		s.setSidebar(true)
 	}
@@ -209,6 +216,10 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 // and delete. enforcePreview runs after the swap; the returned Init cmd must be emitted.
 // Only a restored, never-read buffer needs seeding.
 func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
+	if c.activeGroup == s.editorGroup && id != s.currentID {
+		s.invalidateDocumentTools()
+	}
+	s.nextID = ""
 	if doc, ok := c.bufferInfo(id); ok {
 		s.currentID, s.currentPath, s.currentName = doc.ID, doc.Path, doc.Name
 		c.SetActive(doc.ID)
@@ -220,6 +231,13 @@ func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
 	// Gutter visibility belongs to the pane, not an individual buffer.
 	s.configureSignColumns()
 	cmd := s.paneChild()
+	if c.activeGroup != s.editorGroup {
+		if !s.previewable() && s.fullPreview != nil {
+			s.fullPreview = nil
+			return s.paneChild()
+		}
+		return cmd
+	}
 	return tea.Batch(cmd, s.enforcePreview())
 }
 

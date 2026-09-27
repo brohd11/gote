@@ -181,7 +181,7 @@ func (p *gitDiffUI) view() string {
 func (s *homeScreen) placeGitDiff(sh *core.Shared) (x, y, w, h int) {
 	p := s.gitDiff
 	w, h = p.width+panelChrome, p.height+5
-	x, y = caretPanel(p.x, p.y-sh.BodyY(), s.editorLeft(), false)(s.w, s.h, w, h)
+	x, y = s.caretPopup(p.x, p.y-sh.BodyY(), false)(s.w, s.h, w, h)
 	x, y = max(0, min(x, s.w-w)), max(0, min(y, s.h-h))
 	p.popup.Placement = func(int, int, int, int) (int, int) { return x, y }
 	return x, y + sh.BodyY(), w, h

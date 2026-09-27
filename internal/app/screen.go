@@ -40,9 +40,9 @@ var (
 	// ctrl+d is also the editor's forward-delete, but docsKey only fires while the docs panel
 	// is focused and not filtering.
 	deleteKey = key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete"))
-	// A screen key rather than a panel key, so it works in both views. alt+t collides with no
-	// editor or core chord.
-	flatKey = key.NewBinding(key.WithKeys("alt+t"), key.WithHelp("alt+t", "flat/folder view"))
+	// Scoped to the Docs pane in either view, ahead of row dispatch so empty lists
+	// and directory rows work too. The editor keeps alt+f for word movement.
+	flatKey = key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "flat/folder view"))
 	// The folder view's density key (only while that panel is focused and not filtering);
 	// alt+r because alt+d/f move by words.
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
@@ -76,6 +76,9 @@ type ReseedMsg struct{}
 // keeps the panels (so list state and buffers survive) and stays the same instance, so the
 // router never re-Inits it over a dirty buffer.
 type homeScreen struct {
+	groupLayoutDirty     bool
+	*editorGroup         // active group; document actions always read through this pointer
+	buildingGroups       bool
 	gitDocs              docsGit
 	bottomVisible        bool
 	bottomFraction       float64
@@ -88,20 +91,13 @@ type homeScreen struct {
 	searchPath           string
 	modular              *components.ModularScreen
 	docsPanel            *components.CompactListPanel
-	filePanel            *components.FilePanel // the folder view alt+t swaps into the docs slot
+	filePanel            *components.FilePanel // the folder view alt+f swaps into the docs slot
 	openPanel            *components.CompactListPanel
 	outlinePanel         *components.TreePanel
-	openTabs             *documentTabBar
 	openDocsTabs         bool
 	panelSlots           map[components.Panel]int
-	lastPane             components.Panel // the non-editor pane esc hands the keys back to
-	editorPanel          *components.ScreenPanel
+	lastPane             components.Panel            // the non-editor pane esc hands the keys back to
 	previewPanel         *components.ScrollContainer // the live preview pane
-	editor               *editor.Screen              // the editor pane's live buffer (ScreenPanel exposes none)
-	fullPreview          *components.DocScreen       // alt+p: the reader IN the editor pane; nil = the editor is
-	currentID            string                      // stable buffer identity; path for saved docs, opaque for unsaved
-	currentPath          string                      // filesystem path; empty while the current buffer is unsaved
-	currentName          string                      // visible filename or unsaved_N label
 	sidebar              bool
 	sidebarW             int                  // adjusted sidebar width; zero uses sidebarWidth
 	sidebarSplits        map[string][]float64 // adjusted vertical shares, keyed by visible pane composition
@@ -111,14 +107,10 @@ type homeScreen struct {
 	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
 	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
 	indentGuides         bool                 // config-selected leading-indent visualization for every buffer
-	gitGutter            bool                 // draw change markers against HEAD (see gitgutter.go)
 	gitDiff              *gitDiffUI           // anchored, scrollable diff; nil also cancels pending opens
-	diagnosticsGutter    bool                 // independently toggle the LSP marker column
-	gutter               gutter               // the baseline and last-drawn markers behind them
 	gutterDebounce       time.Duration        // internal test seam; production uses gitGutterDebounce
 	launchPreview        bool                 // --preview: open the reader from Init, once
 	preview              int                  // previewOff/previewPane
-	previewPrior         int                  // the ctrl+p mode alt+p folded away, restored when the reader closes
 	previewSrc           string               // the buffer text the pane was last rendered from
 	previewW             int                  // the width it was last rendered at (a resize must re-wrap)
 	previewMap           []int                // that render's source line → pane row map (RenderMarkdownMapped)
@@ -161,20 +153,19 @@ var _ core.QuitGater = (*homeScreen)(nil)
 func NewHomeScreen(sh *core.Shared) core.Screen {
 	c := Of(sh)
 	minimal := c.Mode == ModeFile
-	// Which view the sidebar opens on is the config's (folder_view); alt+t moves it from
+	// Which view the sidebar opens on is the config's (folder_view); alt+f moves it from
 	// there and nothing writes the choice back.
-	s := &homeScreen{sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
+	s := &homeScreen{sh: sh, editorGroup: &editorGroup{weight: 1}, sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
 		openDocsTabs:  c.Config.OpenDocsView == "tabs",
 		sidebarSplits: make(map[string][]float64), outlineDataSeq: -1, outlineScheduledSeq: -1,
 		indentGuides: c.Config.IndentGuides,
-		gitGutter:    gutterDefault(c.Config, c.Mode),
-		// Both gates: the mode's default asks for the column, and only a launch with a
-		// manager has anything to draw in it.
-		diagnosticsGutter: c.lsp != nil && c.Config.modeDefaults(c.Mode).DiagnosticsGutter,
-		// The lock is single-file's alone, so every other launch is unconditionally true
-		// rather than reading a key that does not speak for it.
-		panelToggles:   !minimal || c.Config.SingleFile.AllowPanelToggle,
-		gutterDebounce: gitGutterDebounce}
+	}
+	s.gitGutter = gutterDefault(c.Config, c.Mode)
+	s.diagnosticsGutter = c.lsp != nil && c.Config.modeDefaults(c.Mode).DiagnosticsGutter
+	s.panelToggles = !minimal || c.Config.SingleFile.AllowPanelToggle
+	s.gutterDebounce = gitGutterDebounce
+	c.groups, c.activeGroup = []*editorGroup{s.editorGroup}, s.editorGroup
+
 	// Both sidebar lists are bordered so the focused pane is visible among three. No Help: the
 	// ? overlay documents rename; OnKey still fires it.
 	s.docsPanel = components.NewCompactListPanel(s.docRows(c), "Docs", components.ListPanelOpts{
@@ -206,7 +197,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// --preview needs a single markdown document, which only ModeFile opens; other launches
 	// ignore it.
 	s.launchPreview = c.Preview && minimal && s.previewable()
-	s.editorPanel = components.NewScreenPanel(s.editor)
+	s.initGroupPanels(c)
 	s.previewPanel = components.NewScrollContainer("preview")
 	// A bare "preview" on the edge, matching the two bordered list panels beside it —
 	// the pane's keys are in the help bar (PanelHelp) where the rest of the screen's are.
@@ -252,7 +243,7 @@ func (s *homeScreen) Init(sh *core.Shared) (initCmd tea.Cmd) {
 // the keys there (editorRelease). Before, because by the time focus reaches the editor the
 // previous pane is already blurred; every route into the editor passes through here.
 func (s *homeScreen) notePane() {
-	if pane := s.focusedPane(); pane != s.editorPanel {
+	if pane := s.focusedPane(); !s.isEditorPanel(pane) {
 		s.lastPane = pane
 	}
 }
@@ -272,6 +263,10 @@ func (s *homeScreen) paneFiltering() bool {
 func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 	none := func() core.Action { return core.Action{} }
 	switch {
+	case core.MatchKey(k, moveTabLeftKey):
+		return func() core.Action { return s.moveTab(sh, -1) }
+	case core.MatchKey(k, moveTabRightKey):
+		return func() core.Action { return s.moveTab(sh, 1) }
 	case core.MatchKey(k, findFilesKey):
 		// Locked with the panels: a result forces the bottom panel open.
 		if !s.panelToggles {
@@ -285,8 +280,6 @@ func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 		return func() core.Action { return s.finishHomeUpdate(sh, s.newUnsavedBuffer(sh)) }
 	case core.MatchKey(k, sidebarKey):
 		return func() core.Action { s.setSidebar(!s.sidebar); return core.Action{} }
-	case core.MatchKey(k, flatKey):
-		return func() core.Action { s.setFlat(!s.flat); return core.Action{} }
 	// ctrl+alt+a and alt+? bypass the capture gate: the editor pane always reports
 	// Filtering, so bare "a" and "?" are text whenever it has the keys.
 	case core.MatchKey(k, core.Keys.Actions) && (!s.modular.Filtering() || k == "ctrl+alt+a"):
@@ -350,6 +343,11 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
+		if !s.minimal && s.sidebar && s.focusedPane() == s.docsPane() &&
+			!s.modular.Filtering() && !s.modular.Resizing() && core.MatchKey(k, flatKey) {
+			s.setFlat(!s.flat)
+			return s, core.Action{}
+		}
 		if s.sidebar && !s.flat && s.filePanel.Focused() &&
 			!s.modular.Filtering() && !s.modular.Resizing() {
 			switch {
@@ -465,6 +463,11 @@ func clickModifierMatches(setting string, mod tea.KeyMod) bool {
 }
 
 func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Action {
+	if s.groupLayoutDirty {
+		s.groupLayoutDirty = false
+		act.Cmd = tea.Batch(act.Cmd, s.rebuildGroups(sh))
+	}
+	act.Cmd = tea.Batch(act.Cmd, s.refreshVisibleGroups(sh))
 	defer s.refreshDiagnostics()
 	s.applyPendingJump()
 	// Alongside the jump and for the same reason: both are a caret aimed at a buffer
@@ -585,6 +588,11 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 					forgetSniffedLanguage(entry.path)
 				}
 			})
+			for _, g := range s.groups() {
+				if g.editor == msg.Editor && g.fullPreview != nil {
+					g.fullPreview.Refresh()
+				}
+			}
 			if msg.Editor == s.editor {
 				s.closeCompletion()
 				s.closeSignature()
@@ -605,12 +613,16 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	case ReseedMsg:
 		return s.reseed(sh)
 	case baselineMsg:
-		s.applyBaseline(msg)
+		for _, g := range s.groups() {
+			s.withGroup(g, func() tea.Cmd { s.applyBaseline(msg); return nil })
+		}
 		return core.Action{}
 	case gitDiffBaselineMsg:
 		return s.applyGitDiffBaseline(sh, msg)
 	case gutterRefreshMsg:
-		s.applyGutterRefresh(msg)
+		for _, g := range s.groups() {
+			s.withGroup(g, func() tea.Cmd { s.applyGutterRefresh(msg); return nil })
+		}
 		return core.Action{}
 	case SwitchVaultMsg:
 		return s.requestVaultSwitch(sh, msg.Name)
@@ -619,7 +631,9 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		core.StyleList(s.filePanel.List())
 		core.StyleList(s.openPanel.List())
 		core.StyleList(s.outlinePanel.List())
-		s.refreshDiagnosticSigns()
+		for _, g := range s.groups() {
+			s.withGroup(g, func() tea.Cmd { s.refreshDiagnosticSigns(); return nil })
+		}
 		s.diagnostics.paint()
 		s.search.paint()
 	}
@@ -640,7 +654,9 @@ func (s *homeScreen) applyLSPEvent(sh *core.Shared, event lspEvent) core.Action 
 	if event.outline != nil {
 		s.applyOutlineResult(event.outline)
 	}
-	s.refreshDiagnosticSigns()
+	for _, g := range s.groups() {
+		s.withGroup(g, func() tea.Cmd { s.refreshDiagnosticSigns(); return nil })
+	}
 	s.lspWaiting = true
 	wait := core.Async(tea.Batch(Of(sh).lsp.WaitCmd(), s.retryOutlineAfterLSP(sh)))
 	if event.status != "" {
@@ -651,6 +667,7 @@ func (s *homeScreen) applyLSPEvent(sh *core.Shared, event lspEvent) core.Action 
 
 // reseed rescans the documents and rebuilds every list from them.
 func (s *homeScreen) reseed(sh *core.Shared) core.Action {
+	groupCmd := s.reconcileGroups(sh)
 	c := Of(sh)
 	c.Seed()
 	s.docsPanel.SetItems(s.docRows(c))
@@ -661,8 +678,8 @@ func (s *homeScreen) reseed(sh *core.Shared) core.Action {
 		s.refreshDiagnosticSigns()
 		if active && !s.lspWaiting {
 			s.lspWaiting = true
-			return core.Async(c.lsp.WaitCmd())
+			return core.Async(tea.Batch(groupCmd, c.lsp.WaitCmd()))
 		}
 	}
-	return core.Action{}
+	return core.Async(groupCmd)
 }

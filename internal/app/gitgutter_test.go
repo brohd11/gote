@@ -386,8 +386,8 @@ func BenchmarkHomeGutterCachedRefresh(b *testing.B) {
 	ed := editor.New(editor.Opts{})
 	ed.SetText(content)
 	s := &homeScreen{
-		currentPath: "large.go", editor: ed, gitGutter: true,
-		gutter:         gutter{path: "large.go", base: content, state: repo.BaselineOK},
+		editorGroup: &editorGroup{currentPath: "large.go", editor: ed, gitGutter: true,
+			gutter: gutter{path: "large.go", base: content, state: repo.BaselineOK}},
 		gutterDebounce: gitGutterDebounce,
 	}
 	s.drawGutter()

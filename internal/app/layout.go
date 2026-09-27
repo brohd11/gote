@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -13,6 +14,9 @@ import (
 // editorLeft is the column the editor pane starts at (the side column's width when shown),
 // the left bound for caret-anchored panels.
 func (s *homeScreen) editorLeft() int {
+	if len(s.groups()) > 1 && s.editorPanel != nil {
+		return s.editorPanel.x
+	}
 	if s.sideColumnVisible() {
 		return s.sidebarPaneWidth()
 	}
@@ -102,31 +106,50 @@ func (s *homeScreen) docsPane() docsPane {
 	return s.filePanel
 }
 
-// noFocus tells rebuildModular to leave focus where the fresh layout auto-places it
-// (its first focusable slot) instead of moving it somewhere specific.
+// noFocus tells rebuildModular to preserve the focused panel if it survives,
+// otherwise use the first focusable panel in the new layout.
 const noFocus = -1
 
 // rebuildModular swaps in a layout for the current flags: blur the outgoing focused panel
-// first (or it keeps a focus ring), size the new screen, then place focus (a slot, or
-// noFocus for the auto-focused first slot). It returns the on-focus cmd only for an
-// explicit focus; the auto-focus has no cmd lane, and re-Initing the screen would re-read
-// the editor's file.
+// first (or it keeps a focus ring), size the new screen, then restore panel focus.
+// Panels are retained; rebuilding must not re-initialize their editors.
 func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) tea.Cmd {
+	prior := s.focusedPane()
+	s.rebuildLayout(sh)
+	if focus == noFocus {
+		focus = s.panelSlot(prior)
+		if focus == noFocus {
+			focus = 0
+		}
+	}
+	cmd := s.modular.FocusSlot(focus)
+	if p, ok := s.focusedPane().(*groupPanel); ok {
+		s.activateGroup(p.group)
+	}
+	return cmd
+}
+
+// rebuildLayout replaces geometry without selecting a different active document.
+// The caller restores focus by panel identity after the new slots exist.
+func (s *homeScreen) rebuildLayout(sh *core.Shared) {
 	s.modular.SetFocused(false)
 	s.modular = s.buildModular()
 	if s.w > 0 {
 		s.modular.SetSize(sh, s.w, s.h)
 	}
-	if focus != noFocus {
-		return s.modular.FocusSlot(focus)
-	}
-	return nil
 }
 
 // buildModular declares gote's pane tree. Depth-first leaf order keeps the upper pane
 // indexes stable.
 func (s *homeScreen) buildModular() *components.ModularScreen {
-	s.editor.SetTitleVisible(!s.tabsVisible())
+	s.buildingGroups = true
+	defer func() { s.buildingGroups = false }()
+	for _, g := range s.groups() {
+		g.editor.SetTitleVisible(!s.tabsVisible())
+		if g.fullPreview != nil {
+			s.withGroup(g, func() tea.Cmd { g.fullPreview.Title = s.readerTitle(); return nil })
+		}
+	}
 	opts := components.ModularOpts{
 		// One entry, pointing at the ? overlay where every app key is listed.
 		Help:      []key.Binding{helpKey},
@@ -153,7 +176,20 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 			Children: children,
 		})
 	}
-	if s.tabsVisible() {
+	if len(s.groups()) > 1 {
+		groups := components.LayoutNode{ID: "groups", Axis: components.LayoutHorizontal}
+		for i, g := range s.groups() {
+			bar := leaf(g.openTabs)
+			bar.Size, bar.FixedSize = 1, true
+			groups.Children = append(groups.Children, components.LayoutNode{ID: fmt.Sprintf("group-%d", i), Axis: components.LayoutVertical, Weight: g.weight,
+				Children: []components.LayoutNode{bar, leaf(g.editorPanel)}})
+		}
+		editors := components.LayoutNode{ID: "editors", Axis: components.LayoutHorizontal, Children: []components.LayoutNode{groups}}
+		if panel := s.previewTarget(); panel != nil {
+			editors.Children = append(editors.Children, leaf(panel))
+		}
+		main.Children = append(main.Children, editors)
+	} else if s.tabsVisible() {
 		bar := leaf(s.openTabs)
 		bar.Size, bar.FixedSize = 1, true
 		editors := components.LayoutNode{ID: "editors", Axis: components.LayoutHorizontal,
@@ -214,6 +250,14 @@ func (s *homeScreen) resizeState() components.ResizeState {
 			sizes, weights = append(sizes, 0), append(weights, 1-share)
 		}
 	}
+	if len(s.groups()) > 1 {
+		split := components.SplitState{}
+		for _, g := range s.groups() {
+			split.Sizes = append(split.Sizes, 0)
+			split.Weights = append(split.Weights, g.weight)
+		}
+		state.Splits["groups"] = split
+	}
 	state.Splits["main"] = components.SplitState{Sizes: sizes, Weights: weights}
 	if s.bottomVisible && s.bottomFraction > 0 && s.bottomFraction < 1 {
 		state.Splits["workspace"] = components.SplitState{Sizes: []int{0, 0}, Weights: []float64{1 - s.bottomFraction, s.bottomFraction}}
@@ -224,6 +268,11 @@ func (s *homeScreen) resizeState() components.ResizeState {
 // saveResize retains gote's pane preferences independently of which panes exist
 // in this layout. The framework knows only named splits and their child weights.
 func (s *homeScreen) saveResize(state components.ResizeState) {
+	if split, ok := state.Splits["groups"]; ok && len(split.Weights) == len(s.groups()) {
+		for i, g := range s.groups() {
+			g.weight = split.Weights[i]
+		}
+	}
 	if split, ok := state.Splits["workspace"]; s.bottomVisible && ok && len(split.Weights) == 2 {
 		s.bottomFraction = split.Weights[1] / (split.Weights[0] + split.Weights[1])
 	}

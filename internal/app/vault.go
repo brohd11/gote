@@ -21,28 +21,38 @@ func (s *homeScreen) requestVaultSwitch(sh *core.Shared, name string) core.Actio
 	return s.activateVault(sh, name)
 }
 
-// activateVault performs a confirmed switch: clear the open set, give the pane a scratch
-// editor, and rebuild vault-specific state before returning to the root.
+// activateVault performs a confirmed switch: save the outgoing session, restore the
+// incoming vault's groups (or a scratch editor), and rebuild the shared tools.
 func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	c := Of(sh)
 	if err := c.SwitchVault(name); err != nil {
 		return core.Replace(errPopup("open vault", err))
 	}
 	s.resetDocsGit()
-	s.installScratch(c)
-	s.fullPreview = nil // the vault's scratch buffer is the editor, not a reader over it
-	cmd := s.editorPanel.SetChild(s.editor)
+	s.invalidateDocumentTools()
+	s.modular.SetFocused(false)
+	s.editorGroup = &editorGroup{weight: 1, gitGutter: gutterDefault(c.Config, ModeVault), diagnosticsGutter: c.lsp != nil && c.Config.Project.DiagnosticsGutter}
+	c.groups, c.activeGroup = []*editorGroup{s.editorGroup}, s.editorGroup
+	s.minimal = false
+	if !s.restoreSession(c) {
+		s.installScratch(c)
+	}
+	s.initGroupPanels(c)
+	var initCmds []tea.Cmd
+	for _, g := range c.groups {
+		initCmds = append(initCmds, g.editorPanel.Init(sh))
+	}
+	cmd := tea.Batch(initCmds...)
 	s.docsPanel.SetItems(s.docRows(c))
 	// Rebuilt, not re-pointed: the new vault brings a new root as well as a new directory,
 	// and the explorer's floor is fixed at construction.
 	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))
-	s.openPanel.SetItems(nil)
+	s.openPanel.SetItems(openDocItems(c, s.currentID))
 	if s.outlineVisible {
 		s.prepareOutlineDocument()
 	}
 	s.preview, s.previewPrior = previewOff, previewOff
 	s.resetPreviewCache()
-	s.minimal = false
 	s.sidebar = true
 	// A vault is the full editor, so re-ask every mode default rather than keeping ModeFile's
 	// (including the panel lock).

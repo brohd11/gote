@@ -19,7 +19,13 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 	// Open has no tabs to switch to in minimal mode (tabsVisible is false there), so the
 	// row would change a setting with nothing to show for it.
 	if !s.minimal {
-		extra = append(extra, s.openDocsViewItem())
+		if len(s.groups()) == 1 {
+			extra = append(extra, s.openDocsViewItem())
+		}
+		extra = append(extra, components.Item{
+			Name: "Editor groups", Desc: "move tabs or close an editor group",
+			Pick: func(*core.Shared) core.Action { return core.Push(s.editorGroupsMenu()) },
+		})
 	}
 	if s.panelToggles && lsp {
 		extra = append(extra, components.Item{
@@ -112,4 +118,27 @@ func vaultsItem() components.Item {
 		Desc: "open or add a saved document folder",
 		Pick: func(sh *core.Shared) core.Action { return core.Push(vaultsMenu(sh)) },
 	}
+}
+
+// editorGroupsMenu keeps all three choices visible. An unavailable row explains
+// why it cannot act and has no Pick callback; Escape returns to Actions.
+func (s *homeScreen) editorGroupsMenu() *components.PickerScreen {
+	row := func(name, desc, reason string, run func(*core.Shared) core.Action) components.Item {
+		item := components.Item{Name: name, Desc: desc}
+		if reason != "" {
+			item.Desc = "Unavailable: " + reason
+			return item
+		}
+		item.Pick = func(sh *core.Shared) core.Action { return core.Seq(core.Pop(2), run(sh)) }
+		return item
+	}
+	closeReason := ""
+	if len(s.groups()) < 2 {
+		closeReason = "only one editor group"
+	}
+	return components.NewPicker([]list.Item{
+		row("Move tab left", "move into the left editor group (ctrl+t)", s.tabMoveUnavailable(-1), func(sh *core.Shared) core.Action { return s.moveTab(sh, -1) }),
+		row("Move tab right / split", "move right or create a group (alt+t)", s.tabMoveUnavailable(1), func(sh *core.Shared) core.Action { return s.moveTab(sh, 1) }),
+		row("Close editor group", "move its tabs to a neighboring group", closeReason, s.closeEditorGroup),
+	}, components.PickerOpts{Title: "Editor groups", Crumb: "Editor groups"})
 }

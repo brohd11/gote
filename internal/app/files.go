@@ -88,6 +88,10 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 // to, keeping its edits, caret and history (editors read their file only once).
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 	c := Of(sh)
+	if owner := c.groupFor(path); owner != nil {
+		s.activateGroup(owner)
+	}
+	s.invalidateDocumentTools()
 	// Asked before OpenDoc, which registers the doc. A newly opened doc must be seeded by hand
 	// while the reader holds the pane (seedForPreview).
 	_, was := c.Doc(path)
@@ -110,6 +114,10 @@ func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
 // switchBuffer shows an already-retained Open row, including a pathless unsaved one.
 func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 	c := Of(sh)
+	if owner := c.groupFor(id); owner != nil {
+		s.activateGroup(owner)
+	}
+	s.invalidateDocumentTools()
 	doc, ok := c.bufferInfo(id)
 	if !ok {
 		return core.Action{}
@@ -191,7 +199,7 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 		highlight := ed.SetPath(path)
 		c.RekeyDoc(doc.Path, path, ed)
 		act.Cmd = tea.Batch(act.Cmd, highlight)
-		if s.currentPath == doc.Path {
+		if s.editor == ed {
 			s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 			c.SetActive(path)
 			// A rename can take a file out of markdown under a live preview.

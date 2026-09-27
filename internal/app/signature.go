@@ -177,6 +177,6 @@ func (s *homeScreen) viewSignature(sh *core.Shared, body string) string {
 		return body
 	}
 	y := absoluteY - sh.BodyY()
-	s.signature.popup.Placement = caretPanel(x, y, s.editorLeft(), true)
+	s.signature.popup.Placement = s.caretPopup(x, y, true)
 	return s.signature.popup.ViewOver(body, s.w, s.h)
 }

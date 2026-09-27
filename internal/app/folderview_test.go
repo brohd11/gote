@@ -1,11 +1,13 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
 	"charm.land/bubbles/v2/list"
@@ -58,7 +60,7 @@ func altKey(r rune) tea.KeyMsg {
 	return keyMsg("alt+" + string(r))
 }
 
-// TestFolderViewToggle: alt+t swaps the docs slot between the flat scan (every hit in one
+// TestFolderViewToggle: alt+f swaps the docs slot between the flat scan (every hit in one
 // list, nested or not) and the folder view (one directory, folders included).
 func TestFolderViewToggle(t *testing.T) {
 	root := scanTree(t)
@@ -75,9 +77,9 @@ func TestFolderViewToggle(t *testing.T) {
 		t.Fatalf("the flat list should carry the nested hit, got %v", flat)
 	}
 
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 	if s.flat {
-		t.Fatal("alt+t should leave the flat list")
+		t.Fatal("alt+f should leave the flat list")
 	}
 	folder := rowTitles(s.filePanel.List())
 	if !hasRow(folder, "sub/") {
@@ -93,9 +95,9 @@ func TestFolderViewToggle(t *testing.T) {
 		t.Fatalf("folder view should only contain filesystem entries, got %v", folder)
 	}
 
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 	if !s.flat {
-		t.Fatal("alt+t should come back to the flat list")
+		t.Fatal("alt+f should come back to the flat list")
 	}
 	if got := rowTitles(s.docsPanel.List()); !hasRow(got, "deep.md") {
 		t.Fatalf("the flat list should be exactly what it was, got %v", got)
@@ -103,7 +105,7 @@ func TestFolderViewToggle(t *testing.T) {
 }
 
 // TestFolderViewFromConfig: folder_view picks which view gote opens on — and only that.
-// The scan still runs behind it, so alt+t shows a flat list that is already seeded rather
+// The scan still runs behind it, so alt+f shows a flat list that is already seeded rather
 // than one that has to go and read the tree first.
 func TestFolderViewFromConfig(t *testing.T) {
 	root := scanTree(t)
@@ -131,9 +133,9 @@ func TestFolderViewFromConfig(t *testing.T) {
 		t.Fatalf("the flat list should be seeded behind the folder view, got %v", got)
 	}
 
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 	if !s.flat {
-		t.Fatal("alt+t should still swap back to the flat list")
+		t.Fatal("alt+f should still swap back to the flat list")
 	}
 }
 
@@ -151,7 +153,7 @@ func TestFlatViewIsTheDefault(t *testing.T) {
 func TestFolderViewOpensDoc(t *testing.T) {
 	root := scanTree(t)
 	s, sh := newScanHome(t, root)
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 
 	selectRow(t, s.filePanel.List(), "notes.md")
 	s.Update(sh, keyMsg("enter"))
@@ -168,7 +170,7 @@ func TestFolderViewOpensDoc(t *testing.T) {
 func TestFolderViewWalksIntoFolder(t *testing.T) {
 	root := scanTree(t)
 	s, sh := newScanHome(t, root)
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 
 	selectRow(t, s.filePanel.List(), "sub/")
 	s.Update(sh, keyMsg("enter"))
@@ -188,7 +190,7 @@ func TestFolderViewWalksIntoFolder(t *testing.T) {
 func TestFolderViewNavigationKeys(t *testing.T) {
 	root := scanTree(t)
 	model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
-	model, _ = model.Update(altKey('t'))
+	model, _ = model.Update(altKey('f'))
 	selectRow(t, s.filePanel.List(), "sub/")
 	model, _ = model.Update(keyMsg("d"))
 	sub := filepath.Join(root, "sub")
@@ -227,7 +229,7 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			root := scanTree(t)
 			model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
-			model, _ = model.Update(altKey('t'))
+			model, _ = model.Update(altKey('f'))
 			selectRow(t, s.filePanel.List(), "sub/")
 			// A nested folder gives both keys somewhere to go: d enters .. and x ascends.
 			model, _ = model.Update(keyMsg("d"))
@@ -243,7 +245,7 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 					t.Fatal("expected Open panel focus")
 				}
 			case "flat":
-				model, _ = model.Update(altKey('t'))
+				model, _ = model.Update(altKey('f'))
 			case "hidden":
 				model, _ = model.Update(keyMsg(`alt+|`))
 			case "resizing":
@@ -322,11 +324,11 @@ func TestFolderViewHiddenToggle(t *testing.T) {
 				t.Fatal("hidden directory reappeared after navigation")
 			}
 			s.Update(sh, keyMsg("."))
-			s.Update(sh, altKey('t'))
+			s.Update(sh, altKey('f'))
 			if got := strings.Join(rowTitles(s.docsPanel.List()), "\n"); got != flatBefore {
 				t.Fatal("toggle changed the flat list")
 			}
-			s.Update(sh, altKey('t'))
+			s.Update(sh, altKey('f'))
 			s.Receive(sh, ReseedMsg{})
 			if !hasRow(rowTitles(s.filePanel.List()), ".hidden.md") {
 				t.Fatal("view change or refresh lost hidden visibility")
@@ -355,7 +357,7 @@ func TestFolderViewHiddenToggle(t *testing.T) {
 func TestFolderViewRootClamp(t *testing.T) {
 	root := scanTree(t)
 	s, sh := newScanHome(t, root)
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 
 	if got := rowTitles(s.filePanel.List()); hasRow(got, "..") {
 		t.Fatalf("the scan root should offer no way above it, got %v", got)
@@ -371,7 +373,7 @@ func TestFolderViewRootClamp(t *testing.T) {
 func TestFolderViewReseed(t *testing.T) {
 	root := scanTree(t)
 	s, sh := newScanHome(t, root)
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 
 	if err := os.WriteFile(filepath.Join(root, "later.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -386,7 +388,7 @@ func TestFolderViewReseed(t *testing.T) {
 func TestFolderViewDensity(t *testing.T) {
 	root := scanTree(t)
 	s, sh := newScanHome(t, root)
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 	s.filePanel.Focus()
 
 	if !s.filePanel.Compact() {
@@ -409,7 +411,10 @@ func TestFolderViewInHelp(t *testing.T) {
 	root := scanTree(t)
 	s, _ := newScanHome(t, root)
 	help := s.helpText()
-	for _, want := range []string{"alt+t", "folder view", "alt+r", "row density", ".", "show or hide dot files (folder view)"} {
+	if strings.Index(help, "flat/folder view") < strings.Index(help, "docs list\n\n") {
+		t.Fatal("file view shortcut should be in Docs help, not general help")
+	}
+	for _, want := range []string{"alt+f", "folder view", "alt+r", "row density", ".", "show or hide dot files (folder view)"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("missing %q from the ? overlay:\n%s", want, help)
 		}
@@ -434,9 +439,86 @@ func TestFolderViewInHelp(t *testing.T) {
 func TestFolderViewMinimalModeStaysPut(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single.md")
 	s, sh := newHomeWith(t, Options{Mode: ModeFile, File: path})
-	s.Update(sh, altKey('t'))
+	s.Update(sh, altKey('f'))
 	if !s.flat {
 		t.Fatal("minimal mode should refuse the swap, as it refuses the sidebar")
+	}
+}
+
+func TestFileViewShortcutEmptyListsAndDirectories(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: t.TempDir()})
+	defer Of(sh).close()
+	for i := 0; i < 4; i++ {
+		before := s.flat
+		model, _ = model.Update(keyMsg("alt+f"))
+		if s.flat == before || s.focusedPane() != s.docsPane() {
+			t.Fatal("empty Docs pane could not toggle or lost focus")
+		}
+	}
+	root := scanTree(t)
+	model, s, sh = newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
+	defer Of(sh).close()
+	model, _ = model.Update(keyMsg("alt+f"))
+	selectRow(t, s.filePanel.List(), "sub/")
+	model, _ = model.Update(keyMsg("alt+f"))
+	if !s.flat {
+		t.Fatal("directory row blocked toggle")
+	}
+	model, _ = model.Update(keyMsg("alt+f"))
+	selectRow(t, s.filePanel.List(), "sub/")
+	model, _ = model.Update(keyMsg("d"))
+	selectRow(t, s.filePanel.List(), "..")
+	model, _ = model.Update(keyMsg("alt+f"))
+	if !s.flat || s.focusedPane() != s.docsPane() {
+		t.Fatal("parent-directory row blocked toggle")
+	}
+	model, _ = model.Update(keyMsg("alt+f"))
+	if s.filePanel.Dir() != filepath.Join(root, "sub") {
+		t.Fatal("toggle reset folder location")
+	}
+}
+
+func TestFileViewShortcutRespectsInputAndFocus(t *testing.T) {
+	for _, folder := range []bool{false, true} {
+		for _, state := range []string{"editor", "open", "filter", "resizing", "hidden", "bottom"} {
+			t.Run(fmt.Sprintf("folder=%v/%s", folder, state), func(t *testing.T) {
+				model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: scanTree(t), Depth: 3, DepthSet: true})
+				defer Of(sh).close()
+				if folder {
+					model, _ = model.Update(keyMsg("alt+f"))
+				}
+				s.editor.SetText("one two")
+				s.editor.Reveal(editor.Position{})
+				switch state {
+				case "editor":
+					s.modular.FocusSlot(s.editorSlot())
+				case "open":
+					s.modular.FocusSlot(s.panelSlot(s.openPanel))
+				case "filter":
+					model, _ = model.Update(keyMsg("/"))
+					model, _ = model.Update(keyMsg("no"))
+				case "resizing":
+					s.modular.SetResizing(true)
+				case "hidden":
+					s.setSidebar(false)
+				case "bottom":
+					s.toggleBottom(sh)
+					s.modular.FocusSlot(s.panelSlot(s.bottom))
+				}
+				before := s.flat
+				model, _ = model.Update(keyMsg("alt+f"))
+				if s.flat != before {
+					t.Fatal("view toggle escaped Docs focus/input gate")
+				}
+				if state == "editor" && (s.editor.CursorPosition().Column == 0 || s.editor.Text() != "one two") {
+					t.Fatal("editor lost forward-word movement")
+				}
+				if state == "filter" && (!s.modular.Filtering() || s.docsPane().List().FilterInput.Value() != "no") {
+					t.Fatal("toggle disturbed filter input")
+				}
+				_ = model
+			})
+		}
 	}
 }
 

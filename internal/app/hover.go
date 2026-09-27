@@ -72,6 +72,13 @@ func (s *homeScreen) applyHover(result *lspRequestResult) core.Action {
 // editor's left edge, minus the box's chrome, capped at max.
 func (s *homeScreen) panelWidth(max int) int {
 	available := s.w - s.editorLeft() - panelChrome - 1
+	if len(s.groups()) > 1 {
+		available = min(max, s.editorPanel.w-panelChrome-1)
+		if available < 1 {
+			return 1
+		}
+		return available
+	}
 	if available < 20 {
 		available = 20
 	}
@@ -167,6 +174,23 @@ func (s *homeScreen) viewHover(sh *core.Shared, body string) string {
 		return body
 	}
 	y := absoluteY - sh.BodyY()
-	s.hover.popup.Placement = caretPanel(x, y, s.editorLeft(), false)
+	s.hover.popup.Placement = s.caretPopup(x, y, false)
 	return s.hover.popup.ViewOver(body, s.w, s.h)
+}
+
+// caretPopup uses the actual editor rectangle in a split, including its tab row
+// and the shared bottom dock. The old full-frame placement remains for one group.
+func (s *homeScreen) caretPopup(x, y int, above bool) components.PopupPlacement {
+	if len(s.groups()) == 1 {
+		return caretPanel(x, y, s.editorLeft(), above)
+	}
+	p := s.editorPanel
+	top := p.y
+	if s.sh != nil {
+		top -= s.sh.BodyY()
+	}
+	return func(_, _, w, h int) (int, int) {
+		px, py := caretPanel(x-p.x, y-top, 0, above)(p.w, p.h, w, h)
+		return p.x + px, top + py
+	}
 }

@@ -39,8 +39,10 @@ type Ctx struct {
 	Files     []DocFile
 	Config    Config
 
-	// open is the set of retained buffers — their stable identities, optional paths,
-	// display names, origin roots, editors and order; see openset.go.
+	// Groups reference retained buffers and survive the screen for session saving.
+	groups      []*editorGroup
+	activeGroup *editorGroup
+	// open owns buffer identities, paths, editors and global opening order.
 	open openSet
 	lsp  *lspManager
 
@@ -320,6 +322,7 @@ func (c *Ctx) OpenDoc(path string, opts editor.Opts) *editor.Screen {
 	opts.Path = path
 	ed := c.newEditor(opts)
 	c.open.addFile(path, c.rootForPath(path), ed)
+	c.assignGroup(path)
 	return ed
 }
 
@@ -419,6 +422,7 @@ func (c *Ctx) trackUnsaved(id, name string, ed *editor.Screen) {
 		return
 	}
 	c.open.addUnsaved(id, name, ed)
+	c.assignGroup(id)
 }
 
 // EachDoc visits every open buffer that speaks for a file, in opening order, skipping
@@ -449,7 +453,9 @@ func (c *Ctx) RekeyDoc(oldID, newPath string, ed *editor.Screen) {
 		rec.Path = newPath
 		c.restore[newPath] = rec
 	}
+	c.rekeyGroups(oldID, newPath, ed)
 	c.open.rekey(oldID, newPath, ed)
+	c.assignGroup(newPath)
 }
 
 // OpenDocs lists the open buffers in opening order, for the open-docs list.
@@ -457,7 +463,13 @@ func (c *Ctx) OpenDocs() []DocFile { return c.open.docs() }
 
 // CloseDoc removes id from the open set (unknown ids are ignored) and returns the buffer
 // to show next: the one after it, else the last, else "".
-func (c *Ctx) CloseDoc(id string) (next string) { return c.open.remove(id) }
+func (c *Ctx) CloseDoc(id string) (next string) {
+	next = c.open.remove(id)
+	if g := c.groupFor(id); g != nil {
+		next = g.remove(id)
+	}
+	return next
+}
 
 // rootForPath records a document's origin root on first open: exact for seeded docs, the
 // mode's root otherwise, or its own directory for a standalone file.

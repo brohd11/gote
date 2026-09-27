@@ -328,13 +328,10 @@ func TestDiagnosticsRevisionTracksPublishedChanges(t *testing.T) {
 func TestBottomActionsMenuReturnsToHome(t *testing.T) {
 	model, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
-	// Theme, Vaults, Open view, Diagnostics: exercise the real picker and router Pop,
-	// including the capture gate when alt+\ is subsequently pressed in editor.
-	for _, k := range []string{"a", "down", "down", "down", "enter"} {
-		var cmd tea.Cmd
-		model, cmd = model.Update(keyMsg(k))
-		model = pumpModel(model, cmd)
-	}
+	// Exercise the real picker and router Pop, selecting by label so menu
+	// organization does not change which action this test exercises.
+	model, _ = model.Update(keyMsg("a"))
+	model = choosePickerRow(t, model, "⚠ Diagnostics")
 	if model.(core.Router).Top() != s || !s.bottomVisible {
 		t.Fatal("diagnostics action did not toggle panel and dismiss menu")
 	}
