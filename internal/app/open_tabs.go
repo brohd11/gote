@@ -100,7 +100,7 @@ func (s *homeScreen) openDocsViewItem() components.Item {
 		Name: "Show open documents as " + view,
 		Desc: "change the Open view for this session",
 		Pick: func(sh *core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.setOpenDocsTabs(sh, !s.openDocsTabs))
+			return s.setOpenDocsTabs(sh, !s.openDocsTabs)
 		},
 	}
 }

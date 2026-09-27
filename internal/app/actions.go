@@ -9,38 +9,27 @@ import (
 	"charm.land/bubbles/v2/list"
 )
 
-// actionsMenu is the Actions picker ("a", or ctrl+alt+a from the editor): the shared
-// menu plus gote's document-root, gutter and language-server rows. Rows that cannot act
-// for the whole session (locked panels, no language-server manager, minimal mode) are
-// left out rather than shown disabled.
+// actionsMenu is the Actions picker ("a", or ctrl+alt+a from the editor).
+// Session-wide restrictions omit rows rather than showing them disabled.
 func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
-	lsp := lspEnabled(sh)
 	extra := []list.Item{vaultsItem()}
-	// Open has no tabs to switch to in minimal mode (tabsVisible is false there), so the
-	// row would change a setting with nothing to show for it.
 	if !s.minimal {
-		if len(s.groups()) == 1 {
-			extra = append(extra, s.openDocsViewItem())
-		}
 		extra = append(extra, components.Item{
 			Name: "Editor groups", Desc: "move tabs or close an editor group",
 			Pick: func(*core.Shared) core.Action { return core.Push(s.editorGroupsMenu()) },
 		})
 	}
-	if s.panelToggles && lsp {
+	extra = append(extra, components.Item{
+		Name: "Editor Settings", Desc: "change the open-document view and git gutter",
+		Pick: func(*core.Shared) core.Action { return core.Push(s.editorSettingsMenu()) },
+	})
+	if lspEnabled(sh) {
 		extra = append(extra, components.Item{
-			Name: "⚠ Diagnostics", Desc: "show open-file diagnostics in the bottom panel",
-			Pick: func(sh *core.Shared) core.Action {
-				s.bottom.selectTab(bottomDiagnostics)
-				if s.bottomVisible {
-					return core.Seq(core.Pop(), core.Async(s.modular.FocusSlot(s.panelSlot(s.bottom))))
-				}
-				return core.Seq(core.Pop(), s.toggleBottom(sh))
-			},
+			Name: "LSP", Desc: "diagnostics, outline, and language-server actions",
+			Pick: func(*core.Shared) core.Action { return core.Push(s.lspActionsMenu()) },
 		})
 	}
-	// Locked with the panels: a result opens the bottom panel whether or not it was asked
-	// for, so a live search would be a way around the lock.
+	// Search results open the bottom panel, so this must respect the panel lock.
 	if s.panelToggles {
 		extra = append(extra, components.Item{
 			Name: "⌕ Find in Files", Desc: "search text beneath a folder (ctrl+alt+f)",
@@ -49,42 +38,76 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 			},
 		})
 	}
-	if lsp {
-		extra = append(extra, components.Item{
-			Name: "Toggle diagnostics gutter", Desc: "show or hide LSP severity markers",
-			Pick: func(*core.Shared) core.Action {
-				s.setDiagnosticsGutter(!s.diagnosticsGutter)
-				return core.SetStatus(fmt.Sprintf("diagnostics gutter %s", onOff(s.diagnosticsGutter)))
-			},
-		})
+	return components.NewActionsMenu(selfUpdateHooks(Of(sh).Version),
+		"reload the document list", refreshAction, nil, extra...)
+}
+
+// actionsSubmenu owns navigation: leaf callbacks only perform their action.
+// Escape returns to Actions; selecting a leaf dismisses both picker layers.
+func actionsSubmenu(title string, items ...components.Item) *components.PickerScreen {
+	rows := make([]list.Item, 0, len(items))
+	for _, item := range items {
+		if run := item.Pick; run != nil {
+			item.Pick = func(sh *core.Shared) core.Action {
+				return core.Seq(core.Pop(2), run(sh))
+			}
+		}
+		rows = append(rows, item)
 	}
-	extra = append(extra, components.Item{
+	return components.NewPicker(rows, components.PickerOpts{Title: title, Crumb: title})
+}
+
+func (s *homeScreen) editorSettingsMenu() *components.PickerScreen {
+	var items []components.Item
+	// Minimal mode has no Open view; multiple groups require tabs.
+	if !s.minimal && len(s.groups()) == 1 {
+		items = append(items, s.openDocsViewItem())
+	}
+	items = append(items, components.Item{
 		Name: "Toggle git gutter", Desc: "show or hide changes against HEAD",
 		Pick: func(*core.Shared) core.Action {
 			on := !s.gitGutter
 			return core.Seq(core.Async(s.setGitGutter(on)), core.SetStatus(fmt.Sprintf("git gutter %s", onOff(on))))
 		},
 	})
+	return actionsSubmenu("Editor Settings", items...)
+}
+
+func (s *homeScreen) lspActionsMenu() *components.PickerScreen {
+	var items []components.Item
 	if s.panelToggles {
-		extra = append(extra, s.outlineActionItem())
-	}
-	if lsp {
-		extra = append(extra,
-			components.Item{
-				Name: "Find references", Desc: "every use of the symbol at the cursor (alt+shift+r)",
-				Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqReferences) },
+		items = append(items, components.Item{
+			Name: "⚠ Diagnostics", Desc: "show open-file diagnostics in the bottom panel",
+			Pick: func(sh *core.Shared) core.Action {
+				s.bottom.selectTab(bottomDiagnostics)
+				if s.bottomVisible {
+					return core.Async(s.modular.FocusSlot(s.panelSlot(s.bottom)))
+				}
+				return s.toggleBottom(sh)
 			},
-			components.Item{
-				Name: "Format document", Desc: "organize imports and reformat the buffer (alt+shift+m)",
-				Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqFormat) },
-			},
-			components.Item{
-				Name: "Restart language servers", Desc: "reconnect every active language workspace",
-				Pick: s.restartLanguageServers,
-			})
+		}, s.outlineActionItem())
 	}
-	return components.NewActionsMenu(selfUpdateHooks(Of(sh).Version),
-		"reload the document list", refreshAction, nil, extra...)
+	items = append(items,
+		components.Item{
+			Name: "Toggle diagnostics gutter", Desc: "show or hide LSP severity markers",
+			Pick: func(*core.Shared) core.Action {
+				s.setDiagnosticsGutter(!s.diagnosticsGutter)
+				return core.SetStatus(fmt.Sprintf("diagnostics gutter %s", onOff(s.diagnosticsGutter)))
+			},
+		},
+		components.Item{
+			Name: "Find references", Desc: "every use of the symbol at the cursor (alt+shift+r)",
+			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqReferences) },
+		},
+		components.Item{
+			Name: "Format document", Desc: "organize imports and reformat the buffer (alt+shift+m)",
+			Pick: func(sh *core.Shared) core.Action { return s.requestAt(sh, lspReqFormat) },
+		},
+		components.Item{
+			Name: "Restart language servers", Desc: "reconnect every active language workspace",
+			Pick: s.restartLanguageServers,
+		})
+	return actionsSubmenu("LSP", items...)
 }
 
 func (s *homeScreen) outlineActionItem() components.Item {
@@ -94,7 +117,7 @@ func (s *homeScreen) outlineActionItem() components.Item {
 	}
 	return components.Item{
 		Name: verb + " outline", Desc: "toggle the document-symbol panel (alt+shift+o)",
-		Pick: func(sh *core.Shared) core.Action { return core.Seq(core.Pop(), s.toggleOutline(sh)) },
+		Pick: s.toggleOutline,
 	}
 }
 

@@ -104,7 +104,7 @@ func (s *homeScreen) helpText() string {
 	}
 	writeSection("general", general)
 	if !s.minimal {
-		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. Actions → Editor groups can move tabs or close a group.\nActions switches Open between list and tabs when one group remains.\n\n")
+		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. Actions → Editor groups can move tabs or close a group.\nActions → Editor Settings switches Open between list and tabs when one group remains.\n\n")
 	}
 	// Language-server keys fire from the editor only. The outline key opens a panel, so the
 	// panel lock takes precedence over the LSP gate; jump-back is never marked, since

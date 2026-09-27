@@ -38,7 +38,7 @@ terminal's option-as-meta setting.
 ### Multi Document
 
 Open documents can appear in the sidebar list or in a tab bar above the editor.
-Use **Actions → Show open documents as tabs/list** to switch for the current session.
+Use **Actions → Editor Settings → Show open documents as tabs/list** to switch for the current session.
 Tabs are the default; set `open_docs_view: list` in `~/.gote/config.yml` to put open
 documents back in the sidebar.
 
@@ -180,7 +180,7 @@ Diagnostics and Find in Files share a full-width bottom panel beneath the sideba
 editor, and preview. Its top edge keeps the active view's full title and count, while
 the bottom edge carries compact `Diag` and `Search` tabs. Click those tabs or use
 Left/Right while the panel is focused. `alt+\` toggles the whole panel without taking
-focus from the editor; Actions → Diagnostics reveals the diagnostic tab. Drag the top
+focus from the editor; Actions → LSP → Diagnostics reveals the diagnostic tab. Drag the top
 divider to resize it; the split is remembered during the session.
 
 Use `ctrl+alt+f` or Actions → Find in Files to open a modal with Search and optional
@@ -208,9 +208,10 @@ over the popup. Esc (or Alt+Shift+D again) closes it. Scrolling outside, typing,
 outside clicks, and pane/document or layout changes dismiss it and continue the
 original action. Alt+D and the editor's word-motion shortcuts keep their existing uses.
 
-The Actions
-and editor context menus independently toggle the diagnostics and git gutters and can
-restart failed server connections. Which of the two columns a launch *starts* with is
+In Actions, **LSP** contains diagnostics, the outline, the diagnostics gutter, references,
+formatting, and language-server restart. **Editor Settings** contains the open-document
+list/tab switch and the git gutter. The editor context menu also provides the gutter
+toggles and language-server restart. Which of the two columns a launch *starts* with is
 `default_git_gutter` and `default_diagnostics_gutter` in the config section for its mode:
 
 ```yaml

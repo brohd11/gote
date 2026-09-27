@@ -331,9 +331,19 @@ func TestBottomActionsMenuReturnsToHome(t *testing.T) {
 	// Exercise the real picker and router Pop, selecting by label so menu
 	// organization does not change which action this test exercises.
 	model, _ = model.Update(keyMsg("a"))
+	model = choosePickerRow(t, model, "LSP")
 	model = choosePickerRow(t, model, "⚠ Diagnostics")
 	if model.(core.Router).Top() != s || !s.bottomVisible {
 		t.Fatal("diagnostics action did not toggle panel and dismiss menu")
+	}
+	// With the panel already visible, switch from Search and focus Diagnostics.
+	s.bottom.selectTab(bottomSearch)
+	s.modular.FocusSlot(s.editorSlot())
+	model, _ = model.Update(keyMsg("ctrl+alt+a"))
+	model = choosePickerRow(t, model, "LSP")
+	model = choosePickerRow(t, model, "⚠ Diagnostics")
+	if model.(core.Router).Top() != s || !s.bottomVisible || s.bottom.active != bottomDiagnostics || !s.bottom.Focused() {
+		t.Fatal("diagnostics action did not select and focus the existing panel")
 	}
 	s.modular.FocusSlot(s.editorSlot())
 	model, _ = model.Update(keyMsg(`alt+\`))

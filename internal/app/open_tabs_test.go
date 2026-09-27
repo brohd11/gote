@@ -273,11 +273,13 @@ func TestOpenTabsActionsAndMinimal(t *testing.T) {
 	model, s, sh := tabTestHome(t)
 	for _, want := range []bool{true, false} {
 		s.modular.FocusSlot(s.panelSlot(s.docsPane()))
-		for _, k := range []string{"a", "down", "down", "enter"} {
-			var cmd tea.Cmd
-			model, cmd = model.Update(keyMsg(k))
-			model = pumpModel(model, cmd)
+		model, _ = model.Update(keyMsg("a"))
+		model = choosePickerRow(t, model, "Editor Settings")
+		view := "list"
+		if want {
+			view = "tabs"
 		}
+		model = choosePickerRow(t, model, "Show open documents as "+view)
 		if model.(core.Router).Top() != s || s.tabsVisible() != want {
 			t.Fatal("Actions did not toggle and dismiss")
 		}

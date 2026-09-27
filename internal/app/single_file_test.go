@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 )
 
@@ -20,14 +21,22 @@ func soloFile(t *testing.T) string {
 	return path
 }
 
-// actionRows renders the Actions picker and returns its visible text. The picker's list is
-// unexported, so the render is the assertion surface — at 40 rows tall it paginates
-// nothing, which the row-count check below relies on.
+// actionRows collects Actions labels, including the editor settings and LSP submenus when
+// their parent rows are available. Submenu placement is tested in actions_test.go.
 func actionRows(t *testing.T, s *homeScreen, sh *core.Shared) string {
 	t.Helper()
-	menu := s.actionsMenu(sh)
-	menu.SetSize(sh, 100, 40)
-	return stripANSI(menu.View(sh))
+	var labels []string
+	for _, row := range s.actionsMenu(sh).List().Items() {
+		name := row.(components.Item).Name
+		labels = append(labels, name)
+		switch name {
+		case "Editor Settings":
+			labels = append(labels, pickerLabels(s.editorSettingsMenu())...)
+		case "LSP":
+			labels = append(labels, pickerLabels(s.lspActionsMenu())...)
+		}
+	}
+	return strings.Join(labels, "\n")
 }
 
 func contextLabels(s *homeScreen, sh *core.Shared) []string {
@@ -165,7 +174,7 @@ func TestSingleFileAllowLSP(t *testing.T) {
 		}
 	}
 	rows := actionRows(t, s, sh)
-	for _, gone := range []string{"⚠ Diagnostics", "Toggle diagnostics gutter",
+	for _, gone := range []string{"LSP", "Show outline", "Hide outline", "⚠ Diagnostics", "Toggle diagnostics gutter",
 		"Find references", "Format document", "Restart language servers"} {
 		if strings.Contains(rows, gone) {
 			t.Errorf("the Actions menu still offers %q with no manager:\n%s", gone, rows)
