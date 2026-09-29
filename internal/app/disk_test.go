@@ -232,7 +232,7 @@ func TestRemovedDocumentIgnoresPendingDiskRead(t *testing.T) {
 	ed := s.editor
 	writeDiskDoc(t, filepath.Join(dir, "first.md"), "external")
 	msg := ed.CheckDiskChanges()()
-	model, cmd := model.Update(keyMsg("ctrl+x"))
+	model, cmd := model.Update(keyMsg("alt+w"))
 	model = pumpModel(model, cmd)
 	model, cmd = model.Update(msg)
 	pumpModel(model, cmd)

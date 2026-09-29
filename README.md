@@ -18,6 +18,10 @@ simple TUI text editor built with Go and Bubbletea.
 produces — terminals put byte `0x1f` on the wire for it. Should your terminal swallow it
 entirely, `alt+/` does the same thing.
 
+**Note:** gote breaks the terminal convention on purpose, so the clipboard chords match
+every desktop OS: `ctrl+c` / `ctrl+x` / `ctrl+v` copy, cut and paste, `ctrl+q` quits
+(confirming unsaved changes), and `alt+w` closes the current buffer.
+
 **Note:** on MacOS, option is treated as alt, but the key does not reach the terminal input by default.
 `Terminal -> Settings -> Profiles -> Keyboard -> Use Option as Meta Key`
 

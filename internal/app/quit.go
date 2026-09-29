@@ -21,7 +21,7 @@ func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
 	return core.Push(quitPopup(dirty)), true
 }
 
-// quitPopup builds the dirty-quit confirm; OnQuit keeps q/ctrl+c as a force-quit while it
+// quitPopup builds the dirty-quit confirm; OnQuit keeps Quit/ForceQuit as a force-quit while it
 // is up (rather than stacking another popup).
 func quitPopup(dirty []string) *components.DialogScreen {
 	return dirtyPopup(dirty, "quitting", func(*core.Shared) core.Action { return core.Async(tea.Quit) })
@@ -30,7 +30,7 @@ func quitPopup(dirty []string) *components.DialogScreen {
 // dirtyPopup is the discard confirm shared by quitting and vault switches.
 func dirtyPopup(dirty []string, consequence string, onYes func(*core.Shared) core.Action) *components.DialogScreen {
 	body := "unsaved changes in:\n\n  " + strings.Join(dirty, "\n  ") +
-		"\n\n" + consequence + " discards them.\n(q/ctrl+c force-quits)"
+		"\n\n" + consequence + " discards them.\n(" + core.Hint("", core.Keys.Quit, core.Keys.ForceQuit).Help().Key + " force-quits)"
 	popup := &components.DialogScreen{
 		Title:   "unsaved changes",
 		Render:  func(*core.Shared) string { return body },

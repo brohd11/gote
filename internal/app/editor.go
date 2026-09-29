@@ -9,9 +9,9 @@ import (
 )
 
 // The editor pane's lifecycle: its options, its right-click menu, and how a buffer
-// leaves (save-as, ctrl+x, release).
+// leaves (save-as, alt+w, release).
 
-// editorOpts is the hook set every editor here gets: ctrl+x closes the buffer, esc
+// editorOpts is the hook set every editor here gets: alt+w closes the buffer, esc
 // releases the keys, ctrl+s saves and stays. BaseDir is docsRoot's directory, not the
 // cwd, and is read per call because a vault switch moves it.
 func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
@@ -161,7 +161,7 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 }
 
 // editorSaved is the ctrl+s hook: the buffer stays and gote catches up. A save-as rekeys
-// the open set (or ctrl+x would close a stale path), and the reseed updates both lists.
+// the open set (or alt+w would close a stale path), and the reseed updates both lists.
 func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	s.invalidateDocumentTools()
 	c := Of(sh)
@@ -188,9 +188,9 @@ func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	return core.Seq(core.Async(s.enforcePreview()), core.PropagateAll(ReseedMsg{}))
 }
 
-// editorExit is the ctrl+x hook (after the editor's own save prompt): the doc leaves the
+// editorExit is the alt+w hook (after the editor's own save prompt): the doc leaves the
 // open set, the pane shows the next open doc (or a scratch buffer), and focus returns to
-// the docs list, unhiding the sidebar if needed. In minimal mode ctrl+x quits, as in
+// the docs list, unhiding the sidebar if needed. In minimal mode alt+w quits, as in
 // nano.
 func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 	if s.minimal {
@@ -210,7 +210,7 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.PropagateAll(ReseedMsg{}))
 }
 
-// showBuffer points the pane at open buffer id, or a scratch buffer for "", used by ctrl+x
+// showBuffer points the pane at open buffer id, or a scratch buffer for "", used by alt+w
 // and delete. enforcePreview runs after the swap; the returned Init cmd must be emitted.
 // Only a restored, never-read buffer needs seeding.
 func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
@@ -240,7 +240,7 @@ func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
 }
 
 // editorRelease is the esc hook: hand the keys back to the pane that last had them without
-// touching the buffer (ctrl+x would close it). With Screen.Update's esc it forms one
+// touching the buffer (alt+w would close it). With Screen.Update's esc it forms one
 // toggle. The sidebar is unhidden only when no other remembered pane is on screen.
 func (s *homeScreen) editorRelease(*core.Shared) core.Action {
 	if s.panelSlot(s.lastPane) == noFocus && !s.sidebar {

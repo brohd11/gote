@@ -280,7 +280,7 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 
 // TestHomePaneNavigationWithoutSidebar: alt+| leaves a single-pane grid, where the
 // pane keys have nowhere to go. They must stay consumed rather than falling through
-// to the editor, and ctrl+x must still be the way back to the sidebar.
+// to the editor, and alt+w must still be the way back to the sidebar.
 func TestHomePaneNavigationWithoutSidebar(t *testing.T) {
 	s, sh := newHome(t)
 
@@ -297,7 +297,7 @@ func TestHomePaneNavigationWithoutSidebar(t *testing.T) {
 	}
 }
 
-// TestEditorExitClosesDoc: the editor's exit hook (every ctrl+x path — clean, saved,
+// TestEditorExitClosesDoc: the editor's exit hook (every alt+w path — clean, saved,
 // discarded) closes the current doc: the open set loses it and the pane swaps to the
 // next open doc, or to a fresh scratch buffer when none remain. Driven through the
 // router-facing Update, so the hook's pane swap runs inside the editor child's own
@@ -312,8 +312,8 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	s.openDoc(sh, a)
 	s.openDoc(sh, b) // current: b; open order [a, b]; the editor pane holds focus
 
-	s.Update(sh, keyMsg("ctrl+x")) // clean buffer: closes b
-	s.Receive(sh, ReseedMsg{})     // the router applies the hook's broadcast
+	s.Update(sh, keyMsg("alt+w")) // clean buffer: closes b
+	s.Receive(sh, ReseedMsg{})    // the router applies the hook's broadcast
 	if _, ok := c.Doc(b); ok {
 		t.Fatal("the exited doc must leave the open set")
 	}
@@ -325,7 +325,7 @@ func TestEditorExitClosesDoc(t *testing.T) {
 	}
 
 	s.modular.FocusSlot(s.editorSlot()) // the exit focused the docs list; go back
-	s.Update(sh, keyMsg("ctrl+x"))      // closes a: none remain
+	s.Update(sh, keyMsg("alt+w"))       // closes a: none remain
 	s.Receive(sh, ReseedMsg{})
 	if s.currentPath != "" || len(c.OpenDocs()) != 0 {
 		t.Fatalf("the last exit should clear everything: path %q, open %v", s.currentPath, c.OpenDocs())
@@ -406,7 +406,7 @@ func TestCtrlXClosesUnsavedBufferAndSwitchesBack(t *testing.T) {
 	first := s.editor
 	s.Update(sh, keyMsg("ctrl+n"))
 
-	s.Update(sh, keyMsg("ctrl+x"))
+	s.Update(sh, keyMsg("alt+w"))
 	s.Receive(sh, ReseedMsg{})
 	if s.editor != first || s.currentName != "unsaved_1" || s.currentPath != "" {
 		t.Fatalf("closing unsaved_2 should restore unsaved_1, editor=%p name=%q path=%q",
@@ -424,7 +424,7 @@ func TestCtrlNUsesFirstAvailableUnsavedName(t *testing.T) {
 	s.Update(sh, keyMsg("ctrl+n"))
 
 	s.switchBuffer(sh, firstID)
-	s.Update(sh, keyMsg("ctrl+x"))
+	s.Update(sh, keyMsg("alt+w"))
 	s.Receive(sh, ReseedMsg{})
 	s.Update(sh, keyMsg("ctrl+n"))
 
@@ -479,9 +479,9 @@ func TestPastePromotesStartupBuffer(t *testing.T) {
 }
 
 // TestEditorEscReleasesFocus: esc hands the keys back to the docs list WITHOUT
-// closing the buffer — the distinction from ctrl+x, which closes it. The editor
+// closing the buffer — the distinction from alt+w, which closes it. The editor
 // captures every printable key, so before the OnRelease hook the only ways out were
-// the shift+← pane chord and that destructive ctrl+x.
+// the shift+← pane chord and that destructive alt+w.
 func TestEditorEscReleasesFocus(t *testing.T) {
 	s, sh := newHome(t)
 	c := Of(sh)
@@ -506,7 +506,7 @@ func TestEditorEscReleasesFocus(t *testing.T) {
 
 // TestEditorEscUnhidesSidebar: with the sidebar hidden the editor is the only pane,
 // so releasing focus has to bring back somewhere to release it TO — the same reason
-// the ctrl+x path unhides.
+// the alt+w path unhides.
 func TestEditorEscUnhidesSidebar(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
@@ -525,15 +525,15 @@ func TestEditorEscUnhidesSidebar(t *testing.T) {
 }
 
 // TestEscOverExitPromptStillCancels: the editor's own save/discard/cancel prompt
-// claims esc first, so ctrl+x on a dirty buffer keeps its cancel instead of the
+// claims esc first, so alt+w on a dirty buffer keeps its cancel instead of the
 // release hook firing over it.
 func TestEscOverExitPromptStillCancels(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
 	s.Update(sh, keyMsg("dirty"))
-	s.Update(sh, keyMsg("ctrl+x")) // dirty ⇒ the prompt, not an exit
+	s.Update(sh, keyMsg("alt+w")) // dirty ⇒ the prompt, not an exit
 	if !strings.Contains(stripANSI(s.View(sh)), "Save modified buffer?") {
-		t.Fatal("a dirty ctrl+x should raise the exit prompt")
+		t.Fatal("a dirty alt+w should raise the exit prompt")
 	}
 
 	s.Update(sh, keyMsg("esc"))
@@ -668,8 +668,8 @@ func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
 	}
 }
 
-// TestHomeLeavesClipboardChordsToTheEditor: alt+c/alt+x/alt+v are the editor's clipboard
-// verbs, so gote's own alt keys (alt+z wrap, alt+p full preview) must not grow into them.
+// TestHomeLeavesClipboardChordsToTheEditor: ctrl+c/ctrl+x/ctrl+v are the editor's clipboard
+// verbs, so gote's own keys (alt+z wrap, alt+p full preview) must not grow into them.
 // The cut is the observable half — the clipboard write itself is async and would shell out
 // to pbcopy, so the returned command is left unrun.
 func TestHomeLeavesClipboardChordsToTheEditor(t *testing.T) {
@@ -677,12 +677,12 @@ func TestHomeLeavesClipboardChordsToTheEditor(t *testing.T) {
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
 	s.Update(sh, keyMsg("alpha beta"))
 
-	_, act := s.Update(sh, keyMsg("alt+x"))
+	_, act := s.Update(sh, keyMsg("ctrl+x"))
 	if act.Cmd == nil {
-		t.Fatal("alt+x should reach the editor and return its clipboard command")
+		t.Fatal("ctrl+x should reach the editor and return its clipboard command")
 	}
 	if got := s.editor.Text(); got != "" {
-		t.Fatalf("alt+x through the home screen left %q, want the line cut", got)
+		t.Fatalf("ctrl+x through the home screen left %q, want the line cut", got)
 	}
 	if s.editor.WrapMode() {
 		t.Fatal("a clipboard chord must not toggle wrap")
@@ -794,7 +794,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		"ctrl+n", "new unsaved file", "actions", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", "alt+l", // gote's alt chords
-		"alt+c", "alt+v", "alt+backspace", "ctrl+alt+backspace", // the editor's, via HelpBindings
+		"ctrl+c", "ctrl+v", "alt+w", "ctrl+q", "alt+backspace", "ctrl+alt+backspace", // the editor's, via HelpBindings
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("the ? overlay is the only place these keys are written; missing %q:\n%s", want, help)
@@ -1411,7 +1411,7 @@ func TestEditorSavedRekeys(t *testing.T) {
 	if _, ok := c.Doc(old); ok {
 		t.Fatal("the old path must leave the open set")
 	}
-	// The close path keys off currentPath, so the rename is what keeps ctrl+x working.
+	// The close path keys off currentPath, so the rename is what keeps alt+w working.
 	if next := c.CloseDoc(s.currentPath); next != "" {
 		t.Fatalf("closing the only doc should leave nothing, got %q", next)
 	}
@@ -1459,7 +1459,7 @@ func TestMinimalMode(t *testing.T) {
 		t.Fatal("single-file help must not advertise the inactive ctrl+n shortcut")
 	}
 	if act := s.editorExit(sh); act.Cmd == nil {
-		t.Fatal("ctrl+x should quit in minimal mode (the root screen cannot be popped)")
+		t.Fatal("alt+w should quit in minimal mode (the root screen cannot be popped)")
 	}
 }
 
@@ -1677,7 +1677,7 @@ func TestQuitGate(t *testing.T) {
 		t.Fatal("a dirty buffer should intercept the quit with a confirm popup push")
 	}
 
-	// The popup must force-quit on q/ctrl+c rather than re-trigger the gate
+	// The popup must force-quit on q/ctrl+q rather than re-trigger the gate
 	// below it (which would stack popup upon popup).
 	if _, handled := quitPopup([]string{"scratch"}).QuitGate(sh); !handled {
 		t.Fatal("the quit popup should answer the quit gate itself (force-quit)")
@@ -2402,7 +2402,7 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 }
 
 // TestHomeEditorMenuQuitGate is the stacking bug the menu's QuitGate exists to prevent:
-// ctrl+c runs ahead of the Filtering gate, so without one the router's walk would reach
+// ctrl+q runs ahead of the Filtering gate, so without one the router's walk would reach
 // homeScreen and draw the unsaved-changes confirm on top of the still-open context menu.
 // The first press must close the menu and stop; only the second raises the confirm.
 func TestHomeEditorMenuQuitGate(t *testing.T) {
@@ -2419,20 +2419,47 @@ func TestHomeEditorMenuQuitGate(t *testing.T) {
 		t.Fatalf("the right click should have raised the menu, top is %T", model.(core.Router).Top())
 	}
 
-	drive(keyMsg("ctrl+c"))
+	drive(keyMsg("ctrl+q"))
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
-		t.Fatalf("ctrl+c should close the menu and stop there, top is %T", model.(core.Router).Top())
+		t.Fatalf("ctrl+q should close the menu and stop there, top is %T", model.(core.Router).Top())
 	}
 	if view := stripANSI(view(model)); strings.Contains(view, "unsaved changes") {
 		t.Errorf("the confirm should not appear until the menu is gone:\n%s", view)
 	}
 
-	drive(keyMsg("ctrl+c"))
+	drive(keyMsg("ctrl+q"))
 	if _, ok := model.(core.Router).Top().(*components.DialogScreen); !ok {
-		t.Fatalf("the second ctrl+c should raise the dirty-buffer confirm, top is %T", model.(core.Router).Top())
+		t.Fatalf("the second ctrl+q should raise the dirty-buffer confirm, top is %T", model.(core.Router).Top())
 	}
 	if view := stripANSI(view(model)); !strings.Contains(view, "unsaved changes") {
 		t.Errorf("the confirm should name the unsaved buffer:\n%s", view)
+	}
+}
+
+// TestHomeCtrlCCopiesThroughTheRouter: with ForceQuit moved to ctrl+q, ctrl+c passes the
+// router to the editor as copy. On a dirty buffer a quit would raise the confirm, so the
+// top staying homeScreen shows the chord never reached the quit gate. The returned command
+// is left unrun (it would shell out to pbcopy).
+func TestHomeCtrlCCopiesThroughTheRouter(t *testing.T) {
+	model, _, _ := newHomeRouter(t, Options{})
+	drive := func(msg tea.Msg) tea.Cmd {
+		var cmd tea.Cmd
+		model, cmd = model.Update(msg)
+		return cmd
+	}
+	drive(tea.MouseClickMsg{X: 45, Y: 15, Button: tea.MouseLeft})
+	drive(tea.MouseReleaseMsg{X: 45, Y: 15, Button: tea.MouseNone})
+	drive(keyMsg("unsaved work"))
+
+	if cmd := drive(keyMsg("ctrl+c")); cmd == nil {
+		t.Fatal("ctrl+c should reach the editor and return its clipboard command")
+	}
+	home, ok := model.(core.Router).Top().(*homeScreen)
+	if !ok {
+		t.Fatalf("ctrl+c must not quit or raise the quit confirm, top is %T", model.(core.Router).Top())
+	}
+	if got := home.editor.Text(); got != "unsaved work" {
+		t.Fatalf("copy changed the buffer to %q", got)
 	}
 }
 

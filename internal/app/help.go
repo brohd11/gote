@@ -75,9 +75,8 @@ func (s *homeScreen) helpText() string {
 		core.Hint("filter", s.docsPanel.List().KeyMap.Filter),
 		core.Hint("top/bottom", core.Keys.Top, core.Keys.Bottom),
 	})
-	// From the shared keymap so rebinding Quit reaches here; ctrl+c is the router's own.
-	quitKey := core.Hint("quit (confirms unsaved changes)",
-		core.Keys.Quit, key.NewBinding(key.WithKeys("ctrl+c")))
+	// From the shared keymap so rebinding Quit or ForceQuit reaches here.
+	quitKey := core.Hint("quit (confirms unsaved changes)", core.Keys.Quit, core.Keys.ForceQuit)
 	// Keys silenced by the panel lock or a missing language server are marked with the
 	// responsible setting (disabledKey).
 	panelLock, lspOff := "", ""

@@ -232,7 +232,7 @@ func (s *homeScreen) deleteFile(sh *core.Shared, doc DocFile) core.Action {
 }
 
 // submitDelete removes the file and catches up: an open doc leaves the open set, and the
-// pane moves off it as ctrl+x would. Errors replace the confirm with a popup.
+// pane moves off it as alt+w would. Errors replace the confirm with a popup.
 func (s *homeScreen) submitDelete(sh *core.Shared, doc DocFile) core.Action {
 	if err := deleteDoc(doc.Path); err != nil {
 		return core.Replace(errPopup("delete", err))
