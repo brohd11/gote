@@ -21,6 +21,36 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestFileViewConfigCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want fileView
+	}{
+		{"", fileViewFlat},
+		{"folder_view: true\n", fileViewFolder},
+		{"folder_view: true\nfile_view: ''\n", fileViewFolder},
+		{"folder_view: true\nfile_view: unknown\n", fileViewFolder},
+		{"file_view: unknown\n", fileViewFlat},
+		{"folder_view: true\nfile_view: flat\n", fileViewFlat},
+		{"file_view: folder\n", fileViewFolder},
+		{"folder_view: true\nfile_view: grouped\n", fileViewGrouped},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			cfg := writeConfig(t, tc.raw)
+			if cfg.startFileView() != tc.want {
+				t.Fatalf("startup = %v, want %v", cfg.startFileView(), tc.want)
+			}
+			if err := SaveConfig(cfg); err != nil {
+				t.Fatal(err)
+			}
+			again, err := LoadConfig()
+			if err != nil || !reflect.DeepEqual(again, cfg) || again.startFileView() != tc.want {
+				t.Fatalf("config round trip changed startup preference: %+v, %v", again, err)
+			}
+		})
+	}
+}
+
 // TestLoadConfigFile: set keys load; unset keys keep their defaults.
 func TestLoadConfigFile(t *testing.T) {
 	home := t.TempDir()
@@ -114,7 +144,7 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "indent_guides:", "git_gutter:", "language_servers:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "file_view:", "indent_guides:", "git_gutter:", "language_servers:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}

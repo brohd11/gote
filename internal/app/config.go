@@ -16,8 +16,10 @@ type Config struct {
 	Extensions []string `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
 	ScanDepth  int      `yaml:"scan_depth"` // default recursive scan depth (default 5)
 	AutoLSP    bool     `yaml:"auto-lsp"`   // lazily start/connect configured servers for supported files
-	// FolderView starts the sidebar in the folder view instead of the flat scan list (the
-	// alt+t preset); the scan still runs.
+	// FileView selects the starting Docs view: flat, folder, or grouped. Empty or
+	// unrecognized values honor the legacy FolderView setting.
+	FileView string `yaml:"file_view"`
+	// FolderView is the legacy startup preference, used when FileView is unspecified.
 	FolderView bool `yaml:"folder_view"`
 	// IndentGuides makes the editor visualize complete leading indent levels. It is
 	// off by default so existing configs retain the uncluttered rendering.

@@ -47,6 +47,7 @@ func (s *homeScreen) activateVault(sh *core.Shared, name string) core.Action {
 	// Rebuilt, not re-pointed: the new vault brings a new root as well as a new directory,
 	// and the explorer's floor is fixed at construction.
 	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))
+	s.groupedPanel = s.newGroupedPanel(c)
 	if s.outlineVisible {
 		s.prepareOutlineDocument()
 	}

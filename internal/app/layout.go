@@ -46,7 +46,7 @@ func (s *homeScreen) sidebarSplitKey() string {
 	var names []string
 	for _, panel := range s.sideColumnPanels() {
 		switch panel {
-		case s.docsPanel, s.filePanel:
+		case s.docsPanel, s.filePanel, s.groupedPanel:
 			names = append(names, "docs")
 		case s.outlinePanel:
 			names = append(names, "outline")
@@ -77,13 +77,13 @@ func (s *homeScreen) setSidebar(visible bool) {
 	s.rebuildModular(s.sh, noFocus)
 }
 
-// setFlat swaps the docs slot between the flat list and the folder view, keeping both
-// panels (and their cursors). Minimal mode refuses, as in setSidebar.
-func (s *homeScreen) setFlat(flat bool) {
-	if s.minimal || flat == s.flat {
+// setFileView swaps the Docs view, keeping all panels and their cursors.
+// Minimal mode refuses, as in setSidebar.
+func (s *homeScreen) setFileView(view fileView) {
+	if s.minimal || view == s.fileView {
 		return
 	}
-	s.flat = flat
+	s.fileView = view
 	s.rebuildModular(s.sh, noFocus)
 }
 
@@ -95,10 +95,13 @@ type docsPane interface {
 }
 
 func (s *homeScreen) docsPane() docsPane {
-	if s.flat {
-		return s.docsPanel
+	switch s.fileView {
+	case fileViewFolder:
+		return s.filePanel
+	case fileViewGrouped:
+		return s.groupedPanel
 	}
-	return s.filePanel
+	return s.docsPanel
 }
 
 // noFocus tells rebuildModular to preserve the focused panel if it survives,

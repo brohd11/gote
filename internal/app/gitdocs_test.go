@@ -117,13 +117,25 @@ func TestDocsGitColorsAcrossViews(t *testing.T) {
 	if folder.TitleColor() != want {
 		t.Fatal("folder missing git color")
 	}
-	// Cached row objects read the replacement snapshot without rebuilding either list.
+	s.Update(sh, keyMsg("alt+f"))
+	selectRow(t, s.groupedPanel.List(), "notes.md")
+	grouped := s.groupedPanel.List().SelectedItem().(core.ColorItem)
+	if grouped.TitleColor() != want || !s.groupedPanel.List().SelectedItem().(core.KeepColorItem).KeepColor() {
+		t.Fatal("grouped file missing preserved git color")
+	}
+	selectRow(t, s.groupedPanel.List(), ".")
+	group := s.groupedPanel.List().SelectedItem().(core.ColorItem)
+	if group.TitleColor() != want {
+		t.Fatal("group heading missing directory git color")
+	}
+	// Cached row objects read the replacement snapshot without rebuilding the lists.
 	filterList(t, s.filePanel.List(), "note")
 	before := s.filePanel.List().Index()
 	gitRun(t, root, "add", ".")
 	fresh := buildDocsGitSnapshot(context.Background(), root, root, 3)
 	s.Receive(sh, docsGitResult{s, s.gitDocs.epoch, s.gitDocs.generation, fresh})
-	if flat.TitleColor() != gitStateColor(gitStaged) || folder.TitleColor() != flat.TitleColor() {
+	if flat.TitleColor() != gitStateColor(gitStaged) || folder.TitleColor() != flat.TitleColor() ||
+		grouped.TitleColor() != flat.TitleColor() || group.TitleColor() != flat.TitleColor() {
 		t.Fatal("rows kept stale snapshot")
 	}
 	if s.filePanel.List().FilterValue() != "note" {
@@ -133,7 +145,7 @@ func TestDocsGitColorsAcrossViews(t *testing.T) {
 		t.Fatal("refresh reset selection")
 	}
 	s.Receive(sh, docsGitResult{s, s.gitDocs.epoch, s.gitDocs.generation, &docsGitSnapshot{}})
-	if flat.TitleColor() != nil || folder.TitleColor() != nil {
+	if flat.TitleColor() != nil || folder.TitleColor() != nil || grouped.TitleColor() != nil || group.TitleColor() != nil {
 		t.Fatal("failed/absent repo left stale colors")
 	}
 }

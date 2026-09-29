@@ -392,9 +392,9 @@ func TestGroupRouterShortcutsAndMinimalMode(t *testing.T) {
 			t.Fatalf("retired shortcut %s moved a tab", chord)
 		}
 	}
-	wasFlat := s.flat
+	priorView := s.fileView
 	model, _ = model.Update(keyMsg("alt+t"))
-	if len(s.groups()) != 2 || s.flat != wasFlat {
+	if len(s.groups()) != 2 || s.fileView != priorView {
 		t.Fatal("alt+t did not split, or changed the file view")
 	}
 	model, _ = model.Update(keyMsg("ctrl+t"))

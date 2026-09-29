@@ -40,9 +40,9 @@ var (
 	// ctrl+d is also the editor's forward-delete, but docsKey only fires while the docs panel
 	// is focused and not filtering.
 	deleteKey = key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete"))
-	// Scoped to the Docs pane in either view, ahead of row dispatch so empty lists
+	// Scoped to the Docs pane in every view, ahead of row dispatch so empty lists
 	// and directory rows work too. The editor keeps alt+f for word movement.
-	flatKey = key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "flat/folder view"))
+	fileViewKey = key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "flat/folder/grouped view"))
 	// The folder view's density key (only while that panel is focused and not filtering);
 	// alt+r because alt+d/f move by words.
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
@@ -91,6 +91,7 @@ type homeScreen struct {
 	modular              *components.ModularScreen
 	docsPanel            *components.CompactListPanel
 	filePanel            *components.FilePanel // the folder view alt+f swaps into the docs slot
+	groupedPanel         *components.TreePanel
 	outlinePanel         *components.TreePanel
 	panelSlots           map[components.Panel]int
 	lastPane             components.Panel            // the non-editor pane esc hands the keys back to
@@ -99,7 +100,7 @@ type homeScreen struct {
 	sidebarW             int                  // adjusted sidebar width; zero uses sidebarWidth
 	sidebarSplits        map[string][]float64 // adjusted vertical shares, keyed by visible pane composition
 	editorFlex           float64              // editor's share when the preview flex column is present; zero uses half
-	flat                 bool                 // the docs slot shows the flat scan (true) or the folder explorer
+	fileView             fileView             // the view occupying the Docs slot
 	showHidden           bool                 // session-only dot-file visibility in the folder view
 	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
 	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
@@ -150,9 +151,9 @@ var _ core.QuitGater = (*homeScreen)(nil)
 func NewHomeScreen(sh *core.Shared) core.Screen {
 	c := Of(sh)
 	minimal := c.Mode == ModeFile
-	// Which view the sidebar opens on is the config's (folder_view); alt+f moves it from
+	// Which view the sidebar opens on is the config's; alt+f moves it from
 	// there and nothing writes the choice back.
-	s := &homeScreen{sh: sh, editorGroup: &editorGroup{weight: 1}, sidebar: !minimal, minimal: minimal, flat: !c.Config.FolderView,
+	s := &homeScreen{sh: sh, editorGroup: &editorGroup{weight: 1}, sidebar: !minimal, minimal: minimal, fileView: c.Config.startFileView(),
 		sidebarSplits: make(map[string][]float64), outlineDataSeq: -1, outlineScheduledSeq: -1,
 		indentGuides: c.Config.IndentGuides,
 	}
@@ -174,6 +175,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// Built eagerly: a layout rebuild does not Init its panels, so a deferred first read would
 	// swap in empty.
 	s.filePanel = components.NewFilePanel(s.filePanelOpts(c))
+	s.groupedPanel = s.newGroupedPanel(c)
 	// The minimal editor goes through the ctx like any doc, so it is registered and rekeyed
 	// normally; ScreenPanel.Init starts the file read.
 	if minimal {
@@ -336,11 +338,11 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
 		if !s.minimal && s.sidebar && s.focusedPane() == s.docsPane() &&
-			!s.modular.Filtering() && !s.modular.Resizing() && core.MatchKey(k, flatKey) {
-			s.setFlat(!s.flat)
+			!s.modular.Filtering() && !s.modular.Resizing() && core.MatchKey(k, fileViewKey) {
+			s.setFileView((s.fileView + 1) % fileViewCount)
 			return s, core.Action{}
 		}
-		if s.sidebar && !s.flat && s.filePanel.Focused() &&
+		if s.sidebar && s.fileView == fileViewFolder && s.filePanel.Focused() &&
 			!s.modular.Filtering() && !s.modular.Resizing() {
 			switch {
 			case core.MatchKey(k, descendKey):
@@ -621,6 +623,7 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	case core.MsgThemeChanged:
 		core.StyleList(s.docsPanel.List())
 		core.StyleList(s.filePanel.List())
+		core.StyleList(s.groupedPanel.List())
 		core.StyleList(s.outlinePanel.List())
 		for _, g := range s.groups() {
 			s.withGroup(g, func() tea.Cmd { s.refreshDiagnosticSigns(); return nil })
@@ -662,6 +665,7 @@ func (s *homeScreen) reseed(sh *core.Shared) core.Action {
 	c := Of(sh)
 	c.Seed()
 	s.docsPanel.SetItems(s.docRows(c))
+	s.groupedPanel.SetNodes(s.groupedDocNodes(c))
 	s.filePanel.Refresh()
 	if c.lsp != nil {
 		active := c.lsp.Reconcile(c)

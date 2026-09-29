@@ -92,11 +92,23 @@ pasting into the empty startup buffer adds its tab the same way. `ctrl+s` gives 
 unsaved buffer a filename, after which it is listed and managed like any other document.
 This shortcut is intentionally unavailable in the chrome-less single-document mode.
 
-The sidebar lists the scan flat by default; `alt+f` switches the focused Docs pane
-between the flat list and a folder-by-folder view of the same tree (`alt+r` there switches
-row density). View switching is inactive during filter entry; in the editor, `alt+f` keeps
-its word-movement behavior. Set `folder_view: true` in the config to
-open on the folder view instead — it only picks the starting view, the scan runs either way.
+The sidebar lists the scan flat by default; `alt+f` cycles the focused Docs pane through
+the flat list, folder browser, and grouped folders. View switching is inactive during
+filter entry; in the editor, `alt+f` keeps its word-movement behavior.
+Set `file_view: flat`, `folder`, or `grouped` in the config to choose the starting view.
+An empty, omitted, or unrecognized `file_view` honors the legacy `folder_view` setting
+(`true` starts in the folder browser; otherwise flat). Switching views does not save a preference.
+
+Grouped view uses the same scan results as the flat list. Each heading shows a complete
+root-relative folder path, with its direct files underneath; `docs` and `docs/something`
+are separate groups, and `.` holds root files. Filenames keep their extensions and lose
+the directory suffix. Groups start expanded: Left/Right collapse or expand, Space toggles
+a fold, and `/` searches even collapsed files. Enter or clicking a folder also toggles
+its fold outside filtering. Enter or clicking a file opens it;
+Ctrl+R renames and Ctrl+D deletes it. Folder headings have no file actions. Each view
+retains its cursor and filter, and group folds survive view switches and refreshes.
+
+In the folder browser, `alt+r` switches row density.
 In folder view, `d` enters the selected folder (including `..`) and `x` goes up, bounded by
 the scan or vault root. Enter still opens folders and documents; `d` does nothing on a
 document. Backspace uses the normal Back/filter behavior.
@@ -104,7 +116,7 @@ While the folder panel is focused, `.` shows or hides dot files and directories,
 while typing a filter. Hidden entries start off; the toggle lasts for the session and
 keeps the existing file-type and dependency-folder filters.
 
-Both docs views color names by Git status: staged green, untracked bright green,
+All three Docs views color names by Git status: staged green, untracked bright green,
 modified yellow, conflicts/deletions red, and ignored gray. Clean files use the normal
 foreground; folders keep their directory color unless changes beneath them take priority.
 Mixed staged/unstaged files show the unstaged state. Nested repos, submodules, and

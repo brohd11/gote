@@ -60,13 +60,12 @@ func altKey(r rune) tea.KeyMsg {
 	return keyMsg("alt+" + string(r))
 }
 
-// TestFolderViewToggle: alt+f swaps the docs slot between the flat scan (every hit in one
-// list, nested or not) and the folder view (one directory, folders included).
+// TestFolderViewToggle: alt+f cycles flat, folder browser, grouped folders, then flat.
 func TestFolderViewToggle(t *testing.T) {
 	root := scanTree(t)
 	s, sh := newScanHome(t, root)
 
-	if !s.flat {
+	if s.fileView != fileViewFlat {
 		t.Fatal("gote should start on the flat list")
 	}
 	flat := rowTitles(s.docsPanel.List())
@@ -78,8 +77,8 @@ func TestFolderViewToggle(t *testing.T) {
 	}
 
 	s.Update(sh, altKey('f'))
-	if s.flat {
-		t.Fatal("alt+f should leave the flat list")
+	if s.fileView != fileViewFolder {
+		t.Fatal("alt+f should enter the folder browser")
 	}
 	folder := rowTitles(s.filePanel.List())
 	if !hasRow(folder, "sub/") {
@@ -96,7 +95,11 @@ func TestFolderViewToggle(t *testing.T) {
 	}
 
 	s.Update(sh, altKey('f'))
-	if !s.flat {
+	if s.fileView != fileViewGrouped || !hasRow(rowTitles(s.groupedPanel.List()), "deep.md") {
+		t.Fatal("alt+f should show grouped scan results")
+	}
+	s.Update(sh, altKey('f'))
+	if s.fileView != fileViewFlat {
 		t.Fatal("alt+f should come back to the flat list")
 	}
 	if got := rowTitles(s.docsPanel.List()); !hasRow(got, "deep.md") {
@@ -113,7 +116,7 @@ func TestFolderViewFromConfig(t *testing.T) {
 	cfg.FolderView = true
 	s, sh := newHomeCfg(t, cfg, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
 
-	if s.flat {
+	if s.fileView != fileViewFolder {
 		t.Fatal("folder_view: true should open on the folder view")
 	}
 	if got := rowTitles(s.filePanel.List()); !hasRow(got, "sub/") {
@@ -134,8 +137,9 @@ func TestFolderViewFromConfig(t *testing.T) {
 	}
 
 	s.Update(sh, altKey('f'))
-	if !s.flat {
-		t.Fatal("alt+f should still swap back to the flat list")
+	s.Update(sh, altKey('f'))
+	if s.fileView != fileViewFlat {
+		t.Fatal("alt+f should cycle back to the flat list")
 	}
 }
 
@@ -143,7 +147,7 @@ func TestFolderViewFromConfig(t *testing.T) {
 func TestFlatViewIsTheDefault(t *testing.T) {
 	root := scanTree(t)
 	s, _ := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeScan, Dir: root})
-	if !s.flat {
+	if s.fileView != fileViewFlat {
 		t.Fatal("the default config should open on the flat list")
 	}
 }
@@ -225,7 +229,7 @@ func TestFolderViewNavigationKeys(t *testing.T) {
 }
 
 func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
-	for _, state := range []string{"filter", "editor", "flat", "hidden", "resizing"} {
+	for _, state := range []string{"filter", "editor", "flat", "grouped", "hidden", "resizing"} {
 		t.Run(state, func(t *testing.T) {
 			root := scanTree(t)
 			model, s, _ := newHomeRouter(t, Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
@@ -240,6 +244,9 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 			case "editor":
 				s.modular.FocusSlot(s.editorSlot())
 			case "flat":
+				model, _ = model.Update(altKey('f'))
+				model, _ = model.Update(altKey('f'))
+			case "grouped":
 				model, _ = model.Update(altKey('f'))
 			case "hidden":
 				model, _ = model.Update(keyMsg(`alt+|`))
@@ -319,6 +326,7 @@ func TestFolderViewHiddenToggle(t *testing.T) {
 				t.Fatal("hidden directory reappeared after navigation")
 			}
 			s.Update(sh, keyMsg("."))
+			s.Update(sh, altKey('f'))
 			s.Update(sh, altKey('f'))
 			if got := strings.Join(rowTitles(s.docsPanel.List()), "\n"); got != flatBefore {
 				t.Fatal("toggle changed the flat list")
@@ -406,7 +414,7 @@ func TestFolderViewInHelp(t *testing.T) {
 	root := scanTree(t)
 	s, _ := newScanHome(t, root)
 	help := s.helpText()
-	if strings.Index(help, "flat/folder view") < strings.Index(help, "docs list\n\n") {
+	if strings.Index(help, "flat/folder/grouped view") < strings.Index(help, "docs list\n\n") {
 		t.Fatal("file view shortcut should be in Docs help, not general help")
 	}
 	for _, want := range []string{"alt+f", "folder view", "alt+r", "row density", ".", "show or hide dot files (folder view)"} {
@@ -435,7 +443,7 @@ func TestFolderViewMinimalModeStaysPut(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single.md")
 	s, sh := newHomeWith(t, Options{Mode: ModeFile, File: path})
 	s.Update(sh, altKey('f'))
-	if !s.flat {
+	if s.fileView != fileViewFlat {
 		t.Fatal("minimal mode should refuse the swap, as it refuses the sidebar")
 	}
 }
@@ -443,10 +451,10 @@ func TestFolderViewMinimalModeStaysPut(t *testing.T) {
 func TestFileViewShortcutEmptyListsAndDirectories(t *testing.T) {
 	model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: t.TempDir()})
 	defer Of(sh).close()
-	for i := 0; i < 4; i++ {
-		before := s.flat
+	for i := 0; i < 6; i++ {
+		before := s.fileView
 		model, _ = model.Update(keyMsg("alt+f"))
-		if s.flat == before || s.focusedPane() != s.docsPane() {
+		if s.fileView != (before+1)%fileViewCount || s.focusedPane() != s.docsPane() {
 			t.Fatal("empty Docs pane could not toggle or lost focus")
 		}
 	}
@@ -456,17 +464,19 @@ func TestFileViewShortcutEmptyListsAndDirectories(t *testing.T) {
 	model, _ = model.Update(keyMsg("alt+f"))
 	selectRow(t, s.filePanel.List(), "sub/")
 	model, _ = model.Update(keyMsg("alt+f"))
-	if !s.flat {
+	if s.fileView != fileViewGrouped {
 		t.Fatal("directory row blocked toggle")
 	}
+	model, _ = model.Update(keyMsg("alt+f"))
 	model, _ = model.Update(keyMsg("alt+f"))
 	selectRow(t, s.filePanel.List(), "sub/")
 	model, _ = model.Update(keyMsg("d"))
 	selectRow(t, s.filePanel.List(), "..")
 	model, _ = model.Update(keyMsg("alt+f"))
-	if !s.flat || s.focusedPane() != s.docsPane() {
+	if s.fileView != fileViewGrouped || s.focusedPane() != s.docsPane() {
 		t.Fatal("parent-directory row blocked toggle")
 	}
+	model, _ = model.Update(keyMsg("alt+f"))
 	model, _ = model.Update(keyMsg("alt+f"))
 	if s.filePanel.Dir() != filepath.Join(root, "sub") {
 		t.Fatal("toggle reset folder location")
@@ -474,12 +484,12 @@ func TestFileViewShortcutEmptyListsAndDirectories(t *testing.T) {
 }
 
 func TestFileViewShortcutRespectsInputAndFocus(t *testing.T) {
-	for _, folder := range []bool{false, true} {
+	for _, view := range []fileView{fileViewFlat, fileViewFolder, fileViewGrouped} {
 		for _, state := range []string{"editor", "filter", "resizing", "hidden", "bottom"} {
-			t.Run(fmt.Sprintf("folder=%v/%s", folder, state), func(t *testing.T) {
+			t.Run(fmt.Sprintf("view=%v/%s", view, state), func(t *testing.T) {
 				model, s, sh := newHomeRouter(t, Options{Mode: ModeScan, Dir: scanTree(t), Depth: 3, DepthSet: true})
 				defer Of(sh).close()
-				if folder {
+				for range int(view) {
 					model, _ = model.Update(keyMsg("alt+f"))
 				}
 				s.editor.SetText("one two")
@@ -498,9 +508,9 @@ func TestFileViewShortcutRespectsInputAndFocus(t *testing.T) {
 					s.toggleBottom(sh)
 					s.modular.FocusSlot(s.panelSlot(s.bottom))
 				}
-				before := s.flat
+				before := s.fileView
 				model, _ = model.Update(keyMsg("alt+f"))
-				if s.flat != before {
+				if s.fileView != before {
 					t.Fatal("view toggle escaped Docs focus/input gate")
 				}
 				if state == "editor" && (s.editor.CursorPosition().Column == 0 || s.editor.Text() != "one two") {
