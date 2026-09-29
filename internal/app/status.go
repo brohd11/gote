@@ -1,18 +1,15 @@
 package app
 
 import (
-	"strings"
-
-	"github.com/brohd11/bubblestack/core"
-
 	"charm.land/lipgloss/v2"
+	"github.com/brohd11/bubblestack/core"
 )
 
 // The status line, drawn by gote rather than the router: the router's status row takes a
 // row from the body, so panes would jump on each message. With ChromeMask.Status set, the
-// screen paints it into space the frame already uses:
-//   - into the help bar's blank top row (statusBar), or
-//   - over the body's last row when there is no help bar (statusOver).
+// screen paints it into space the frame already reserves:
+//   - into the screen's own one-row status row, drawn as its help bar (statusRow), or
+//   - over the body's last row when that row is masked away (statusOver).
 //
 // Every screen that masks the status must use one of these, or messages are lost.
 
@@ -33,24 +30,16 @@ func statusLine(sh *core.Shared) string {
 	return clamp.Render(line)
 }
 
-// statusBar draws the status into the help bar's blank top row (from bubbles' HelpStyle
-// padding). If that row is not blank, the line goes above the bar instead.
-func statusBar(sh *core.Shared, help string) string {
-	line := statusLine(sh)
-	if line == "" {
-		return help
+// statusRow is the one-row status line the home screen draws in the help bar's place.
+// It is always one row, blank without a message, so a message never resizes the body.
+func statusRow(sh *core.Shared) string {
+	if line := statusLine(sh); line != "" {
+		return line
 	}
-	lines := strings.Split(help, "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "" {
-		return lipgloss.JoinVertical(lipgloss.Left, line, help)
-	}
-	// HelpStyle indents the hints two cells; statusStyle pads one, so one more space
-	// puts the message on the same column as the bar below it.
-	lines[0] = " " + line
-	return strings.Join(lines, "\n")
+	return " " // vheight("") is 0: the row must exist even when empty
 }
 
-// statusOver paints the status over the body's last row (minimal mode, no help bar),
+// statusOver paints the status over the body's last row (minimal mode, no status row),
 // covering only its own width. A short body is first padded to bodyHeight.
 func statusOver(sh *core.Shared, body string, bodyHeight int) string {
 	line := statusLine(sh)

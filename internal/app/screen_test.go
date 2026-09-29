@@ -102,14 +102,14 @@ func typeMarkdownBullets(s *homeScreen, sh *core.Shared, n int) {
 	s.Update(sh, keyMsg("backspace"))
 }
 
-// focusedPane names which pane holds focus, read off the help bar: the sidebar
-// lists contribute their select hint (ListPanel.PanelHelp) while the editor's
-// ScreenPanel contributes none, so "select" present means a list is focused and
-// absent means the editor is. Nothing else on gote's bar (panes / back / ? more)
-// carries the word. It is the only focus signal the app package can see —
-// ModularScreen's index is another package's unexported field.
+// focusedPane names which pane holds focus, read off the modular screen's help (gote
+// no longer draws it, but it still tracks focus): the sidebar lists contribute their
+// select hint (ListPanel.PanelHelp) while the editor's ScreenPanel contributes none, so
+// "select" present means a list is focused and absent means the editor is. Nothing else
+// on that bar (panes / back) carries the word. It is the only focus signal the app
+// package can see — ModularScreen's index is another package's unexported field.
 func focusedPane(s *homeScreen, sh *core.Shared) string {
-	if strings.Contains(s.HelpView(sh), "select") {
+	if strings.Contains(s.modular.HelpView(sh), "select") {
 		return "list"
 	}
 	return "editor"
@@ -780,9 +780,8 @@ func TestHomeEditorIndentGuidesFromConfig(t *testing.T) {
 	}
 }
 
-// TestHelpOverlayIsTheCompleteReference pins the split the bar and the overlay now make:
-// the bar names only the way in ("? more"), so every app key has to be written in the
-// overlay or it is written nowhere. It also pins the notation — one modifier spelling
+// TestHelpOverlayIsTheCompleteReference: there is no hint bar, only the status row, so
+// every app key has to be written in the overlay or it is written nowhere. It also pins the notation — one modifier spelling
 // across gote's own chords and the editor's, which is the point of listing them together.
 func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 	_, s, sh := newHomeRouter(t, Options{})
@@ -805,16 +804,11 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		t.Fatalf("alt chords should be spelled \"alt+\" throughout, not ⌥:\n%s", help)
 	}
 
-	// The bar keeps the pointer and drops everything the overlay covers. Checked with the
-	// docs list focused, the state that used to carry the most: rename plus all three.
+	// The help bar's place is the one-row status line, with no hints on it. Checked with
+	// the docs list focused, the state that used to carry the most.
 	bar := stripANSI(s.HelpView(sh))
-	if !strings.Contains(bar, "more") {
-		t.Fatalf("the bar should still point at the overlay:\n%s", bar)
-	}
-	for _, gone := range []string{"sidebar", "actions", "rename"} {
-		if strings.Contains(bar, gone) {
-			t.Fatalf("%q belongs in the overlay, not the bar:\n%s", gone, bar)
-		}
+	if lipgloss.Height(bar) != 1 || strings.TrimSpace(bar) != "" {
+		t.Fatalf("the help bar should be just the (empty) status row, got %q", bar)
 	}
 }
 
@@ -1143,9 +1137,6 @@ func TestReaderKeepsTheSidebar(t *testing.T) {
 	}
 	if !strings.Contains(view, "Title") || strings.Contains(view, "# Title") {
 		t.Fatalf("the reader should render the document where the editor was, frame:\n%s", view)
-	}
-	if !strings.Contains(stripANSI(s.HelpView(sh)), "alt+p") {
-		t.Error("the bar should name the way back to the editor")
 	}
 	// alt+| still works, and the reader is still there on the other side of it.
 	s.Update(sh, keyMsg(`alt+|`))
@@ -1519,16 +1510,10 @@ func TestMinimalFrame(t *testing.T) {
 	if strings.Contains(minimal, "docs") || strings.Contains(minimal, "Docs") {
 		t.Fatalf("no sidebar or breadcrumb should be drawn, frame:\n%s", minimal)
 	}
-	// "? more" is the bar's own entry (the app keys live in the ? overlay now), so it is
-	// the string that proves the bar is there — or, here, that it is not.
-	if strings.Contains(minimal, "more") || strings.Contains(minimal, "panes") {
-		t.Fatalf("the help bar should be masked away, frame:\n%s", minimal)
-	}
-
 	// The masked chrome is rows the editor gets instead. The frame fills the terminal
 	// either way, so the proof is WHOSE rows the edges are: minimal mode opens on the
 	// editor's own title bar and ends on a buffer row, where the ordinary launch spends
-	// its first row on the breadcrumb and its last on the help bar.
+	// its first row on the breadcrumb and its last on the (here empty) status row.
 	minLines := strings.Split(minimal, "\n")
 	if len(minLines) != rows {
 		t.Fatalf("minimal mode should fill the terminal: %d rows, want %d", len(minLines), rows)
@@ -1545,8 +1530,11 @@ func TestMinimalFrame(t *testing.T) {
 	if !strings.Contains(ordLines[0], "docs") {
 		t.Fatalf("the ordinary launch's top row should be the breadcrumb, got %q", ordLines[0])
 	}
-	if !strings.Contains(ordLines[len(ordLines)-1], "more") {
-		t.Fatalf("the ordinary launch's last row should be the help bar, got %q", ordLines[len(ordLines)-1])
+	if last := ordLines[len(ordLines)-1]; strings.TrimSpace(last) != "" {
+		t.Fatalf("the ordinary launch's last row should be the empty status row, got %q", last)
+	}
+	if !strings.Contains(ordLines[len(ordLines)-2], "└") {
+		t.Fatalf("the row above the status row should be the panes' bottom border, got %q", ordLines[len(ordLines)-2])
 	}
 }
 
@@ -1588,11 +1576,11 @@ func TestStatusCostsNoRows(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		opts Options
-		// lands is the row the message is expected to take: the help bar's padding row
-		// for a launch that has a help bar, the very last row for one that doesn't.
+		// lands is the row the message is expected to take: the last row either way —
+		// the status row in an ordinary launch, the body's last row in minimal mode.
 		lands int
 	}{
-		{"ordinary launch", Options{}, rows - 2},
+		{"ordinary launch", Options{}, rows - 1},
 		{"minimal launch", Options{Mode: ModeFile, File: file}, rows - 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

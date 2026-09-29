@@ -7,7 +7,6 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 )
@@ -141,8 +140,7 @@ func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	if !ok {
 		row = 1 // the selected row is on-page by construction; never die on it
 	}
-	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row-1, s.sidebarPaneWidth(), onDone, nil)
-	edit.Help = []key.Binding{} // the hint row wraps at sidebar width; keep the box slim
+	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row-1, s.sidebarPaneWidth(), false, onDone, nil)
 	return edit
 }
 

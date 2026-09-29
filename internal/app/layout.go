@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/components"
@@ -148,16 +147,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 			s.withGroup(g, func() tea.Cmd { g.fullPreview.Title = s.readerTitle(); return nil })
 		}
 	}
-	opts := components.ModularOpts{
-		// One entry, pointing at the ? overlay where every app key is listed.
-		Help:      []key.Binding{helpKey},
-		HelpLimit: 4,
-	}
-	if s.fullPreview != nil {
-		// The reader in place of the editor names how to get the editor back (a ScreenPanel
-		// contributes no help of its own).
-		opts.Help = append([]key.Binding{fullPreviewKey}, opts.Help...)
-	}
+	opts := components.ModularOpts{}
 	leaf := func(panel components.Panel) components.LayoutNode {
 		s.panelSlots[panel] = len(s.panelSlots)
 		return components.LayoutNode{Slot: &components.Slot{Panel: panel}}

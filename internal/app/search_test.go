@@ -150,22 +150,6 @@ func TestSearchPanelDimsFileHeadings(t *testing.T) {
 	}
 }
 
-func TestBottomHelpIsContextualAndCapped(t *testing.T) {
-	s, sh := newHome(t)
-	defer Of(sh).close()
-	s.toggleBottom(sh)
-	s.modular.FocusSlot(s.panelSlot(s.bottom))
-	bar := stripANSI(s.HelpView(sh))
-	for _, want := range []string{"panes", "esc", "enter", "more"} {
-		if !strings.Contains(bar, want) {
-			t.Fatalf("bottom help missing %q: %s", want, bar)
-		}
-	}
-	if strings.Count(bar, " • ") > 3 {
-		t.Fatalf("help bar contains more than four entries: %s", bar)
-	}
-}
-
 func TestFindFilesShortcutRunsIntoFocusedBottomPanel(t *testing.T) {
 	root := t.TempDir()
 	writeSearchFile(t, root, "match.txt", "before needle after\n")

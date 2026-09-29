@@ -486,7 +486,8 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 }
 
 // View and HelpView draw the status line themselves (status.go), since the router's is
-// masked. In minimal mode the body's last row takes it.
+// masked. HelpView is only the status row: the key hints live in the ? overlay. In
+// minimal mode the body's last row takes the status.
 func (s *homeScreen) View(sh *core.Shared) string {
 	s.refreshOpenTabs(sh)
 	body := s.modular.View(sh)
@@ -500,7 +501,7 @@ func (s *homeScreen) View(sh *core.Shared) string {
 }
 
 func (s *homeScreen) HelpView(sh *core.Shared) string {
-	return statusBar(sh, s.modular.HelpView(sh))
+	return statusRow(sh)
 }
 
 func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
@@ -524,7 +525,7 @@ func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 func (s *homeScreen) Filtering() bool { return s.modular.Filtering() }
 
 // chromeMask is gote's chrome rule: minimal mode hides everything; otherwise the
-// breadcrumb and help bar stay. Status is masked in both, and drawn by the screen (see
+// breadcrumb and status row stay. Status is masked in both, and drawn by the screen (see
 // status.go), so a message never changes the body's height.
 func chromeMask(minimal bool) core.ChromeMask {
 	if minimal {
