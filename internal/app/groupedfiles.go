@@ -97,6 +97,7 @@ func (s *homeScreen) newGroupedPanel(c *Ctx) *components.TreePanel {
 	return components.NewTreePanel(s.groupedDocNodes(c), "Docs", components.TreePanelOpts{
 		Border:                 true,
 		ToggleBranchesOnSelect: true,
+		Selection:              sidebarSelection,
 		OnSelect: func(sh *core.Shared, node components.TreeNode) core.Action {
 			if item, ok := node.Item.(groupedDocItem); ok {
 				return s.pickDoc(sh, item.docItem)

@@ -145,6 +145,11 @@ var _ core.Crumber = (*homeScreen)(nil)
 var _ core.ChromeMasker = (*homeScreen)(nil)
 var _ core.QuitGater = (*homeScreen)(nil)
 
+// sidebarSelection is how every sidebar list marks its row: a plain-text bar instead of the
+// accent border, and nothing while the pane is unfocused — while typing in the editor the
+// sidebar cursor tells the reader nothing.
+var sidebarSelection = core.SelectionOpts{Style: core.SelectBackground, NoAccent: true, HideUnfocused: true}
+
 // NewHomeScreen builds the root screen: the docs list, document tabs, and a scratch
 // buffer. ModeFile builds the same screen minimally (sidebar unreachable, chrome masked,
 // the given file in the editor), reusing the editor pane's wiring.
@@ -166,9 +171,10 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// The Docs list is bordered so the focused pane is visible. No Help: the
 	// ? overlay documents rename; OnKey still fires it.
 	s.docsPanel = components.NewCompactListPanel(s.docRows(c), "Docs", components.ListPanelOpts{
-		OnSelect: s.pickDoc,
-		OnKey:    s.docsKey,
-		Border:   true,
+		OnSelect:  s.pickDoc,
+		OnKey:     s.docsKey,
+		Border:    true,
+		Selection: sidebarSelection,
 	})
 	s.outlinePanel = s.newOutlinePanel()
 	s.openTabs = &documentTabBar{TabBar: components.NewTabBar()}

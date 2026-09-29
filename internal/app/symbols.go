@@ -33,7 +33,8 @@ func (i outlineItem) PrefixText() string  { return symbolMark(i.kind) + " " }
 
 func (s *homeScreen) newOutlinePanel() *components.TreePanel {
 	return components.NewTreePanel(nil, "Outline", components.TreePanelOpts{
-		Border: true,
+		Border:    true,
+		Selection: sidebarSelection,
 		OnSelect: func(sh *core.Shared, node components.TreeNode) core.Action {
 			item, ok := node.Item.(outlineItem)
 			if !ok || s.currentPath == "" {

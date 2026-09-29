@@ -26,7 +26,8 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 		DensityKey: densityKey,
 		UpKey:      upKey,
 		TitleColor: s.fileTitleColor,
-		KeepColor:  true, // git state is what the reader wants on the row they are pointing at; the frame's rule still says which row that is
+		KeepColor:  true, // git state is what the reader wants on the row they are pointing at; the selection bar still says which row that is
+		Selection:  sidebarSelection,
 		OnDir:      func(*core.Shared, string) core.Action { return core.Async(s.refreshDocsGit()) },
 		Include:    s.includeDoc(c),
 		OnSelect:   func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
