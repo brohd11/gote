@@ -33,8 +33,9 @@ func TestOutlinePanelLayoutModesAndMinimal(t *testing.T) {
 	}
 
 	s.Update(sh, keyMsg("alt+shift+o"))
-	if !s.outlineVisible || s.panelSlot(s.docsPane()) != 0 || s.panelSlot(s.outlinePanel) != 1 ||
-		s.panelSlot(s.openTabs) != 2 || s.panelSlot(s.editorPanel) != 3 {
+	// Slot 0 is the header leaf.
+	if !s.outlineVisible || s.panelSlot(s.docsPane()) != 1 || s.panelSlot(s.outlinePanel) != 2 ||
+		s.panelSlot(s.openTabs) != 3 || s.panelSlot(s.editorPanel) != 4 {
 		t.Fatalf("outline slots = docs %d outline %d tabs %d editor %d",
 			s.panelSlot(s.docsPane()), s.panelSlot(s.outlinePanel), s.panelSlot(s.openTabs), s.panelSlot(s.editorPanel))
 	}

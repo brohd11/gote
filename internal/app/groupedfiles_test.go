@@ -110,7 +110,7 @@ func TestGroupedFilesOpenAndFolderActions(t *testing.T) {
 				var msg tea.Msg = keyMsg("enter")
 				if mouse {
 					row, _ := s.groupedPanel.RowY(s.groupedPanel.List().Index())
-					msg = tea.MouseClickMsg{X: 8, Y: sh.BodyY() + row, Button: tea.MouseLeft}
+					msg = tea.MouseClickMsg{X: 8, Y: sh.BodyY() + s.headerHeight() + row, Button: tea.MouseLeft}
 				}
 				model, _ = model.Update(msg)
 				if hasRow(rowTitles(s.groupedPanel.List()), "deep.md") != expanded {
@@ -129,7 +129,7 @@ func TestGroupedFilesOpenAndFolderActions(t *testing.T) {
 				if !ok {
 					t.Fatal("selected file is off-page")
 				}
-				msg = tea.MouseClickMsg{X: 8, Y: sh.BodyY() + row, Button: tea.MouseLeft}
+				msg = tea.MouseClickMsg{X: 8, Y: sh.BodyY() + s.headerHeight() + row, Button: tea.MouseLeft}
 			}
 			model, _ = model.Update(msg)
 			if s.currentPath != path || !s.editorPanel.Focused() {
@@ -145,11 +145,14 @@ func TestGroupedFilesRenameAndDelete(t *testing.T) {
 	s.setFileView(fileViewGrouped)
 	s.groupedPanel.Select("file:" + filepath.Join(root, "sub", "old.md"))
 	row, _ := s.groupedPanel.RowY(s.groupedPanel.List().Index())
+	// Read before the push: the line edit's own mask keeps the router breadcrumb, moving
+	// BodyY, while the anchor is measured in the home screen's frame beneath it.
+	top := sh.BodyY() + s.headerHeight()
 	model, edit := pressRename(model)
 	if edit == nil || edit.Value() != filepath.Join("sub", "old.md") {
 		t.Fatal("rename did not preserve root-relative context")
 	}
-	if x, y, w := edit.Anchor(); x != 0 || y != sh.BodyY()+row-1 || w != s.sidebarPaneWidth() {
+	if x, y, w := edit.Anchor(); x != 0 || y != top+row-1 || w != s.sidebarPaneWidth() {
 		t.Fatalf("rename anchor = %d,%d width %d", x, y, w)
 	}
 	edit.SetValue("moved/new.md")

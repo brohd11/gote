@@ -148,7 +148,7 @@ func TestOpenTabsGeometryAndFocus(t *testing.T) {
 	s.setPreview(previewPane)
 	s.toggleBottom(sh)
 	s.View(sh)
-	if s.openTabs.h != 1 || s.openTabs.x != 34 || s.openTabs.y != sh.BodyY() {
+	if s.openTabs.h != 1 || s.openTabs.x != 34 || s.openTabs.y != sh.BodyY()+headerRows {
 		t.Fatalf("tab geometry = %+v", s.openTabs)
 	}
 	// Pane traversal skips the non-focusable bar.
@@ -159,7 +159,7 @@ func TestOpenTabsGeometryAndFocus(t *testing.T) {
 	}
 	s.setSidebar(false)
 	s.View(sh)
-	if s.openTabs.x != 0 || s.openTabs.w != 100 || s.openTabs.h != 1 || s.editorSlot() != 1 {
+	if s.openTabs.x != 0 || s.openTabs.w != 100 || s.openTabs.h != 1 || s.editorSlot() != s.firstSlot()+1 {
 		t.Fatal("hidden sidebar also hid or misplaced tabs")
 	}
 	if s.editor != ed || s.currentID != id || s.editor.CursorPosition() != position || s.editor.Text() != "A" {

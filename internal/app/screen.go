@@ -80,6 +80,7 @@ type homeScreen struct {
 	buildingGroups       bool
 	gitDocs              docsGit
 	bottomVisible        bool
+	header               *headerPanel // the layout's breadcrumb leaf; nil in minimal mode
 	bottomFraction       float64
 	bottom               *bottomDock
 	diagnostics          *diagnosticsPanel
@@ -496,7 +497,7 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 // minimal mode the body's last row takes the status.
 func (s *homeScreen) View(sh *core.Shared) string {
 	s.refreshOpenTabs(sh)
-	body := s.modular.View(sh)
+	body := s.joinHeaderRule(s.modular.View(sh))
 	if s.minimal {
 		body = statusOver(sh, body, s.h)
 	}
@@ -530,14 +531,15 @@ func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {
 // single-key shortcuts alone while the editor types or a list filters.
 func (s *homeScreen) Filtering() bool { return s.modular.Filtering() }
 
-// chromeMask is gote's chrome rule: minimal mode hides everything; otherwise the
-// breadcrumb and status row stay. Status is masked in both, and drawn by the screen (see
-// status.go), so a message never changes the body's height.
+// chromeMask is gote's chrome rule: minimal mode hides everything; otherwise only the
+// help row stays. Status is masked in both, and drawn by the screen (see status.go), so a
+// message never changes the body's height. The breadcrumb is the layout's header leaf
+// (see header.go), so its rule can join the pane dividers.
 func chromeMask(minimal bool) core.ChromeMask {
 	if minimal {
 		return core.FullscreenMask()
 	}
-	return core.ChromeMask{Status: true}
+	return core.ChromeMask{Status: true, Breadcrumb: true}
 }
 
 func (s *homeScreen) ChromeMask() core.ChromeMask { return chromeMask(s.minimal) }

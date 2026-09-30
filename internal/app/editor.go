@@ -205,7 +205,7 @@ func (s *homeScreen) editorExit(sh *core.Shared) core.Action {
 	if !s.sidebar {
 		s.setSidebar(true)
 	}
-	focus := s.modular.FocusSlot(0)
+	focus := s.modular.FocusSlot(s.firstSlot())
 	s.refreshPreview()
 	return core.Seq(core.Async(tea.Batch(cmd, focus)), core.PropagateAll(ReseedMsg{}))
 }
@@ -255,5 +255,5 @@ func (s *homeScreen) releaseSlot() int {
 	if slot := s.panelSlot(s.lastPane); slot != noFocus {
 		return slot
 	}
-	return 0
+	return s.firstSlot()
 }

@@ -132,7 +132,7 @@ func (s *homeScreen) switchBuffer(sh *core.Shared, id string) core.Action {
 }
 
 // rowLineEdit builds a line edit over the selected docs row for renaming. The docs panel
-// is at (0, BodyY); RowY gives the row within the panel, and the anchor is one row above
+// is at (0, BodyY) below the header; RowY gives the row within the panel, and the anchor is one row above
 // (the box draws its own top border). The box spans the sidebar width.
 func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	onDone func(*core.Shared, string) core.Action) *components.LineEditScreen {
@@ -141,7 +141,7 @@ func (s *homeScreen) rowLineEdit(sh *core.Shared, placeholder string,
 	if !ok {
 		row = 1 // the selected row is on-page by construction; never die on it
 	}
-	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+row-1, s.sidebarPaneWidth(), false, onDone, nil)
+	edit := components.NewLineEdit(placeholder, 0, sh.BodyY()+s.headerHeight()+row-1, s.sidebarPaneWidth(), false, onDone, nil)
 	return edit
 }
 

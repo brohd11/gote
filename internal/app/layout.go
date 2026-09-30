@@ -66,6 +66,14 @@ func (s *homeScreen) editorSlot() int {
 	return s.panelSlot(s.editorPanel)
 }
 
+// firstSlot is the first pane below the header: where focus lands when no panel claims it.
+func (s *homeScreen) firstSlot() int {
+	if s.header != nil {
+		return 1
+	}
+	return 0
+}
+
 // setSidebar rebuilds the layout with or without the sidebar. Minimal mode refuses here,
 // the one path the sidebar can return through, so no caller needs a guard.
 func (s *homeScreen) setSidebar(visible bool) {
@@ -116,7 +124,7 @@ func (s *homeScreen) rebuildModular(sh *core.Shared, focus int) tea.Cmd {
 	if focus == noFocus {
 		focus = s.panelSlot(prior)
 		if focus == noFocus {
-			focus = 0
+			focus = s.firstSlot()
 		}
 	}
 	cmd := s.modular.FocusSlot(focus)
@@ -153,6 +161,14 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		return components.LayoutNode{Slot: &components.Slot{Panel: panel}}
 	}
 	s.panelSlots = make(map[components.Panel]int)
+	// The header is the first leaf, so every pane's slot counts it (see firstSlot).
+	s.header = nil
+	var header components.LayoutNode
+	if !s.minimal {
+		s.header = &headerPanel{host: s}
+		header = leaf(s.header)
+		header.Size, header.FixedSize = headerRows, true
+	}
 	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
 	if panels := s.sideColumnPanels(); len(panels) > 0 {
 		children := make([]components.LayoutNode, 0, len(panels))
@@ -206,6 +222,10 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 				Children: []components.LayoutNode{leaf(s.bottom)},
 			}},
 		}
+	}
+	if s.header != nil {
+		root = components.LayoutNode{ID: "frame", Axis: components.LayoutVertical,
+			Children: []components.LayoutNode{header, root}}
 	}
 	opts.Resize = &components.ResizeOpts{State: s.resizeState(), OnChange: s.saveResize}
 	return components.NewModularLayout(root, opts)

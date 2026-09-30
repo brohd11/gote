@@ -1464,12 +1464,15 @@ func TestMinimalMode(t *testing.T) {
 }
 
 // TestNonMinimalKeepsChrome: the mask is opt-in per launch, not a global — the ordinary
-// launch must still draw its breadcrumb and help bar. Status is the one exception, masked
-// in every mode because the screen paints it itself (see TestStatusCostsNoRows).
+// launch must still draw its breadcrumb and help bar. Status and breadcrumb are masked
+// because the screen paints them itself (see TestStatusCostsNoRows, header.go).
 func TestNonMinimalKeepsChrome(t *testing.T) {
-	s, _ := newHome(t)
-	if mask := s.ChromeMask(); mask != (core.ChromeMask{Status: true}) {
-		t.Fatalf("the doc-list launch should mask nothing but the status row, got %+v", mask)
+	s, sh := newHome(t)
+	if mask := s.ChromeMask(); mask != (core.ChromeMask{Status: true, Breadcrumb: true}) {
+		t.Fatalf("the doc-list launch should mask only status and breadcrumb, got %+v", mask)
+	}
+	if !strings.Contains(s.View(sh), s.CrumbLabel(false)) {
+		t.Fatal("the header leaf should draw the breadcrumb")
 	}
 }
 
