@@ -152,7 +152,7 @@ func TestGroupInputFocusAndPaste(t *testing.T) {
 	s.editorGroup = s.groups()[0] // emulate stale host state; Focus must repair it synchronously
 	s.groups()[1].editorPanel.Focus()
 	// The View menu's Wrap acts on the active editor, as the old right-click row did.
-	for _, it := range s.viewMenuItems(sh, func() *components.MenuScreen { return nil }) {
+	for _, it := range s.viewMenuItems(sh) {
 		if unmark(it.Label) == "Wrap" {
 			it.Pick(sh)
 			called = true

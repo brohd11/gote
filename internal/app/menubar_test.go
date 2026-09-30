@@ -68,14 +68,13 @@ func chooseMenuRow(t *testing.T, model tea.Model, label string) tea.Model {
 func TestHeaderMenuContents(t *testing.T) {
 	_, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
-	none := func() *components.MenuScreen { return nil }
 	for id, want := range map[string]string{
 		"file":    "Nothing here yet",
 		"edit":    "Copy | Cut | Paste",
 		"view":    "Preview | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter",
 		"options": "LSP",
 	} {
-		if got := strings.Join(menuLabels(s.headerMenuItems(sh, id, none)), " | "); got != want {
+		if got := strings.Join(menuLabels(s.headerMenuItems(sh, id)), " | "); got != want {
 			t.Errorf("%s = %q, want %q", id, got, want)
 		}
 	}
@@ -83,7 +82,7 @@ func TestHeaderMenuContents(t *testing.T) {
 		"Show diagnostics | Diagnostics gutter | Find references | Format document | Restart language servers" {
 		t.Errorf("Options → LSP = %q", got)
 	}
-	edit := s.headerMenuItems(sh, "edit", none)
+	edit := s.headerMenuItems(sh, "edit")
 	if !edit[0].Disabled || edit[0].Hint != "ctrl+c" {
 		t.Errorf("Copy should be disabled without a selection and hint ctrl+c: %+v", edit[0])
 	}
@@ -142,7 +141,7 @@ func TestViewMenuTogglesPanels(t *testing.T) {
 
 func TestOptionsLSPNeedsAServer(t *testing.T) {
 	_, s, sh := tabTestHome(t) // no language-server manager
-	items := s.headerMenuItems(sh, "options", func() *components.MenuScreen { return nil })
+	items := s.headerMenuItems(sh, "options")
 	if len(items) != 1 || !items[0].Disabled {
 		t.Fatalf("Options → LSP should be disabled without a server: %+v", items)
 	}

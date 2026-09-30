@@ -54,25 +54,31 @@ func selected(on bool, label string) string { return marked(menuRadioMark, on, l
 func hint(b key.Binding) string { return b.Help().Key }
 
 // headerMenuItems is the dropdown for menu id, built as it opens so disabled rows and
-// checks reflect that moment. parent is the dropdown itself, for anchoring submenus.
-func (s *homeScreen) headerMenuItems(sh *core.Shared, id string, parent func() *components.MenuScreen) []components.MenuItem {
+// checks reflect that moment.
+func (s *homeScreen) headerMenuItems(sh *core.Shared, id string) []components.MenuItem {
 	switch id {
 	case "edit":
 		return s.editMenuItems()
 	case "view":
-		return s.viewMenuItems(sh, parent)
+		return s.viewMenuItems(sh)
 	case "options":
-		return s.optionsMenuItems(sh, parent)
+		return s.optionsMenuItems(sh)
 	}
 	return []components.MenuItem{{Label: "Nothing here yet", Disabled: true}}
 }
 
-// submenu is a row that opens items beside its parent. Esc in the child returns to the
-// parent; the child's rows close both (menuPick(2, …)).
-func submenu(label string, disabled bool, parent func() *components.MenuScreen, items func() []components.MenuItem) components.MenuItem {
-	return components.MenuItem{Label: label, Hint: "›", Disabled: disabled, Pick: func(*core.Shared) core.Action {
-		return core.Push(components.NewMenu(components.MenuOpts{Items: items(), Anchor: parent().ChildAnchor()}))
-	}}
+// menuStyle is every gote menu's look, matching the sidebar: a background-filled
+// selection with un-accented text, and a border in the frame color rather than the accent.
+var menuStyle = components.MenuStyle{
+	Selection: core.SelectionOpts{Style: core.SelectBackground, NoAccent: true},
+	Focus:     components.FocusLegend,
+}
+
+// submenu is a row that opens items beside it (enter, click, → or hover); the menu opens
+// the child itself, in its own style. Esc in the child returns to the parent; the child's
+// rows close both (menuPick(2, …)).
+func submenu(label string, disabled bool, items func() []components.MenuItem) components.MenuItem {
+	return components.MenuItem{Label: label, Disabled: disabled, Submenu: items}
 }
 
 // editMenuItems are the editor's own clipboard rows, labeled with gote's chords.
@@ -86,9 +92,9 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 	return items
 }
 
-func (s *homeScreen) viewMenuItems(sh *core.Shared, parent func() *components.MenuScreen) []components.MenuItem {
+func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 	items := []components.MenuItem{
-		submenu(checked(false, "Preview"), !s.previewable(), parent, s.previewMenuItems),
+		submenu(checked(false, "Preview"), !s.previewable(), s.previewMenuItems),
 		{Separator: true},
 		{Label: checked(s.sidebar, "Sidebar"), Hint: hint(sidebarKey), Pick: menuPick(1, func(*core.Shared) core.Action {
 			s.setSidebar(!s.sidebar)
@@ -165,9 +171,9 @@ func (s *homeScreen) previewMenuItems() []components.MenuItem {
 	}
 }
 
-func (s *homeScreen) optionsMenuItems(sh *core.Shared, parent func() *components.MenuScreen) []components.MenuItem {
+func (s *homeScreen) optionsMenuItems(sh *core.Shared) []components.MenuItem {
 	return []components.MenuItem{
-		submenu("LSP", !lspEnabled(sh), parent, func() []components.MenuItem { return s.lspMenuItems(sh) }),
+		submenu("LSP", !lspEnabled(sh), func() []components.MenuItem { return s.lspMenuItems(sh) }),
 	}
 }
 
@@ -229,11 +235,9 @@ func (s *homeScreen) headerInput(sh *core.Shared, msg tea.Msg) (core.Action, boo
 // directly over the box; the border starts one cell left of the label and flips clear of
 // it near the right edge.
 func (s *homeScreen) openHeaderMenu(sh *core.Shared, span statusSpan) core.Action {
-	var menu *components.MenuScreen
-	parent := func() *components.MenuScreen { return menu }
-	menu = components.NewMenu(components.MenuOpts{
-		Items:  s.headerMenuItems(sh, span.id, parent),
+	return core.Push(components.NewMenu(components.MenuOpts{
+		Items:  s.headerMenuItems(sh, span.id),
 		Anchor: components.MenuAnchor{X: max(span.x0-1, 0), Y: sh.BodyY() + headerRows - 1, FlipX: span.x1 + 1},
-	})
-	return core.Push(menu)
+		Style:  menuStyle,
+	}))
 }

@@ -25,6 +25,7 @@ func (s *homeScreen) docMenu(doc DocFile, open func(*core.Shared) core.Action) c
 	unsaved := doc.Path == ""
 	return core.Push(components.NewMenu(components.MenuOpts{
 		Anchor: components.AnchorAt(s.rightClickX, s.rightClickY),
+		Style:  menuStyle,
 		Items: []components.MenuItem{
 			{Label: "Open", Pick: menuPick(1, open)},
 			{Label: "Rename", Hint: hint(renameKey), Disabled: unsaved, Pick: menuPick(1, func(sh *core.Shared) core.Action {
