@@ -29,13 +29,24 @@ func openDiskFixture(t *testing.T) (tea.Model, *homeScreen, *core.Shared, string
 	return model, s, sh, dir
 }
 
-func refreshThroughActions(t *testing.T, model tea.Model) tea.Model {
+// refreshThroughMenu picks File → Refresh, pumping its disk check through the router.
+func refreshThroughMenu(t *testing.T, model tea.Model) tea.Model {
 	t.Helper()
-	model, cmd := model.Update(keyMsg("ctrl+alt+a"))
-	return choosePickerRow(t, pumpModel(model, cmd), "⟳ Refresh")
+	home := model.(core.Router).Top().(*homeScreen)
+	model = openHeaderMenu(t, model, home, home.sh, "file")
+	menu := model.(core.Router).Top().(*components.MenuScreen)
+	for i, it := range menu.Items() {
+		if it.Label == "Refresh" {
+			menu.Select(i)
+			next, cmd := model.Update(keyMsg("enter"))
+			return pumpModel(next, cmd)
+		}
+	}
+	t.Fatal("File has no Refresh row")
+	return model
 }
 
-func TestActionsRefreshChecksRetainedDocuments(t *testing.T) {
+func TestMenuRefreshChecksRetainedDocuments(t *testing.T) {
 	for _, state := range []string{"clean", "dirty", "deleted"} {
 		t.Run(state, func(t *testing.T) {
 			model, s, sh, dir := openDiskFixture(t)
@@ -57,7 +68,7 @@ func TestActionsRefreshChecksRetainedDocuments(t *testing.T) {
 			} else {
 				writeDiskDoc(t, secondPath, "external second")
 			}
-			refreshThroughActions(t, model)
+			refreshThroughMenu(t, model)
 			if first.Text() != "external first" || first.Dirty() {
 				t.Fatal("refresh missed the inactive clean buffer")
 			}
@@ -91,7 +102,7 @@ func TestActionsRefreshChecksRetainedDocuments(t *testing.T) {
 	}
 }
 
-func TestActionsRefreshUpdatesPreviews(t *testing.T) {
+func TestMenuRefreshUpdatesPreviews(t *testing.T) {
 	for _, mode := range []string{"side", "full", "single-file"} {
 		t.Run(mode, func(t *testing.T) {
 			var model tea.Model
@@ -115,7 +126,13 @@ func TestActionsRefreshUpdatesPreviews(t *testing.T) {
 				}
 			}
 			writeDiskDoc(t, path, "updated preview text")
-			refreshThroughActions(t, model)
+			if mode == "single-file" {
+				// No menu bar in the minimal launch: regaining focus is its refresh.
+				next, cmd := model.Update(tea.FocusMsg{})
+				pumpModel(next, cmd)
+			} else {
+				refreshThroughMenu(t, model)
+			}
 			var view string
 			if mode == "side" {
 				view = s.previewPanel.View(false)
@@ -283,7 +300,7 @@ func TestReloadReconcilesLSPWithoutAnotherKey(t *testing.T) {
 			previous := manager.desired[path].version
 			writeDiskDoc(t, path, "new_name = 2\n")
 			if trigger == "refresh" {
-				refreshThroughActions(t, model)
+				refreshThroughMenu(t, model)
 			} else {
 				model, cmd := model.Update(tea.FocusMsg{})
 				pumpModel(model, cmd)

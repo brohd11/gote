@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 )
 
@@ -19,24 +18,6 @@ func soloFile(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-// actionRows collects Actions labels, including the editor settings and LSP submenus when
-// their parent rows are available. Submenu placement is tested in actions_test.go.
-func actionRows(t *testing.T, s *homeScreen, sh *core.Shared) string {
-	t.Helper()
-	var labels []string
-	for _, row := range s.actionsMenu(sh).List().Items() {
-		name := row.(components.Item).Name
-		labels = append(labels, name)
-		switch name {
-		case "Editor Settings":
-			labels = append(labels, pickerLabels(s.editorSettingsMenu())...)
-		case "LSP":
-			labels = append(labels, pickerLabels(s.lspActionsMenu())...)
-		}
-	}
-	return strings.Join(labels, "\n")
 }
 
 func contextLabels(s *homeScreen, sh *core.Shared) []string {
@@ -104,7 +85,7 @@ func TestSingleFilePanelUnlockKeys(t *testing.T) {
 	}
 }
 
-// TestSingleFilePanelLockMenus: the rows the lock takes away are omitted from both menus,
+// TestSingleFilePanelLockMenus: the rows the lock takes away are omitted from the menu,
 // and the rows beside them are untouched.
 func TestSingleFilePanelLockMenus(t *testing.T) {
 	locked, lsh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: soloFile(t)})
@@ -120,41 +101,17 @@ func TestSingleFilePanelLockMenus(t *testing.T) {
 		}
 	}
 
-	rows := actionRows(t, locked, lsh)
-	for _, gone := range []string{"⚠ Diagnostics", "⌕ Find in Files", "Show outline"} {
-		if strings.Contains(rows, gone) {
-			t.Errorf("the Actions menu still offers %q under the lock:\n%s", gone, rows)
-		}
-	}
-	// Open has no tabs in minimal mode, so the view row would change a setting with
-	// nothing to show for it.
-	if strings.Contains(rows, "Show open documents as") {
-		t.Errorf("minimal mode has no Open view to switch:\n%s", rows)
-	}
-	for _, kept := range []string{"▣ Vaults", "Toggle git gutter", "⟳ Refresh"} {
-		if !strings.Contains(rows, kept) {
-			t.Errorf("the Actions menu lost %q:\n%s", kept, rows)
-		}
-	}
-
 	// Unlocked, every removed row comes back.
 	open, osh := newHomeCfg(t, minimalCfg(), Options{Mode: ModeFile, File: soloFile(t)})
 	if labels := contextLabels(open, osh); !hasLabel(labels, "Show outline") ||
 		!hasLabel(labels, "Toggle diagnostics panel") {
 		t.Errorf("unlocking did not restore the right-click panel rows: %v", labels)
 	}
-	rows = actionRows(t, open, osh)
-	for _, want := range []string{"⚠ Diagnostics", "⌕ Find in Files", "Show outline"} {
-		if !strings.Contains(rows, want) {
-			t.Errorf("unlocking did not restore %q:\n%s", want, rows)
-		}
-	}
 }
 
 // TestSingleFileAllowLSP: default_allow_lsp: false denies the launch a manager, which is
-// the same state auto-lsp: false produces — so every LSP-derived row falls away with it,
-// in the Actions menu as well as the right-click one. The Actions menu used to list them
-// unconditionally.
+// the same state auto-lsp: false produces — so every LSP-derived row falls away from the
+// right-click menu with it.
 func TestSingleFileAllowLSP(t *testing.T) {
 	cfg := minimalCfg()
 	cfg.SingleFile.AllowLSP = false
@@ -173,15 +130,8 @@ func TestSingleFileAllowLSP(t *testing.T) {
 			t.Errorf("the right-click menu still offers %q with no manager: %v", gone, labels)
 		}
 	}
-	rows := actionRows(t, s, sh)
-	for _, gone := range []string{"LSP", "Show outline", "Hide outline", "⚠ Diagnostics", "Toggle diagnostics gutter",
-		"Find references", "Format document", "Restart language servers"} {
-		if strings.Contains(rows, gone) {
-			t.Errorf("the Actions menu still offers %q with no manager:\n%s", gone, rows)
-		}
-	}
 	// The git column is not an LSP feature and must survive.
-	if !strings.Contains(rows, "Toggle git gutter") || !hasLabel(labels, "Toggle git gutter") {
+	if !hasLabel(labels, "Toggle git gutter") {
 		t.Error("the git gutter row should survive a launch with no language server")
 	}
 
@@ -315,15 +265,11 @@ func TestSingleFileVaultPromotionLiftsRestrictions(t *testing.T) {
 	}
 }
 
-// TestActionsReachableFromEditor: bare "a" is text whenever the editor has the keys — its
-// Filtering() is unconditionally true — so in the minimal launch, where the editor is the
-// only pane, ctrl+alt+a is the only way to the picker.
-func TestActionsReachableFromEditor(t *testing.T) {
+// TestNoActionsPicker: the Actions picker is retired (the menu bar holds its rows), so
+// neither of its keys opens anything — and in the minimal launch, where the editor has the
+// keys, bare "a" is still text and ctrl+alt+a is not typed.
+func TestNoActionsPicker(t *testing.T) {
 	s, sh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: soloFile(t)})
-	if !s.editorPanel.Focused() {
-		t.Fatal("the minimal launch should boot with the editor focused")
-	}
-
 	before := s.editor.Text()
 	if _, act := s.Update(sh, keyMsg("a")); act.Msg != nil {
 		t.Errorf("bare a must stay text while the editor is capturing, got %T", act.Msg)
@@ -331,28 +277,18 @@ func TestActionsReachableFromEditor(t *testing.T) {
 	if s.editor.Text() == before {
 		t.Error("bare a should have been typed into the buffer")
 	}
-
-	_, act := s.Update(sh, keyMsg("ctrl+alt+a"))
-	if act.Msg == nil {
-		t.Fatal("ctrl+alt+a should push the Actions picker from the editor")
+	if _, act := s.Update(sh, keyMsg("ctrl+alt+a")); act.Msg != nil {
+		t.Fatalf("ctrl+alt+a should open nothing now, got %T", act.Msg)
 	}
 	if typed := s.editor.Text(); strings.Contains(typed, "aa") {
-		t.Error("ctrl+alt+a must not also reach the buffer as text")
+		t.Error("ctrl+alt+a must not reach the buffer as text")
 	}
-}
 
-// TestActionsKeyIsShared: the picker key lives in core.Keys so every app on the framework
-// carries the same pair, and gote's help must name both — the alias is the only way in
-// from the editor, so a page listing "a" alone would hide it.
-func TestActionsKeyIsShared(t *testing.T) {
-	keys := core.Keys.Actions.Keys()
-	for _, want := range []string{"a", "ctrl+alt+a"} {
-		if !core.MatchKey(want, core.Keys.Actions) {
-			t.Errorf("core.Keys.Actions should carry %q, has %v", want, keys)
-		}
+	home, hsh := newHome(t)
+	if _, act := home.Update(hsh, keyMsg("a")); act.Msg != nil {
+		t.Errorf("a should not open a picker from the home screen, got %T", act.Msg)
 	}
-	s, _ := newHome(t)
-	if text := s.helpText(); !strings.Contains(text, "a/ctrl+alt+a") {
-		t.Errorf("the ? overlay should name both keys:\n%s", text)
+	if text := home.helpText(); strings.Contains(text, "ctrl+alt+a") || strings.Contains(text, "Actions") {
+		t.Errorf("the ? overlay still mentions the Actions picker:\n%s", text)
 	}
 }

@@ -303,6 +303,20 @@ func (c *Ctx) SwitchVault(name string) error {
 	if err != nil {
 		return err
 	}
+	c.switchRoot(ModeVault, name, path)
+	return nil
+}
+
+// SwitchDefault closes the current session and activates what a bare launch opens
+// (Config.Default: the home store, a directory, or a vault — see resolveDefault, which
+// falls back to the home store rather than failing).
+func (c *Ctx) SwitchDefault() {
+	c.switchRoot(resolveDefault(c.Config))
+}
+
+// switchRoot is a root switch after validation: bank the outgoing session, drop the open
+// set, and re-seed for the new root.
+func (c *Ctx) switchRoot(mode Mode, name, path string) {
 	// Banked before the buffers go: the outgoing vault's session is only knowable while
 	// its open set is still standing. Best-effort, like every other session write.
 	_ = c.saveSession()
@@ -310,7 +324,7 @@ func (c *Ctx) SwitchVault(name string) error {
 	// The incoming vault gets a clean slate rather than the old root's leftovers, which
 	// would otherwise be written back under ITS key on quit.
 	c.activeID, c.restore = "", nil
-	c.Mode, c.VaultName, c.ScanDir = ModeVault, name, path
+	c.Mode, c.VaultName, c.ScanDir = mode, name, path
 	c.FilePath = ""
 	// A single-file launch whose settings denied a manager may be allowed one as a vault;
 	// create it now, since nothing else reconsiders.
@@ -318,7 +332,6 @@ func (c *Ctx) SwitchVault(name string) error {
 		c.lsp = newLSPManager(c.Config, c.Version)
 	}
 	c.Seed()
-	return nil
 }
 
 // OpenDoc returns path's editor, creating and registering it on first open with opts

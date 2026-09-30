@@ -290,10 +290,8 @@ func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 		return func() core.Action { return s.finishHomeUpdate(sh, s.newUnsavedBuffer(sh)) }
 	case core.MatchKey(k, sidebarKey):
 		return func() core.Action { s.setSidebar(!s.sidebar); return core.Action{} }
-	// ctrl+alt+a and alt+? bypass the capture gate: the editor pane always reports
-	// Filtering, so bare "a" and "?" are text whenever it has the keys.
-	case core.MatchKey(k, core.Keys.Actions) && (!s.modular.Filtering() || k == "ctrl+alt+a"):
-		return func() core.Action { return core.Push(s.actionsMenu(sh)) }
+	// alt+? bypasses the capture gate: the editor pane always reports Filtering, so bare
+	// "?" is text whenever it has the keys.
 	case core.MatchKey(k, helpKey) && (!s.modular.Filtering() || k == "alt+?"):
 		return func() core.Action { return core.Push(s.helpScreen()) }
 	case core.MatchKey(k, previewKey):
@@ -644,6 +642,9 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		}
 		return core.Action{}
 	case SwitchVaultMsg:
+		if msg.Default {
+			return s.requestDefaultSwitch(sh)
+		}
 		return s.requestVaultSwitch(sh, msg.Name)
 	case core.MsgThemeChanged:
 		core.StyleList(s.docsPanel.List())

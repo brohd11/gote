@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -588,5 +589,36 @@ func TestSearchFindsUnreadRestoredBufferOnDisk(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("search returned %#v, want the match read from disk — an unread buffer "+
 			"must not override the file with its empty text", got)
+	}
+}
+
+// TestRecentVaults: noting a vault puts it first, drops its older entry, and caps the list;
+// reading it keeps only vaults still configured.
+func TestRecentVaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for i := range maxRecentVaults + 3 {
+		noteRecentVault(fmt.Sprintf("v%d", i))
+	}
+	noteRecentVault("v5") // revisit: moves up, not duplicated
+	sessions, err := LoadSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := sessions.RecentVaults
+	if len(got) != maxRecentVaults || got[0] != "v5" || got[1] != fmt.Sprintf("v%d", maxRecentVaults+2) {
+		t.Fatalf("recent = %v", got)
+	}
+	for i, n := range got {
+		for _, m := range got[i+1:] {
+			if n == m {
+				t.Fatalf("duplicate %q in %v", n, got)
+			}
+		}
+	}
+
+	cfg := DefaultConfig()
+	cfg.Vaults = map[string]VaultConfig{"v5": {Path: "/x"}, "v12": {Path: "/y"}}
+	if r := recentVaults(cfg); strings.Join(r, ",") != "v5,v12" {
+		t.Fatalf("recentVaults should keep configured names in order, got %v", r)
 	}
 }

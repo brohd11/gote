@@ -1,90 +1,63 @@
 package app
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 )
 
-// Choose by label so unrelated additions to Actions do not change the test's target.
-func choosePickerRow(t *testing.T, model tea.Model, label string) tea.Model {
-	t.Helper()
-	picker, ok := model.(core.Router).Top().(*components.PickerScreen)
-	if !ok {
-		t.Fatal("expected a picker")
-	}
-	for i, row := range picker.List().Items() {
-		if item, ok := row.(components.Item); ok && item.Name == label {
-			picker.List().Select(i)
-			next, cmd := model.Update(keyMsg("enter"))
-			return pumpModel(next, cmd)
-		}
-	}
-	t.Fatalf("picker has no row %q", label)
-	return model
-}
+// The Actions picker is retired: its rows live in the menu bar (menubar.go). These pin
+// the rows that moved there from its Editor groups submenu, now View → Tab Groups.
 
-func TestEditorGroupsSubmenuNavigationAndActions(t *testing.T) {
+func TestTabGroupsMenu(t *testing.T) {
 	model, s, sh := tabTestHome(t)
 	a, _ := seedDoc(t, s, sh, "a.txt", "a")
 	b, _ := seedDoc(t, s, sh, "b.txt", "b")
 	s.openDoc(sh, b)
-	model, _ = model.Update(keyMsg("ctrl+alt+a"))
-	actions := model.(core.Router).Top().(*components.PickerScreen)
-	for _, row := range actions.List().Items() {
-		item := row.(components.Item)
-		if strings.HasPrefix(item.Name, "Move tab") || item.Name == "Close editor group" {
-			t.Fatal("group action still appears at top level")
-		}
+	tabGroups := func() {
+		t.Helper()
+		model = openHeaderMenu(t, model, s, sh, "view")
+		model = chooseMenuRow(t, model, "Tab Groups")
 	}
-	model = choosePickerRow(t, model, "Editor groups")
-	groups := model.(core.Router).Top().(*components.PickerScreen)
-	if len(groups.List().Items()) != 3 {
-		t.Fatal("submenu should have exactly three rows")
+
+	// One group: moving left and closing a group cannot act, so they are disabled.
+	tabGroups()
+	rows := model.(core.Router).Top().(*components.MenuScreen).Items()
+	if got := strings.Join(menuLabels(rows), " | "); got != "Move tab left | Move tab right / split | Close editor group" {
+		t.Fatalf("Tab Groups = %q", got)
 	}
-	for _, index := range []int{0, 2} {
-		item := groups.List().Items()[index].(components.Item)
-		if item.Pick != nil || !strings.HasPrefix(item.Desc, "Unavailable:") {
-			t.Fatal("unavailable row has no explanation or can activate")
-		}
-		model = choosePickerRow(t, model, item.Name)
-		if model.(core.Router).Top() != groups || len(s.groups()) != 1 {
-			t.Fatal("unavailable action changed state")
-		}
+	if !rows[0].Disabled || rows[1].Disabled || !rows[2].Disabled {
+		t.Fatalf("with one group only the split should be live: %+v", rows)
 	}
 	model, _ = model.Update(keyMsg("esc"))
-	if model.(core.Router).Top() != actions {
-		t.Fatal("Escape did not return to Actions")
-	}
-	model = choosePickerRow(t, model, "Editor groups")
-	model = choosePickerRow(t, model, "Move tab right / split")
+	model, _ = model.Update(keyMsg("esc"))
+
+	tabGroups()
+	model = chooseMenuRow(t, model, "Move tab right / split")
 	if model.(core.Router).Top() != s || len(s.groups()) != 2 || s.currentID != b || !s.editorPanel.Focused() {
-		t.Fatal("split action did not return to its editor")
+		t.Fatal("split should close both menus and return to its editor")
 	}
-	model, _ = model.Update(keyMsg("ctrl+alt+a"))
-	model = choosePickerRow(t, model, "Editor groups")
-	model = choosePickerRow(t, model, "Move tab left")
+	tabGroups()
+	model = chooseMenuRow(t, model, "Move tab left")
 	if model.(core.Router).Top() != s || len(s.groups()) != 1 || s.currentID != b {
-		t.Fatal("left action did not dismiss both menus")
+		t.Fatal("left should close both menus")
 	}
 	model, _ = model.Update(keyMsg("alt+t"))
-	model, _ = model.Update(keyMsg("ctrl+alt+a"))
-	model = choosePickerRow(t, model, "Editor groups")
-	model = choosePickerRow(t, model, "Close editor group")
+	tabGroups()
+	model = chooseMenuRow(t, model, "Close editor group")
 	if model.(core.Router).Top() != s || len(s.groups()) != 1 || s.currentID != b || len(s.tabs) != 2 || s.tabs[0] != a {
-		t.Fatal("close action did not merge and return to editor")
+		t.Fatal("close should merge the group and return to the editor")
 	}
 }
 
-func TestEditorGroupsSubmenuSplitAvailability(t *testing.T) {
+// TestTabGroupsSplitAvailability: the split row is disabled for the same reasons the
+// shortcut refuses — one tab, or four groups already.
+func TestTabGroupsSplitAvailability(t *testing.T) {
 	s, sh := groupHome(t)
 	s.newUnsavedBuffer(sh)
-	item := s.editorGroupsMenu().List().Items()[1].(components.Item)
-	if item.Pick != nil || !strings.Contains(item.Desc, "second tab") {
+	if !s.tabGroupMenuItems()[1].Disabled || !strings.Contains(s.tabMoveUnavailable(1), "second tab") {
 		t.Fatal("single-tab split was offered")
 	}
 	for len(s.groups()) < maxEditorGroups {
@@ -92,103 +65,7 @@ func TestEditorGroupsSubmenuSplitAvailability(t *testing.T) {
 		s.moveTab(sh, 1)
 	}
 	s.newUnsavedBuffer(sh)
-	item = s.editorGroupsMenu().List().Items()[1].(components.Item)
-	if item.Pick != nil || !strings.Contains(item.Desc, "four") {
+	if !s.tabGroupMenuItems()[1].Disabled || !strings.Contains(s.tabMoveUnavailable(1), "four") {
 		t.Fatal("fifth group was offered")
-	}
-}
-
-func pickerLabels(picker *components.PickerScreen) []string {
-	var labels []string
-	for _, row := range picker.List().Items() {
-		labels = append(labels, row.(components.Item).Name)
-	}
-	return labels
-}
-
-func TestActionsSubmenuMembershipAndNavigation(t *testing.T) {
-	model, s, sh := newHomeRouter(t, Options{})
-	defer Of(sh).close()
-	model, _ = model.Update(keyMsg("a"))
-	actions := model.(core.Router).Top().(*components.PickerScreen)
-	top := pickerLabels(actions)
-	for _, name := range []string{"Editor groups", "Editor Settings", "⌕ Find in Files", "▣ Vaults"} {
-		if !slices.Contains(top, name) {
-			t.Fatalf("Actions missing %q: %v", name, top)
-		}
-	}
-	// With a menu bar, the language-server commands are Options → LSP (menubar_test.go).
-	if slices.Contains(top, "LSP") {
-		t.Fatalf("Actions should leave LSP to the menu bar: %v", top)
-	}
-	for _, tc := range []struct {
-		name string
-		want []string
-	}{
-		{"Editor Settings", []string{"Toggle git gutter"}},
-	} {
-		model = choosePickerRow(t, model, tc.name)
-		picker := model.(core.Router).Top().(*components.PickerScreen)
-		if got := pickerLabels(picker); !slices.Equal(got, tc.want) {
-			t.Fatalf("%s rows = %v, want %v", tc.name, got, tc.want)
-		}
-		for _, leaf := range tc.want {
-			if slices.Contains(top, leaf) {
-				t.Errorf("%q still appears at top level", leaf)
-			}
-		}
-		model, _ = model.Update(keyMsg("esc"))
-		if model.(core.Router).Top() != actions {
-			t.Fatalf("Escape from %s did not return to Actions", tc.name)
-		}
-	}
-	model, _ = model.Update(keyMsg("esc"))
-	if model.(core.Router).Top() != s {
-		t.Fatal("Escape from Actions did not return home")
-	}
-}
-
-func TestActionsSubmenuTogglesReturnHome(t *testing.T) {
-	model, s, sh := newHomeRouter(t, Options{})
-	defer Of(sh).close()
-	s.newUnsavedBuffer(sh)
-	id, ed := s.currentID, s.editor
-	selectAction := func(menu, name string) {
-		t.Helper()
-		model, _ = model.Update(keyMsg("ctrl+alt+a"))
-		model = choosePickerRow(t, model, menu)
-		model = choosePickerRow(t, model, name)
-		if model.(core.Router).Top() != s || s.currentID != id || s.editor != ed {
-			t.Fatalf("%s did not dismiss both menus or changed the active document", name)
-		}
-	}
-	for range 2 {
-		before := s.gitGutter
-		selectAction("Editor Settings", "Toggle git gutter")
-		if s.gitGutter == before || !s.editorPanel.Focused() {
-			t.Fatal("git gutter did not toggle and retain editor focus")
-		}
-	}
-}
-
-func TestEditorSettingsSubmenuWithMultipleGroups(t *testing.T) {
-	model, s, sh := tabTestHome(t)
-	s.newUnsavedBuffer(sh)
-	s.newUnsavedBuffer(sh)
-	s.moveTab(sh, 1)
-	model, _ = model.Update(keyMsg("ctrl+alt+a"))
-	if slices.Contains(pickerLabels(model.(core.Router).Top().(*components.PickerScreen)), "LSP") {
-		t.Fatal("LSP submenu is available without a manager")
-	}
-	model = choosePickerRow(t, model, "Editor Settings")
-	if got := pickerLabels(model.(core.Router).Top().(*components.PickerScreen)); !slices.Equal(got, []string{"Toggle git gutter"}) {
-		t.Fatalf("multi-group settings rows = %v", got)
-	}
-	active := s.editorGroup
-	other := s.groups()[0]
-	before, otherBefore := active.gitGutter, other.gitGutter
-	model = choosePickerRow(t, model, "Toggle git gutter")
-	if model.(core.Router).Top() != s || active.gitGutter == before || other.gitGutter != otherBefore {
-		t.Fatal("gutter toggle did not apply only to the active group and return home")
 	}
 }

@@ -31,6 +31,44 @@ const (
 // Sessions is the whole file: roots to what was open under them.
 type Sessions struct {
 	Sessions map[string]Session `yaml:"sessions"`
+	// RecentVaults names the vaults last visited, most recent first, for File → Vaults.
+	RecentVaults []string `yaml:"recent_vaults,omitempty"`
+}
+
+// maxRecentVaults is how many vaults File → Vaults lists before its More row.
+const maxRecentVaults = 10
+
+// noteRecentVault moves name to the front of the recent list. Best-effort, like every
+// session write: an unparseable file is overwritten rather than kept.
+func noteRecentVault(name string) {
+	sessions, err := LoadSessions()
+	if err != nil {
+		sessions = Sessions{}
+	}
+	recent := []string{name}
+	for _, n := range sessions.RecentVaults {
+		if n != name && len(recent) < maxRecentVaults {
+			recent = append(recent, n)
+		}
+	}
+	sessions.RecentVaults = recent
+	_ = SaveSessions(sessions)
+}
+
+// recentVaults is the recent list, keeping only vaults still configured, so a removed
+// vault drops out without a cleanup pass.
+func recentVaults(cfg Config) []string {
+	sessions, err := LoadSessions()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, n := range sessions.RecentVaults {
+		if _, ok := cfg.Vaults[n]; ok {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Session is one root's last state. Active is a path rather than a buffer id, so an

@@ -260,9 +260,9 @@ func TestOpenTabsHideEditorTitlesAcrossBufferSwitches(t *testing.T) {
 
 func TestOpenTabsActionsAndMinimal(t *testing.T) {
 	_, s, sh := tabTestHome(t)
-	for _, name := range pickerLabels(s.editorSettingsMenu()) {
+	for _, name := range menuLabels(s.viewMenuItems(sh)) {
 		if strings.Contains(name, "Show open documents as") {
-			t.Fatal("obsolete view toggle remains in Actions")
+			t.Fatal("obsolete view toggle remains in the View menu")
 		}
 	}
 	s.minimal = true

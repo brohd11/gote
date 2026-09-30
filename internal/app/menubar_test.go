@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,9 +71,9 @@ func TestHeaderMenuContents(t *testing.T) {
 	_, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
 	for id, want := range map[string]string{
-		"file":    "Nothing here yet",
-		"edit":    "Copy | Cut | Paste",
-		"view":    "Preview | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter",
+		"file":    "Vaults | Refresh | Update gote",
+		"edit":    "Copy | Cut | Paste | Find in Files",
+		"view":    "Preview | Tab Groups | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter | Theme",
 		"options": "LSP",
 	} {
 		if got := strings.Join(menuLabels(s.headerMenuItems(sh, id)), " | "); got != want {
@@ -181,7 +183,7 @@ func TestMenuBarSwitches(t *testing.T) {
 
 	model = openHeaderMenu(t, model, s, sh, "file")
 	model, _ = model.Update(tea.MouseMotionMsg{X: headerLabelX(t, model, s, "edit"), Y: sh.BodyY()})
-	if got := topLabels(); got != "Copy | Cut | Paste" {
+	if got := topLabels(); got != "Copy | Cut | Paste | Find in Files" {
 		t.Fatalf("pointing at Edit should switch to it, top menu = %q", got)
 	}
 	if underTop() != s {
@@ -206,5 +208,131 @@ func TestMenuBarSwitches(t *testing.T) {
 	model, _ = model.Update(tea.MouseClickMsg{X: headerLabelX(t, model, s, "view"), Y: sh.BodyY(), Button: tea.MouseLeft})
 	if model.(core.Router).Top() != s {
 		t.Fatal("a click on the open menu's own label should close it")
+	}
+}
+
+// TestMenuBarOpensAppScreens: the rows that came from the Actions picker push the same
+// screens it did — the theme picker, the update check, the vaults list, the search form.
+func TestMenuBarOpensAppScreens(t *testing.T) {
+	for _, tc := range []struct {
+		menu, row string
+		want      func(core.Screen) bool
+	}{
+		{"view", "Theme", func(sc core.Screen) bool { _, ok := sc.(*components.PickerScreen); return ok }},
+		{"file", "Update gote", func(sc core.Screen) bool { _, ok := sc.(*components.LoadingScreen); return ok }},
+		{"edit", "Find in Files", func(sc core.Screen) bool { _, ok := sc.(*components.FormScreen); return ok }},
+	} {
+		model, s, sh := newHomeRouter(t, Options{})
+		model = openHeaderMenu(t, model, s, sh, tc.menu)
+		model = chooseMenuRow(t, model, tc.row)
+		if top := model.(core.Router).Top(); !tc.want(top) {
+			t.Errorf("%s → %s pushed %T", tc.menu, tc.row, top)
+		}
+		Of(sh).close()
+	}
+}
+
+// TestFileVaultsSubmenu: File → Vaults lists the recently visited vaults newest first,
+// marks the active one, and ends in More, the full picker; picking one switches to it
+// and moves it to the front.
+func TestFileVaultsSubmenu(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{}) // sets a temp HOME: the state file is scratch
+	defer Of(sh).close()
+	c := Of(sh)
+	vaultsItems := func() []components.MenuItem {
+		t.Helper()
+		for _, it := range s.fileMenuItems() {
+			if it.Label == "Vaults" {
+				return it.Submenu()
+			}
+		}
+		t.Fatal("File has no Vaults row")
+		return nil
+	}
+
+	// No vaults yet: gote (the default root, active in this home-store launch) and More.
+	first := vaultsItems()
+	if got := strings.Join(menuLabels(first), " | "); got != "gote | "+menuMoreLabel {
+		t.Fatalf("with no vaults the submenu is gote and More, got %q", got)
+	}
+	if !strings.HasPrefix(first[0].Label, menuRadioMark) || first[0].Hint != defaultDocsRef {
+		t.Fatalf("gote should be marked while on the default root, hinting it: %+v", first[0])
+	}
+
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if err := c.AddVault(name, filepath.Join(t.TempDir(), name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Never visited, the vaults still fill the list, by name.
+	if got := strings.Join(menuLabels(vaultsItems()), " | "); got != "gote | alpha | beta | gamma | "+menuMoreLabel {
+		t.Fatalf("unvisited vaults should fill the list by name: %q", got)
+	}
+	noteRecentVault("gamma")
+	noteRecentVault("beta")
+	if got := strings.Join(menuLabels(vaultsItems()), " | "); got != "gote | beta | gamma | alpha | "+menuMoreLabel {
+		t.Fatalf("recent vaults should lead newest first, the rest filling after: %q", got)
+	}
+
+	// Pick alpha through the real menus: it becomes the active vault and moves to the front.
+	model = openHeaderMenu(t, model, s, sh, "file")
+	model = chooseMenuRow(t, model, "Vaults")
+	model = chooseMenuRow(t, model, "alpha")
+	model = pumpModel(model, nil)
+	if model.(core.Router).Top() != s {
+		t.Fatalf("picking a vault should close both menus, top %T", model.(core.Router).Top())
+	}
+	if c.Mode != ModeVault || c.VaultName != "alpha" {
+		t.Fatalf("switch did not happen: mode %v vault %q", c.Mode, c.VaultName)
+	}
+	items := vaultsItems()
+	if got := strings.Join(menuLabels(items), " | "); got != "gote | alpha | beta | gamma | "+menuMoreLabel {
+		t.Fatalf("the vault just visited should lead: %q", got)
+	}
+	if strings.HasPrefix(items[0].Label, menuRadioMark) || !strings.HasPrefix(items[2].Label, menuRadioMark) ||
+		strings.HasPrefix(items[3].Label, menuRadioMark) {
+		t.Fatalf("only the active vault is marked: %q / %q / %q", items[0].Label, items[2].Label, items[3].Label)
+	}
+
+	// gote goes back to the default root (the home store here) and takes the mark.
+	model = openHeaderMenu(t, model, s, sh, "file")
+	model = chooseMenuRow(t, model, "Vaults")
+	model = chooseMenuRow(t, model, "gote")
+	if model.(core.Router).Top() != s || c.Mode != ModeHome || c.VaultName != "" {
+		t.Fatalf("gote should switch to the default root: mode %v vault %q", c.Mode, c.VaultName)
+	}
+	if items := vaultsItems(); !strings.HasPrefix(items[0].Label, menuRadioMark) {
+		t.Fatalf("gote should be marked after switching to it: %q", items[0].Label)
+	}
+
+	// A default that names a vault is the gote row, not a second row below it.
+	c.Config.Default = "beta"
+	if got := strings.Join(menuLabels(vaultsItems()), " | "); got != "gote | alpha | gamma | "+menuMoreLabel {
+		t.Fatalf("the default vault should not repeat below gote: %q", got)
+	}
+
+	model = openHeaderMenu(t, model, s, sh, "file")
+	model = chooseMenuRow(t, model, "Vaults")
+	model = chooseMenuRow(t, model, menuMoreLabel)
+	if _, ok := model.(core.Router).Top().(*components.PickerScreen); !ok {
+		t.Fatalf("More should open the Vaults picker, top %T", model.(core.Router).Top())
+	}
+}
+
+// TestFileVaultsFillCaps: filling from the remaining vaults stops at maxRecentVaults, so
+// the rest are reached through More.
+func TestFileVaultsFillCaps(t *testing.T) {
+	_, s, sh := newHomeRouter(t, Options{})
+	defer Of(sh).close()
+	for i := range maxRecentVaults + 3 {
+		name := fmt.Sprintf("v%02d", i)
+		if err := Of(sh).AddVault(name, filepath.Join(t.TempDir(), name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	noteRecentVault("v12")
+	labels := menuLabels(s.vaultMenuItems())
+	if len(labels) != maxRecentVaults+2 || labels[0] != "gote" || labels[1] != "v12" || labels[2] != "v00" || labels[len(labels)-1] != menuMoreLabel {
+		t.Fatalf("expected gote, v12, then v00… up to %d vaults, then More: %v", maxRecentVaults, labels)
 	}
 }

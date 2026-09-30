@@ -18,10 +18,10 @@ var headerMenus = []struct{ id, label string }{
 	{"options", "Options"},
 }
 
-// The menu bar is where the view toggles, preview modes and language-server commands
-// live; the right-click menu and the Actions picker keep only what the bar does not
-// cover. Minimal mode has no header, so there they stay where they always were (see
-// editorViewItems, editorLanguageItems, actionsMenu).
+// The menu bar is where gote's commands live (it replaced the Actions picker); the
+// right-click menu keeps only what acts on the click. Minimal mode has no header, so its
+// right-click menu keeps the view and language-server rows (editorViewItems,
+// editorLanguageItems); otherwise it has only its key chords.
 
 // menuPick wraps run so the pick first closes levels menus (1 for a dropdown row, 2 for a
 // submenu row) and then acts.
@@ -32,8 +32,9 @@ func menuPick(levels int, run func(*core.Shared) core.Action) func(*core.Shared)
 // Menu row marks, one column before the label. Rows without a mark get blanks as wide as
 // the mark, so labels line up; swap the glyphs here to try others.
 const (
-	menuCheckMark = "✓" // a toggle that is on
-	menuRadioMark = "✓" // the chosen value of an enum submenu (View → Preview)
+	menuCheckMark = "✓"      // a toggle that is on
+	menuRadioMark = "✓"      // the chosen value of an enum submenu (View → Preview)
+	menuMoreLabel = "⋯ More" // a submenu's way on to the full list (File → Vaults)
 )
 
 // marked prefixes label with mark when on, or with blanks as wide as it.
@@ -57,6 +58,8 @@ func hint(b key.Binding) string { return b.Help().Key }
 // checks reflect that moment.
 func (s *homeScreen) headerMenuItems(sh *core.Shared, id string) []components.MenuItem {
 	switch id {
+	case "file":
+		return s.fileMenuItems()
 	case "edit":
 		return s.editMenuItems()
 	case "view":
@@ -64,7 +67,78 @@ func (s *homeScreen) headerMenuItems(sh *core.Shared, id string) []components.Me
 	case "options":
 		return s.optionsMenuItems(sh)
 	}
-	return []components.MenuItem{{Label: "Nothing here yet", Disabled: true}}
+	return nil
+}
+
+// fileMenuItems are the session's document roots and the app itself.
+func (s *homeScreen) fileMenuItems() []components.MenuItem {
+	return []components.MenuItem{
+		submenu("Vaults", false, s.vaultMenuItems),
+		{Label: "Refresh", Pick: menuPick(1, refreshAction)},
+		{Separator: true},
+		{Label: "Update gote", Pick: menuPick(1, func(sh *core.Shared) core.Action {
+			return core.Push(components.NewSelfUpdateLoading(selfUpdateHooks(Of(sh).Version)))
+		})},
+	}
+}
+
+// vaultMenuItems are File → Vaults: gote (Config.Default, what a bare launch opens), then
+// up to maxRecentVaults vaults — the recently visited first, then the rest by name while
+// there is room — with the active root marked, then More, the full Vaults picker: the
+// place to add a vault or reach one not listed.
+func (s *homeScreen) vaultMenuItems() []components.MenuItem {
+	c := Of(s.sh)
+	// A default that names a vault is the gote row; listing it again below would repeat it.
+	defMode, defName, defDir := resolveDefault(c.Config)
+	listed := map[string]bool{}
+	if defMode == ModeVault {
+		listed[defName] = true
+	}
+	var names []string
+	for _, n := range recentVaults(c.Config) {
+		if !listed[n] {
+			names = append(names, n)
+			listed[n] = true
+		}
+	}
+	for _, v := range VaultList(c.Config) {
+		if len(names) >= maxRecentVaults {
+			break
+		}
+		if !listed[v.Name] {
+			names = append(names, v.Name)
+		}
+	}
+	onDefault := c.Mode == defMode && c.VaultName == defName && (defMode == ModeHome || c.ScanDir == defDir)
+	defHint := c.Config.Default
+	if defHint == "" {
+		defHint = defaultDocsRef
+	}
+	items := []components.MenuItem{
+		{Label: selected(onDefault, "gote"), Hint: defHint, Pick: menuPick(2, func(*core.Shared) core.Action {
+			return core.PropagateAll(SwitchVaultMsg{Default: true})
+		})},
+		{Separator: true},
+	}
+	for _, name := range names {
+		active := c.Mode == ModeVault && c.VaultName == name
+		items = append(items, components.MenuItem{Label: selected(active, name), Pick: menuPick(2, func(*core.Shared) core.Action {
+			return core.PropagateAll(SwitchVaultMsg{Name: name})
+		})})
+	}
+	if len(names) > 0 {
+		items = append(items, components.MenuItem{Separator: true})
+	}
+	// Marked like the rows above, so its label lines up with theirs.
+	return append(items, components.MenuItem{Label: selected(false, menuMoreLabel), Pick: menuPick(2, func(sh *core.Shared) core.Action {
+		return core.Push(vaultsMenu(sh))
+	})})
+}
+
+// refreshAction reseeds the doc list and checks open buffers for external changes. The
+// home screen does the list reload on the broadcast.
+func refreshAction(sh *core.Shared) core.Action {
+	return core.Seq(core.PropagateAll(ReseedMsg{}), core.Async(Of(sh).checkDiskChanges()))
 }
 
 // menuStyle is every gote menu's look, matching the sidebar: a background-filled
@@ -89,12 +163,20 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 			items[i].Hint = chord
 		}
 	}
+	// Search results open the bottom panel, so this respects the panel lock.
+	if s.panelToggles {
+		items = append(items, components.MenuItem{Separator: true},
+			components.MenuItem{Label: "Find in Files", Hint: hint(findFilesKey), Pick: menuPick(1, func(sh *core.Shared) core.Action {
+				return core.Push(s.findFilesForm(sh))
+			})})
+	}
 	return items
 }
 
 func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 	items := []components.MenuItem{
 		submenu(checked(false, "Preview"), !s.previewable(), s.previewMenuItems),
+		submenu(checked(false, "Tab Groups"), false, s.tabGroupMenuItems),
 		{Separator: true},
 		{Label: checked(s.sidebar, "Sidebar"), Hint: hint(sidebarKey), Pick: menuPick(1, func(*core.Shared) core.Action {
 			s.setSidebar(!s.sidebar)
@@ -119,7 +201,32 @@ func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 		components.MenuItem{Label: checked(s.gitGutter, "Git gutter"), Pick: menuPick(1, func(*core.Shared) core.Action {
 			return core.Async(s.setGitGutter(!s.gitGutter))
 		})},
+		components.MenuItem{Separator: true},
+		components.MenuItem{Label: checked(false, "Theme"), Pick: menuPick(1, func(*core.Shared) core.Action {
+			return core.Push(components.ThemePicker())
+		})},
 	)
+}
+
+// tabGroupMenuItems are View → Tab Groups. A row that cannot act now is disabled, for the
+// same reasons the shortcuts refuse (tabMoveUnavailable).
+func (s *homeScreen) tabGroupMenuItems() []components.MenuItem {
+	return []components.MenuItem{
+		{Label: "Move tab left", Hint: hint(moveTabLeftKey), Disabled: s.tabMoveUnavailable(-1) != "",
+			Pick: menuPick(2, func(sh *core.Shared) core.Action { return s.moveTab(sh, -1) })},
+		{Label: "Move tab right / split", Hint: hint(moveTabRightKey), Disabled: s.tabMoveUnavailable(1) != "",
+			Pick: menuPick(2, func(sh *core.Shared) core.Action { return s.moveTab(sh, 1) })},
+		{Label: "Close editor group", Disabled: len(s.groups()) < 2, Pick: menuPick(2, s.closeEditorGroup)},
+	}
+}
+
+// showDiagnostics brings the dock's diagnostics panel up and focuses it.
+func (s *homeScreen) showDiagnostics(sh *core.Shared) core.Action {
+	s.bottom.selectTab(bottomDiagnostics)
+	if s.bottomVisible {
+		return core.Async(s.modular.FocusSlot(s.panelSlot(s.bottom)))
+	}
+	return s.toggleBottom(sh)
 }
 
 // Preview modes as the View → Preview submenu offers them.

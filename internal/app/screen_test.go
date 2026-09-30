@@ -791,7 +791,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		"panes", "back", "select", // navigation, the hints the bar still shows
 		"filter",                                    // navigation too, but off the bar — the overlay is its only home
 		"alt+|", "sidebar", `alt+\`, "bottom panel", // the panel toggles
-		"ctrl+n", "new unsaved file", "actions", // moved off the bar
+		"ctrl+n", "new unsaved file", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", "alt+l", // gote's alt chords
 		"ctrl+c", "ctrl+v", "alt+w", "ctrl+q", "alt+backspace", "ctrl+alt+backspace", // the editor's, via HelpBindings

@@ -10,9 +10,13 @@ import (
 	"charm.land/bubbles/v2/list"
 )
 
-// SwitchVaultMsg asks the live home screen to close its session and activate Name.
-// The root owns this operation because it alone can see an untracked scratch editor.
-type SwitchVaultMsg struct{ Name string }
+// SwitchVaultMsg asks the live home screen to close its session and activate Name, or,
+// with Default, what a bare launch opens (Config.Default). The root owns this operation
+// because it alone can see an untracked scratch editor.
+type SwitchVaultMsg struct {
+	Name    string
+	Default bool
+}
 
 // VaultsChangedMsg refreshes a live Vaults picker after New Vault persists an entry.
 type VaultsChangedMsg struct{}

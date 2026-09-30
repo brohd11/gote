@@ -21,6 +21,9 @@ func Run(version string, cfg Config, opts Options) error {
 	profile := colorprofile.Detect(os.Stdout, os.Environ())
 	c := newWithColorProfile(version, cfg, opts, profile)
 	defer c.close()
+	if c.Mode == ModeVault {
+		noteRecentVault(c.VaultName) // a launch into a vault is a visit too
+	}
 	err := bubblestack.Run(bubblestack.Config{
 		App:    c,
 		Status: components.NewStatusLine(),

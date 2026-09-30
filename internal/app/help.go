@@ -92,10 +92,8 @@ func (s *homeScreen) helpText() string {
 		}
 		return disabledKey(b, why)
 	}
-	// FullHint rather than Hint on the picker: it is the one general key with an alias, and
-	// ctrl+alt+a is the only way to reach it from the editor, so the page must name both.
 	general := []key.Binding{quitKey, sidebarKey, mark(bottomKey, panelLock),
-		mark(findFilesKey, panelLock), core.FullHint("actions", core.Keys.Actions),
+		mark(findFilesKey, panelLock),
 		previewKey, fullPreviewKey, wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
@@ -103,7 +101,7 @@ func (s *homeScreen) helpText() string {
 	}
 	writeSection("general", general)
 	if !s.minimal {
-		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. Actions → Editor groups can move tabs or close a group.\nActions → Editor Settings switches Open between list and tabs when one group remains.\n\n")
+		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. View → Tab Groups can move tabs or close a group.\n\n")
 	}
 	// Language-server keys fire from the editor only. The outline key opens a panel, so the
 	// panel lock takes precedence over the LSP gate; jump-back is never marked, since
@@ -168,7 +166,7 @@ func (s *homeScreen) helpText() string {
 		"Typing, outside clicks, pane/document changes and layout changes close it.\n\n")
 	b.WriteString(clickHelp(s.sh) + "\n")
 	b.WriteString("Document marks: (*) unsaved · (!) changed on disk · (!*) both.\n")
-	b.WriteString("Focus or Actions → Refresh checks open files and reloads clean buffers; saving asks before overwriting external changes.\n")
+	b.WriteString("Focus or File → Refresh checks open files and reloads clean buffers; saving asks before overwriting external changes.\n")
 	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
 	return b.String()
 }
