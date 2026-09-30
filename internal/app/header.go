@@ -8,22 +8,41 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// headerRows is the header leaf's fixed height: the breadcrumb bar and its rule.
+// headerRows is the header leaf's fixed height: the menu and breadcrumb row, and its rule.
 const headerRows = 2
 
-// headerPanel is the breadcrumb drawn as the layout's top leaf, in place of the router's,
-// so its rule can join the pane dividers below (see joinRule). Not Focusable: pane
-// traversal skips it and clicks fall through.
+// headerPanel is the layout's top leaf, drawn in place of the router's breadcrumb so its
+// rule can join the pane dividers (see joinRule): ` File  Edit  View  Options │ crumb`.
+// Not Focusable, so pane traversal skips it; the home screen takes its mouse input
+// (headerInput) before the panes can.
 type headerPanel struct {
-	host *homeScreen
-	w    int
+	host      *homeScreen
+	w         int
+	menuSpans []statusSpan // each menu label's columns, as last rendered
 }
 
 func (p *headerPanel) SetSize(w, _ int) { p.w = w }
 
 func (p *headerPanel) View(bool) string {
+	p.menuSpans = p.menuSpans[:0]
+	var b strings.Builder
+	x := 0
+	for _, m := range headerMenus {
+		b.WriteString(" ")
+		p.menuSpans = append(p.menuSpans, statusSpan{m.id, x + 1, x + 1 + lipgloss.Width(m.label)})
+		b.WriteString(m.label + " ")
+		x += lipgloss.Width(m.label) + 2
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(core.BorderColor).Render("│"))
+	x++
+	// The breadcrumb gets what the menus leave; it truncates, the menus never do.
 	crumbs := []core.Crumb{{Full: p.host.CrumbLabel(false), Short: p.host.CrumbLabel(true)}}
-	return core.RenderBreadcrumb(crumbs, p.w) + "\n" + joinRule(p.w, "", "")
+	b.WriteString(core.RenderBreadcrumb(crumbs, max(p.w-x, 0)))
+	row := ansi.Truncate(b.String(), p.w, "")
+	for i := range p.menuSpans {
+		p.menuSpans[i].x1 = min(p.menuSpans[i].x1, p.w)
+	}
+	return row + "\n" + joinRule(p.w, "", "")
 }
 
 // joinRule renders a width-cell rule in the border color that the lines around it meet:
@@ -110,6 +129,6 @@ func (s *homeScreen) joinHeaderRule(body string) string {
 	if len(lines) <= headerRows {
 		return body
 	}
-	lines[headerRows-1] = joinRule(s.w, "", lines[headerRows])
+	lines[headerRows-1] = joinRule(s.w, lines[headerRows-2], lines[headerRows])
 	return strings.Join(lines, "\n")
 }

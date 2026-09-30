@@ -326,6 +326,9 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 	if act, handled := s.statusBarInput(sh, msg); handled {
 		return s, act
 	}
+	if act, handled := s.headerInput(sh, msg); handled {
+		return s, act
+	}
 	if act, handled := s.documentTabInput(sh, msg); handled {
 		return s, s.finishHomeUpdate(sh, act)
 	}

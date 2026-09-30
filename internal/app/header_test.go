@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/core"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -76,5 +79,88 @@ func TestDockRuleJoinsColumns(t *testing.T) {
 	s.toggleBottom(sh)
 	if view := ansi.Strip(s.View(sh)); !strings.Contains(view, "└") {
 		t.Fatalf("closing the dock should give the sidebar its bottom edge back:\n%s", view)
+	}
+}
+
+func TestHeaderMenuRow(t *testing.T) {
+	s, sh := newHome(t)
+	lines := strings.Split(ansi.Strip(s.View(sh)), "\n")
+	if !strings.HasPrefix(lines[0], " File  Edit  View  Options │") || !strings.Contains(lines[0], s.CrumbLabel(false)) {
+		t.Fatalf("header row = %q", lines[0])
+	}
+	sep := len([]rune(" File  Edit  View  Options "))
+	if rule := []rune(lines[1]); rule[sep] != '┴' && rule[sep] != '┼' {
+		t.Fatalf("the menu separator should tee into the rule at %d: %q", sep, lines[1])
+	}
+}
+
+// TestHeaderCapturesMouse: presses and wheel notches over the header stop there — no pane
+// takes focus or moves — while a menu label opens its dropdown under the rule.
+func TestHeaderCapturesMouse(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	id, _ := seedDoc(t, s, sh, "a.md", "one\ntwo\nthree\n")
+	s.openDoc(sh, id)
+	top := sh.BodyY()
+	// Both focus states: an unfocused editor must not take focus from a header click, and
+	// a focused one must not move its cursor.
+	for _, focus := range []components.Panel{s.editorPanel, s.docsPane()} {
+		// Park the cursor off row 0, where a leaked click on the header row would move it.
+		s.modular.FocusSlot(s.panelSlot(s.editorPanel))
+		model, _ = model.Update(keyMsg("down"))
+		model, _ = model.Update(keyMsg("down"))
+		s.modular.FocusSlot(s.panelSlot(focus))
+		_ = model.(core.Router).View()
+		pos := s.editor.CursorPosition()
+		if pos.Line == 0 {
+			t.Fatal("fixture: the cursor should be off row 0")
+		}
+		for _, msg := range []tea.Msg{
+			tea.MouseClickMsg{X: 60, Y: top, Button: tea.MouseLeft},     // the crumb, over the editor
+			tea.MouseReleaseMsg{X: 60, Y: top, Button: tea.MouseLeft},   // passes, but finds no gesture
+			tea.MouseClickMsg{X: 60, Y: top + 1, Button: tea.MouseLeft}, // the rule
+			tea.MouseReleaseMsg{X: 60, Y: top + 1, Button: tea.MouseLeft},
+			tea.MouseWheelMsg{X: 60, Y: top, Button: tea.MouseWheelDown},
+		} {
+			model, _ = model.Update(msg)
+			if model.(core.Router).Top() != s || s.focusedPane() != focus || s.editor.CursorPosition() != pos {
+				t.Fatalf("%T over the header reached the panes (focus %T)", msg, focus)
+			}
+		}
+	}
+	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
+
+	s.View(sh)
+	var viewMenu statusSpan
+	for _, span := range s.header.menuSpans {
+		if span.id == "view" {
+			viewMenu = span
+		}
+	}
+	model, _ = model.Update(tea.MouseClickMsg{X: viewMenu.x0, Y: top, Button: tea.MouseLeft})
+	menu, ok := model.(core.Router).Top().(*components.MenuScreen)
+	if !ok {
+		t.Fatalf("clicking View should open a menu, top is %T", model.(core.Router).Top())
+	}
+	if s.focusedPane() != s.docsPane() {
+		t.Fatal("opening a menu must not move pane focus")
+	}
+	if !strings.Contains(ansi.Strip(menu.View(sh)), "Nothing here yet") {
+		t.Fatal("the placeholder item is missing")
+	}
+	// The box's top border lies on the rule: label, border, items — no doubled line.
+	rows := strings.Split(stripANSI(view(model)), "\n")
+	if !strings.Contains(rows[top+headerRows-1], "╭") || !strings.Contains(rows[top+headerRows], "Nothing here yet") {
+		t.Fatalf("menu should open on the rule:\n%s", strings.Join(rows[:top+headerRows+2], "\n"))
+	}
+}
+
+// TestHeaderLetsDragsThrough: a gesture begun in a pane keeps its motion over the header.
+func TestHeaderLetsDragsThrough(t *testing.T) {
+	s, sh := newHome(t)
+	if _, handled := s.headerInput(sh, tea.MouseMotionMsg{X: 50, Y: sh.BodyY(), Button: tea.MouseLeft}); handled {
+		t.Fatal("motion over the header must pass to the pane holding the gesture")
+	}
+	if _, handled := s.headerInput(sh, tea.MouseReleaseMsg{X: 50, Y: sh.BodyY(), Button: tea.MouseLeft}); handled {
+		t.Fatal("a release over the header must pass to the pane holding the gesture")
 	}
 }
