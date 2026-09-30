@@ -216,7 +216,7 @@ with no project root above it means the directory it sits in; narrow that with a
 Diagnostics and Find in Files share a full-width bottom panel beneath the sidebar,
 editor, and preview. Its top edge keeps the active view's full title and count, while
 the bottom edge carries compact `Diag` and `Search` tabs. Click those tabs or use
-Left/Right while the panel is focused. `alt+\` toggles the whole panel without taking
+Left/Right while the panel is focused. `alt+|` toggles the whole panel without taking
 focus from the editor; Actions → LSP → Diagnostics reveals the diagnostic tab. Drag the top
 divider to resize it; the split is remembered during the session.
 
@@ -231,8 +231,8 @@ the Search tab. Use `ctrl+f` to search the current editor buffer instead.
 In either bottom view, Up/Down selects entries and Enter or a click jumps to the
 location; `alt+shift+b` returns. Messages wrap in full, Page Up/Down and the mouse wheel
 scroll, and Escape returns focus to the editor while leaving the panel open. Diagnostics
-cover all open files, current file first. The panel toggles sit on punctuation (`alt+\`
-and `alt+|`) precisely so they stay clear of the editor's word motions: `alt+b` and
+cover all open files, current file first. The panel toggles sit on punctuation (`alt+|`
+and `alt+\`) precisely so they stay clear of the editor's word motions: `alt+b` and
 `alt+f` are what a terminal sends for `alt+left` and `alt+right`, and both keep moving
 the cursor by a word.
 
@@ -371,11 +371,11 @@ single_file_mode:
   allow_panel_toggle: false
 ```
 
-With `allow_panel_toggle: false` (the default) the launch is taken at its word: `alt+\`,
+With `allow_panel_toggle: false` (the default) the launch is taken at its word: `alt+|`,
 `alt+shift+o` and `ctrl+alt+f` do nothing. Find in files is locked with them because a result opens the bottom panel whether
 or not it was asked for. The `?` overlay still lists every locked key, marked off and
 naming the setting — a binding that silently vanished would read as a bug rather than a
-choice. Set it to `true` and `alt+shift+o` adds the outline and `alt+\` the diagnostics panel,
+choice. Set it to `true` and `alt+shift+o` adds the outline and `alt+|` the diagnostics panel,
 still without restoring the breadcrumb or help bar.
 
 `default_allow_lsp: false` denies this launch a language server, which takes every

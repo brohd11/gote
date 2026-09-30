@@ -90,9 +90,9 @@ func TestBottomTogglePreservesEditorAndSplit(t *testing.T) {
 		t.Fatal("fixture must contain unsaved edits")
 	}
 	before := ed.CursorPosition()
-	s.Update(sh, tea.KeyPressMsg{Code: '\\', Mod: tea.ModAlt})
+	s.Update(sh, tea.KeyPressMsg{Code: '|', Mod: tea.ModAlt})
 	if !s.bottomVisible || !s.editorPanel.Focused() || ed.CursorPosition() != before || ed.Text() != text {
-		t.Fatal(`alt+\ changed editor state or focus`)
+		t.Fatal(`alt+| changed editor state or focus`)
 	}
 	if !strings.Contains(s.View(sh), "No diagnostics.") { // the dock is titleless now
 		t.Fatal("bottom missing from view")
@@ -335,8 +335,8 @@ func TestBottomActionsMenuReturnsToHome(t *testing.T) {
 		t.Fatal("diagnostics action did not select and focus the existing panel")
 	}
 	s.modular.FocusSlot(s.editorSlot())
-	model, _ = model.Update(keyMsg(`alt+\`))
+	model, _ = model.Update(keyMsg(`alt+|`))
 	if s.bottomVisible || !s.editorPanel.Focused() {
-		t.Fatal(`router capture gate swallowed alt+\`)
+		t.Fatal(`router capture gate swallowed alt+|`)
 	}
 }

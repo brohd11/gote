@@ -45,7 +45,7 @@ func TestSingleFilePanelLockKeys(t *testing.T) {
 	if s.panelToggles {
 		t.Fatal("the shipped single_file_mode should lock the panels")
 	}
-	for _, k := range []string{"alt+\\", "alt+shift+o", "ctrl+alt+f"} {
+	for _, k := range []string{"alt+|", "alt+shift+o", "ctrl+alt+f"} {
 		if _, act := s.Update(sh, keyMsg(k)); act.Msg != nil {
 			t.Errorf("%s should be inert while the panels are locked, got %T", k, act.Msg)
 		}
@@ -76,9 +76,9 @@ func TestSingleFilePanelUnlockKeys(t *testing.T) {
 	if !s.panelToggles {
 		t.Fatal("allow_panel_toggle: true should leave the panels reachable")
 	}
-	s.Update(sh, keyMsg("alt+\\"))
+	s.Update(sh, keyMsg("alt+|"))
 	if !s.bottomVisible {
-		t.Error("alt+\\ should open the bottom panel when the panels are unlocked")
+		t.Error("alt+| should open the bottom panel when the panels are unlocked")
 	}
 	s.Update(sh, keyMsg("alt+shift+o"))
 	if !s.outlineVisible {
@@ -166,7 +166,7 @@ func TestSingleFileHelpMarksLockedKeys(t *testing.T) {
 	s, _ := newHomeCfg(t, cfg, Options{Mode: ModeFile, File: soloFile(t)})
 	text := s.helpText()
 
-	for _, k := range []string{"alt+\\", "alt+shift+o", "ctrl+alt+f"} {
+	for _, k := range []string{"alt+|", "alt+shift+o", "ctrl+alt+f"} {
 		if !strings.Contains(text, k) {
 			t.Errorf("the overlay dropped %q instead of marking it:\n%s", k, text)
 		}

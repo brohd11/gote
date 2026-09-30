@@ -18,11 +18,11 @@ const sidebarWidth = 30
 
 // The home screen's own keys. Panel toggles carry a modifier, so they fire even while
 // typing in the editor; "a" and "?" only when nothing captures text (alt+? works
-// anywhere). The sidebar keys are alt+\ and alt+| because alt+b and alt+f are the
+// anywhere). The sidebar keys are alt+| and alt+\ because alt+b and alt+f are the
 // editor's word motions as terminals send them.
 var (
-	bottomKey  = key.NewBinding(key.WithKeys("alt+\\"), key.WithHelp("alt+\\", "bottom panel"))
-	sidebarKey = key.NewBinding(key.WithKeys("alt+|"), key.WithHelp("alt+|", "sidebar"))
+	bottomKey  = key.NewBinding(key.WithKeys("alt+|"), key.WithHelp("alt+|", "bottom panel"))
+	sidebarKey = key.NewBinding(key.WithKeys("alt+\\"), key.WithHelp("alt+\\", "sidebar"))
 	// ctrl+p cycles the current doc's mode (docmode.go): off, live, reader.
 	docModeKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "doc mode"))
 	// The side preview is chrome, a column toggle like the sidebar.

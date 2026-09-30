@@ -278,15 +278,15 @@ func TestThemeChangeKeepsEditor(t *testing.T) {
 	}
 }
 
-// TestHomePaneNavigationWithoutSidebar: alt+| leaves a single-pane grid, where the
+// TestHomePaneNavigationWithoutSidebar: alt+\ leaves a single-pane grid, where the
 // pane keys have nowhere to go. They must stay consumed rather than falling through
 // to the editor, and alt+w must still be the way back to the sidebar.
 func TestHomePaneNavigationWithoutSidebar(t *testing.T) {
 	s, sh := newHome(t)
 
-	s.Update(sh, keyMsg(`alt+|`))
+	s.Update(sh, keyMsg(`alt+\`))
 	if s.sidebar {
-		t.Fatal("alt+| should hide the sidebar")
+		t.Fatal("alt+\\ should hide the sidebar")
 	}
 	if got := focusedPane(s, sh); got != "editor" {
 		t.Fatalf("the lone editor pane should hold focus, got %s", got)
@@ -510,9 +510,9 @@ func TestEditorEscReleasesFocus(t *testing.T) {
 func TestEditorEscUnhidesSidebar(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, keyMsg(`alt+|`))
+	s.Update(sh, keyMsg(`alt+\`))
 	if s.sidebar {
-		t.Fatal("alt+| should have hidden the sidebar")
+		t.Fatal("alt+\\ should have hidden the sidebar")
 	}
 
 	s.Update(sh, keyMsg("esc"))
@@ -691,8 +691,8 @@ func TestHomeLeavesClipboardChordsToTheEditor(t *testing.T) {
 // TestHomeLeavesWordMotionsToTheEditor: alt+b and alt+f are the bytes a terminal sends
 // for alt+left and alt+right, so they belong to the editor's word motions and gote must
 // not claim either. It did claim alt+b (bottom panel) for a while, which broke word-back
-// in every buffer without breaking a single test — the panel toggles now live on alt+\
-// and alt+|. Cursor position is the assertion: the letters must move it and nothing else.
+// in every buffer without breaking a single test — the panel toggles now live on alt+|
+// and alt+\. Cursor position is the assertion: the letters must move it and nothing else.
 func TestHomeLeavesWordMotionsToTheEditor(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
@@ -789,7 +789,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 	for _, want := range []string{
 		"panes", "back", "select", // navigation, the hints the bar still shows
 		"filter",                                    // navigation too, but off the bar — the overlay is its only home
-		"alt+|", "sidebar", `alt+\`, "bottom panel", // the panel toggles
+		"alt+\\", "sidebar", `alt+|`, "bottom panel", // the panel toggles
 		"ctrl+n", "new unsaved file", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", "alt+l", // gote's alt chords
@@ -1137,15 +1137,15 @@ func TestReaderKeepsTheSidebar(t *testing.T) {
 	if !strings.Contains(view, "Title") || strings.Contains(view, "# Title") {
 		t.Fatalf("the reader should render the document where the editor was, frame:\n%s", view)
 	}
-	// alt+| still works, and the reader is still there on the other side of it.
-	s.Update(sh, keyMsg(`alt+|`))
+	// alt+\ still works, and the reader is still there on the other side of it.
+	s.Update(sh, keyMsg(`alt+\`))
 	if s.sidebar || s.fullPreview == nil {
-		t.Fatal("alt+| should hide the sidebar and leave the reader alone")
+		t.Fatal("alt+\\ should hide the sidebar and leave the reader alone")
 	}
 	if v := stripANSI(s.View(sh)); strings.Contains(v, "Docs") {
 		t.Errorf("the sidebar should be gone, frame:\n%s", v)
 	}
-	s.Update(sh, keyMsg(`alt+|`))
+	s.Update(sh, keyMsg(`alt+\`))
 
 	s.openDoc(sh, filepath.Join(dir, "b.md"))
 	if s.fullPreview != nil {
@@ -1453,7 +1453,7 @@ func TestEditorSavedRekeys(t *testing.T) {
 }
 
 // TestMinimalMode: a file argument boots the editor alone — the file loaded, the
-// sidebar gone and locked out (alt+| is a no-op, where it toggles in every other
+// sidebar gone and locked out (alt+\ is a no-op, where it toggles in every other
 // mode), and every chrome element masked so the buffer owns the terminal.
 func TestMinimalMode(t *testing.T) {
 	dir := t.TempDir()
@@ -1477,9 +1477,9 @@ func TestMinimalMode(t *testing.T) {
 		t.Fatalf("minimal mode should mask the chrome, got %+v", mask)
 	}
 
-	s.Update(sh, keyMsg(`alt+|`))
+	s.Update(sh, keyMsg(`alt+\`))
 	if s.sidebar {
-		t.Fatal("alt+| must not bring the sidebar back in minimal mode")
+		t.Fatal("alt+\\ must not bring the sidebar back in minimal mode")
 	}
 	// The editor pane is the only slot, so it is slot 0 and holds focus.
 	if got := focusedPane(s, sh); got != "editor" {
@@ -2687,9 +2687,9 @@ func TestEscFallsBackWhenTheRememberedPaneIsGone(t *testing.T) {
 func TestEscReturnsToTheDockWithoutOpeningTheSidebar(t *testing.T) {
 	s, sh := newHome(t)
 
-	s.Update(sh, keyMsg(`alt+\`)) // the bottom dock, last in flat order
+	s.Update(sh, keyMsg(`alt+|`)) // the bottom dock, last in flat order
 	if !s.bottomVisible {
-		t.Fatal(`alt+\ should have shown the bottom panel`)
+		t.Fatal(`alt+| should have shown the bottom panel`)
 	}
 	for i := 0; i < 4 && paneName(s) != "bottom"; i++ {
 		s.Update(sh, keyMsg("shift+tab"))
@@ -2701,9 +2701,9 @@ func TestEscReturnsToTheDockWithoutOpeningTheSidebar(t *testing.T) {
 	if got := paneName(s); got != "editor" {
 		t.Fatalf("esc should have reached the editor, got %s", got)
 	}
-	s.Update(sh, keyMsg(`alt+|`))
+	s.Update(sh, keyMsg(`alt+\`))
 	if s.sidebar {
-		t.Fatal(`alt+| should have hidden the sidebar`)
+		t.Fatal(`alt+\ should have hidden the sidebar`)
 	}
 
 	s.Update(sh, keyMsg("esc"))

@@ -250,7 +250,7 @@ func TestFolderViewKeysRespectInputAndFocus(t *testing.T) {
 			case "grouped":
 				nextFileView(s)
 			case "hidden":
-				model, _ = model.Update(keyMsg(`alt+|`))
+				model, _ = model.Update(keyMsg(`alt+\`))
 			case "resizing":
 				s.modular.SetResizing(true)
 			}
