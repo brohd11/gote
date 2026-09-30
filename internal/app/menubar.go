@@ -223,12 +223,34 @@ func (s *homeScreen) headerInput(sh *core.Shared, msg tea.Msg) (core.Action, boo
 		return core.Action{}, true
 	}
 	s.closeCompletion()
-	for _, span := range s.header.menuSpans {
-		if m.Y == sh.BodyY() && m.X >= span.x0 && m.X < span.x1 {
-			return s.openHeaderMenu(sh, span), true
-		}
+	if span, ok := s.headerSpanAt(sh, m.X, m.Y); ok {
+		return s.openHeaderMenu(sh, span), true
 	}
 	return core.Action{}, true
+}
+
+// headerSpanAt is the menu label under absolute cell (x, y), if any.
+func (s *homeScreen) headerSpanAt(sh *core.Shared, x, y int) (statusSpan, bool) {
+	if s.header == nil || y != sh.BodyY() {
+		return statusSpan{}, false
+	}
+	for _, span := range s.header.menuSpans {
+		if x >= span.x0 && x < span.x1 {
+			return span, true
+		}
+	}
+	return statusSpan{}, false
+}
+
+// menuBarSwitch is an open header menu's OnPointerOutside: pointing at (or clicking)
+// another label switches to that menu, as a desktop menu bar does; the menu has already
+// closed its cascade. The open menu's own label is declined, so a click there closes it.
+func (s *homeScreen) menuBarSwitch(sh *core.Shared, current string, x, y int) (core.Action, bool) {
+	span, ok := s.headerSpanAt(sh, x, y)
+	if !ok || span.id == current {
+		return core.Action{}, false
+	}
+	return s.openHeaderMenu(sh, span), true
 }
 
 // openHeaderMenu drops menu span down with its top border on the rule, so the label sits
@@ -239,5 +261,8 @@ func (s *homeScreen) openHeaderMenu(sh *core.Shared, span statusSpan) core.Actio
 		Items:  s.headerMenuItems(sh, span.id),
 		Anchor: components.MenuAnchor{X: max(span.x0-1, 0), Y: sh.BodyY() + headerRows - 1, FlipX: span.x1 + 1},
 		Style:  menuStyle,
+		OnPointerOutside: func(sh *core.Shared, x, y int) (core.Action, bool) {
+			return s.menuBarSwitch(sh, span.id, x, y)
+		},
 	}))
 }

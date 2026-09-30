@@ -146,3 +146,65 @@ func TestOptionsLSPNeedsAServer(t *testing.T) {
 		t.Fatalf("Options → LSP should be disabled without a server: %+v", items)
 	}
 }
+
+// headerLabelX is the first column of header menu id's label.
+func headerLabelX(t *testing.T, model tea.Model, s *homeScreen, id string) int {
+	t.Helper()
+	_ = model.(core.Router).View()
+	for _, span := range s.header.menuSpans {
+		if span.id == id {
+			return span.x0
+		}
+	}
+	t.Fatalf("no header menu %q", id)
+	return 0
+}
+
+// TestMenuBarSwitches: with one header menu open, pointing at another label opens that
+// one in its place — from a submenu too — and clicking the open label closes it.
+func TestMenuBarSwitches(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	defer Of(sh).close()
+	s.newUnsavedBuffer(sh) // previewable, so View → Preview is live
+	topLabels := func() string {
+		menu, ok := model.(core.Router).Top().(*components.MenuScreen)
+		if !ok {
+			return ""
+		}
+		return strings.Join(menuLabels(menu.Items()), " | ")
+	}
+	underTop := func() core.Screen {
+		// Closing the top menu must reveal home: the old menu is gone, not buried.
+		model, _ = model.Update(core.Pop())
+		return model.(core.Router).Top()
+	}
+
+	model = openHeaderMenu(t, model, s, sh, "file")
+	model, _ = model.Update(tea.MouseMotionMsg{X: headerLabelX(t, model, s, "edit"), Y: sh.BodyY()})
+	if got := topLabels(); got != "Copy | Cut | Paste" {
+		t.Fatalf("pointing at Edit should switch to it, top menu = %q", got)
+	}
+	if underTop() != s {
+		t.Fatal("the File menu should have closed, not stayed under Edit")
+	}
+
+	model = openHeaderMenu(t, model, s, sh, "view")
+	model = chooseMenuRow(t, model, "Preview") // the submenu is open
+	model, _ = model.Update(tea.MouseMotionMsg{X: headerLabelX(t, model, s, "options"), Y: sh.BodyY()})
+	if got := topLabels(); got != "LSP" {
+		t.Fatalf("pointing at Options from a submenu should switch, top menu = %q", got)
+	}
+	if underTop() != s {
+		t.Fatal("the View cascade should have closed entirely")
+	}
+
+	model = openHeaderMenu(t, model, s, sh, "file")
+	model, _ = model.Update(tea.MouseClickMsg{X: headerLabelX(t, model, s, "view"), Y: sh.BodyY(), Button: tea.MouseLeft})
+	if !strings.HasPrefix(topLabels(), "Preview") {
+		t.Fatalf("a click on View should switch in one click, top menu = %q", topLabels())
+	}
+	model, _ = model.Update(tea.MouseClickMsg{X: headerLabelX(t, model, s, "view"), Y: sh.BodyY(), Button: tea.MouseLeft})
+	if model.(core.Router).Top() != s {
+		t.Fatal("a click on the open menu's own label should close it")
+	}
+}
