@@ -8,6 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/brohd11/bubblestack/components/editor"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -26,10 +28,6 @@ var (
 	mdListStyle     lipgloss.Style
 )
 
-// mdPalette is the palette the styles above came from; live preview derives its own
-// styles from it per parse (live_markdown.go).
-var mdPalette syntaxPalette
-
 // mdStyle IDs index mdStyles (0 is unstyled), so grouping compares IDs rather than
 // lipgloss.Style values.
 const (
@@ -42,13 +40,12 @@ const (
 	mdStyleLink
 	mdStyleList
 
-	// Live preview only, resolved through liveStyles rather than mdStyles.
+	// Live preview only (live_markdown.go resolves every id through the previewer's palette).
 	mdStyleH1
 	mdStyleH2
 	mdStyleH3
 	mdStyleCodeSpan
-	mdStyleLiveStrong
-	mdStyleLiveEm
+	mdStyleRule
 )
 
 // Pointers, freshly allocated on every rebuild: see chromaStyles for why a span holds a
@@ -64,7 +61,6 @@ func applyMarkdownPalette(p syntaxPalette) {
 	mdQuoteStyle = lipgloss.NewStyle().Foreground(p.mdQuote)
 	mdLinkStyle = lipgloss.NewStyle().Foreground(p.mdLink).Underline(true)
 	mdListStyle = lipgloss.NewStyle().Foreground(p.mdList).Bold(true)
-	mdPalette = p
 
 	mdStyles = []*lipgloss.Style{
 		mdStyleNone:     nil, // the unstyled run
@@ -100,8 +96,11 @@ type markdownHighlighter struct {
 	liveIntervals [][]mdInterval
 	live          [][]editor.Span
 	liveCols      [][]int
-	liveStyles    map[int]*lipgloss.Style    // live-only styles for this parse (newLiveStyles)
-	pairStyles    map[[2]int]*lipgloss.Style // resolved (block, inline) pairs
+	liveTab       map[int]*lipgloss.Style    // live styles by id, rewritten in place on a theme change
+	pairStyles    map[[2]int]*lipgloss.Style // inherited (block, inline) pairs, likewise
+	liveKey       string                     // the theme and background liveTab was built for
+	fenceOf       map[int]*fenceCode         // fence body rows a language can highlight
+	codeRuns      map[int][]editor.Span      // those rows' SourceSpans, once highlighted
 	fills         []liveFill                 // rows drawn as a rule to the render width
 	glyphs        [][]editor.Glyph           // bullets kept while a row shows its source
 }
@@ -132,6 +131,7 @@ func (m *markdownHighlighter) Parse(doc string) {
 	}
 
 	m.liveIntervals = make([][]mdInterval, len(m.lines))
+	m.fenceOf, m.codeRuns = map[int]*fenceCode{}, map[int][]editor.Span{}
 
 	root := goldmark.New(goldmark.WithExtensions(extension.Table)).Parser().Parse(text.NewReader(m.src))
 	ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -150,6 +150,7 @@ func (m *markdownHighlighter) Parse(doc string) {
 			first, last := m.rowOf(v.Pos()), m.fencedLastRow(v)
 			m.setRestart(first, last, first)
 			m.addBlock(first, last, mdStyleCode)
+			m.chromaFence(v)
 		case *ast.CodeBlock:
 			if ls := v.Lines(); ls.Len() > 0 {
 				first, last := m.rowOf(ls.At(0).Start), m.rowOf(ls.At(ls.Len()-1).Stop-1)
@@ -415,4 +416,81 @@ func (m *markdownHighlighter) bake() {
 		}
 		m.spans[r] = spans
 	}
+}
+
+// fenceCode is a fenced block whose info string names a language chroma knows: its body
+// rows, where each row's code starts, and the code text, highlighted on first request.
+type fenceCode struct {
+	lexer chroma.Lexer
+	rows  []int
+	offs  []int
+	texts []string
+	done  bool
+}
+
+// chromaFence records a fenced block chroma can highlight. The highlighting itself waits
+// for SourceSpans (live preview only), so plain editing pays nothing for it.
+func (m *markdownHighlighter) chromaFence(v *ast.FencedCodeBlock) {
+	if v.Info == nil {
+		return
+	}
+	fields := strings.Fields(string(v.Info.Segment.Value(m.src)))
+	if len(fields) == 0 {
+		return
+	}
+	lexer := lexers.Get(fields[0])
+	if lexer == nil {
+		return
+	}
+	f := &fenceCode{lexer: lexer}
+	ls := v.Lines()
+	for i := 0; i < ls.Len(); i++ {
+		seg := ls.At(i)
+		row := m.rowOf(seg.Start)
+		f.rows = append(f.rows, row)
+		f.offs = append(f.offs, m.runeCol(row, seg.Start))
+		f.texts = append(f.texts, strings.TrimSuffix(string(m.src[seg.Start:min(seg.Stop, len(m.src))]), "\n"))
+		m.fenceOf[row] = f
+	}
+}
+
+// SourceSpans colors a fence body row by its language, as the previewer's code blocks
+// are: the row's prefix (a list or quote indent) keeps its highlight, the code takes the
+// language's spans. The fence is highlighted once, on its first row's request, and only
+// ever on the UI goroutine.
+func (m *markdownHighlighter) SourceSpans(row int) []editor.Span {
+	f, ok := m.fenceOf[row]
+	if !ok {
+		return nil
+	}
+	if !f.done {
+		f.done = true
+		h := chromaHighlighterFactory(f.lexer)()
+		h.Parse(strings.Join(f.texts, "\n"))
+		for i, r := range f.rows {
+			spans := h.HighlightLine(i)
+			if spans == nil || string([]rune(m.lines[r])[f.offs[i]:]) != f.texts[i] {
+				continue
+			}
+			m.codeRuns[r] = append(prefixSpans(m.spans[r], f.offs[i]), spans...)
+		}
+	}
+	return m.codeRuns[row]
+}
+
+// prefixSpans is spans cut to their first n runes.
+func prefixSpans(spans []editor.Span, n int) []editor.Span {
+	var out []editor.Span
+	for _, sp := range spans {
+		if n <= 0 {
+			break
+		}
+		rs := []rune(sp.Text)
+		if len(rs) > n {
+			rs = rs[:n]
+		}
+		out = append(out, editor.Span{Text: string(rs), Style: sp.Style})
+		n -= len(rs)
+	}
+	return out
 }

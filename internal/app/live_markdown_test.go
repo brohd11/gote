@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
+	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/bubblestack/tuitest"
 
 	"charm.land/lipgloss/v2"
@@ -32,19 +34,19 @@ func TestLiveMarkdownRendersEachConstruct(t *testing.T) {
 		want      string
 	}{
 		{"atx heading", "### Title", 0, "Title"},
-		{"h1 is padded", "# Title", 0, " Title "},
+		{"h1", "# Title", 0, "Title"},
 		{"closing hashes", "## Title ##", 0, "Title"},
 		{"heading alone", "#", 0, ""},
 		{"setext keeps its underline", "Title\n===", 1, "<source>"},
 		{"bullet", "- item", 0, "• item"},
 		{"nested bullet", "- a\n  - b", 1, "  ◦ b"},
-		{"quoted fence closer keeps the bar", "> ```\n> a\n> ```", 2, "▌ ```"},
+		{"quoted fence closer keeps the bar", "> ```\n> a\n> ```", 2, "│ ```"},
 		{"a quote does not swallow the next paragraph", "> ```\n> a\ntext", 2, "<source>"},
 		{"ordered stays", "1. first", 0, "<source>"},
 		{"open task", "- [ ] todo", 0, "• ☐ todo"},
 		{"done task", "* [x] done", 0, "• ☑ done"},
-		{"quote", "> said", 0, "▌ said"},
-		{"nested quote", "> > deep", 0, "▌ ▌ deep"},
+		{"quote", "> said", 0, "│ said"},
+		{"nested quote", "> > deep", 0, "│ │ deep"},
 		{"emphasis", "a *b* **c** d", 0, "a b c d"},
 		{"nested emphasis", "***both*** and **a *b* c**", 0, "both and a b c"},
 		{"multi-line strong", "**one\ntwo**", 1, "two"},
@@ -59,7 +61,7 @@ func TestLiveMarkdownRendersEachConstruct(t *testing.T) {
 		{"bare fence opener", "```\nx\n```", 0, strings.Repeat("─", liveWidth)},
 		{"fence body", "```go\nx\n```", 1, "<source>"},
 		{"fence closer", "```go\nx\n```", 2, strings.Repeat("─", liveWidth)},
-		{"rule in a quote keeps the bar", "> ---", 0, "▌ ---"},
+		{"rule in a quote keeps the bar", "> ---", 0, "│ ---"},
 		{"plain", "just text", 0, "<source>"},
 		{"table header", "| a | bbb |\n|:-|--:|\n| cc | *d* |", 0, "│ a  │ bbb │"},
 		{"table delimiter", "| a | bbb |\n|:-|--:|\n| cc | *d* |", 1, "├────┼─────┤"},
@@ -147,7 +149,7 @@ func TestLiveMarkdownBulletGlyphs(t *testing.T) {
 			}
 			continue
 		}
-		if len(gs) != 1 || gs[0].Col != w.Col || gs[0].From != w.From || gs[0].Text != w.Text || gs[0].Style == nil {
+		if len(gs) != 1 || gs[0].Col != w.Col || gs[0].From != w.From || gs[0].Text != w.Text || gs[0].Style != nil {
 			t.Errorf("row %d: glyphs %+v, want %+v", row, gs, w)
 		}
 	}
@@ -168,8 +170,8 @@ func TestLiveMarkdownHeadingLevels(t *testing.T) {
 		}
 	}
 	h1, h2, h3 := styles[0], styles[1], styles[2]
-	if !hasColor(h1.GetBackground()) || !h1.GetBold() {
-		t.Error("h1 should be bold on the heading color")
+	if !h1.GetUnderline() || !h1.GetBold() || hasColor(h1.GetBackground()) {
+		t.Error("h1 should be the previewer's underlined heading, with no background")
 	}
 	if !h2.GetBold() || h2.GetUnderline() || !hasColor(h2.GetForeground()) {
 		t.Error("h2 should be bold in the heading color, not underlined")
@@ -216,8 +218,8 @@ func TestLiveMarkdownInlineStyles(t *testing.T) {
 	if !hasColor(chip.GetBackground()) || !hasColor(chip.GetForeground()) {
 		t.Error("a code span should render as a tinted chip")
 	}
-	if y := liveSpan(t, hl, 1, "y"); !y.GetBold() || !hasColor(y.GetBackground()) {
-		t.Error("bold inside an h1 should keep the h1's background")
+	if y := liveSpan(t, hl, 1, "y"); !y.GetBold() || !y.GetUnderline() || !hasColor(y.GetForeground()) {
+		t.Error("bold inside an h1 should keep the h1's color and underline")
 	}
 	if r := liveSpan(t, hl, 2, "r"); !r.GetBold() || !hasColor(r.GetForeground()) {
 		t.Error("bold inside a quote should keep the quote's color")
@@ -227,5 +229,55 @@ func TestLiveMarkdownInlineStyles(t *testing.T) {
 		if sp.Text == "**b**" && !markdownStyleEqual(spanStyle(sp), mdStrongStyle) {
 			t.Error("the source row's bold should keep its color")
 		}
+	}
+}
+
+// Live rows draw in the full previewer's palette; source rows keep md_*.
+func TestLiveMarkdownUsesPreviewerPalette(t *testing.T) {
+	hl := newMarkdownHighlighter().(*markdownHighlighter)
+	hl.Parse("## Two\n### Three\nsee [l](u) and `c`\n> q\n\n---")
+	ms := components.CurrentMarkdownStyles()
+	for _, c := range []struct {
+		name string
+		row  int
+		text string
+		want lipgloss.Style
+	}{
+		{"h2", 0, "Two", ms.Heading},
+		{"h3", 1, "Three", ms.Subheading},
+		{"link", 2, "l", ms.Link},
+		{"code chip", 2, " c ", ms.CodeSpan},
+		{"quote bar", 3, components.MarkdownQuoteBar, ms.Rule},
+		{"quote text", 3, " q", ms.QuoteText},
+	} {
+		if got := liveSpan(t, hl, c.row, c.text); !markdownStyleEqual(got, c.want) {
+			t.Errorf("%s: live style differs from the previewer's", c.name)
+		}
+	}
+	rule := hl.RenderLine(5, editor.LiveContext{Width: 10})
+	if !markdownStyleEqual(spanStyle(rule[0]), ms.Rule) {
+		t.Error("a rule should draw in the previewer's rule color")
+	}
+	if raw := hl.HighlightLine(0); !markdownStyleEqual(spanStyle(raw[0]), mdHeadingStyle) {
+		t.Error("source rows keep the md_* heading color")
+	}
+}
+
+// A theme switch repaints already-baked live spans on the next RenderLine, no reparse.
+func TestLiveMarkdownFollowsThemeChange(t *testing.T) {
+	prev := core.CurrentTheme()
+	t.Cleanup(func() { core.SetTheme(prev) })
+	core.SetTheme("red")
+	hl := newMarkdownHighlighter().(*markdownHighlighter)
+	hl.Parse("## Two")
+	span := hl.RenderLine(0, editor.LiveContext{Width: 20})[0]
+	before := spanStyle(span).Render("x")
+	core.SetTheme("green")
+	hl.RenderLine(0, editor.LiveContext{Width: 20})
+	if after := spanStyle(span).Render("x"); after == before {
+		t.Fatal("the baked heading span kept the old theme's color")
+	}
+	if !markdownStyleEqual(spanStyle(span), components.CurrentMarkdownStyles().Heading) {
+		t.Error("the heading should now match the new theme's previewer heading")
 	}
 }

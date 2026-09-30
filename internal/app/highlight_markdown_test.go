@@ -135,7 +135,7 @@ func TestMarkdownInlineBeatsBlockStyle(t *testing.T) {
 }
 
 func TestMarkdownCodeBlocks(t *testing.T) {
-	closed := "before\n```go\nfmt.Println()\nx\n```\nafter\n"
+	closed := "before\n```\nfmt.Println()\nx\n```\nafter\n" // no language: the block style
 	for _, row := range []int{1, 2, 3, 4} {
 		assertMarkdownSpans(t, closed, row,
 			markdownWantSpan{strings.Split(closed, "\n")[row], mdCodeStyle})
@@ -202,6 +202,37 @@ func TestMarkdownOutOfRange(t *testing.T) {
 	for _, row := range []int{-1, 1, 99} {
 		if spans := hl.HighlightLine(row); spans != nil {
 			t.Errorf("row %d = %#v, want nil", row, spans)
+		}
+	}
+}
+
+// A fence naming a language chroma knows is highlighted by it, as the previewer's code
+// blocks are, but only through SourceSpans (live preview): plain editing keeps one code
+// color. The prefix of a fence in a list keeps its own style.
+func TestMarkdownFenceChroma(t *testing.T) {
+	doc := "```go\nfunc main() {}\n```\n\n- item\n  ```go\n  return 1\n  ```\n\n```nosuchlang\nfunc x\n```\n\n```\nfunc y\n```"
+	lines := strings.Split(doc, "\n")
+	hl := newMarkdownHighlighter().(*markdownHighlighter)
+	hl.Parse(doc)
+	for _, row := range []int{1, 6} {
+		spans := hl.SourceSpans(row)
+		if spanText(spans) != lines[row] {
+			t.Fatalf("row %d spans %q do not rebuild %q", row, spanText(spans), lines[row])
+		}
+		if len(spans) < 2 {
+			t.Fatalf("row %d: %d span(s), want chroma's several", row, len(spans))
+		}
+	}
+	if got := hl.SourceSpans(6); got[0].Text != "  " {
+		t.Errorf("a list fence's indent should stay its own run, got %q", got[0].Text)
+	}
+	if a, b := hl.SourceSpans(1), hl.SourceSpans(1); &a[0] != &b[0] {
+		t.Error("a fence should be highlighted once and its spans cached")
+	}
+	assertMarkdownSpans(t, doc, 1, markdownWantSpan{"func main() {}", mdCodeStyle})
+	for _, row := range []int{0, 4, 10, 14} { // an opener, prose, unknown and bare fences
+		if got := hl.SourceSpans(row); got != nil {
+			t.Errorf("row %d: SourceSpans = %q, want nil", row, spanText(got))
 		}
 	}
 }

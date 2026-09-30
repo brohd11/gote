@@ -2,11 +2,11 @@ package app
 
 import (
 	"fmt"
-	"image/color"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 
@@ -57,6 +57,7 @@ func (m *markdownHighlighter) RenderLine(row int, ctx editor.LiveContext) []edit
 	if row < 0 || row >= len(m.live) {
 		return nil
 	}
+	m.refreshLiveStyles()
 	if f := m.fills[row]; f.set {
 		text := f.label
 		if n := ctx.Width - utf8.RuneCountInString(text); text == "" {
@@ -104,7 +105,7 @@ func (m *markdownHighlighter) addOp(start, stop int, text string, id int) {
 // collectLive walks the AST for the markup each construct hides or replaces.
 func (m *markdownHighlighter) collectLive(root ast.Node) {
 	m.ops = make([][]liveOp, len(m.lines))
-	m.liveStyles, m.pairStyles = nil, nil
+	m.liveTab, m.pairStyles = nil, nil
 	m.fills = make([]liveFill, len(m.lines))
 	m.glyphs = make([][]editor.Glyph, len(m.lines))
 	var tables []liveTable
@@ -117,7 +118,7 @@ func (m *markdownHighlighter) collectLive(root ast.Node) {
 			m.liveHeading(v)
 		case *ast.ThematicBreak:
 			if pos := v.Pos(); pos >= 0 {
-				m.fills[m.rowOf(pos)] = liveFill{set: true, id: mdStyleQuote}
+				m.fills[m.rowOf(pos)] = liveFill{set: true, id: mdStyleRule}
 			}
 		case *ast.FencedCodeBlock:
 			m.liveFence(v)
@@ -181,9 +182,8 @@ func hasAncestor[T ast.Node](n ast.Node) bool {
 }
 
 // liveHeading hides an ATX heading's "#" run and the spaces after it, plus any closing
-// run. Setext headings keep their underline: it is the heading's own rule. Levels 1 and 2
-// get their own styles (live only; a raw row keeps the plain heading style), and an h1's
-// background is padded by a space each side so it reads as a block.
+// run. Setext headings keep their underline: it is the heading's own rule. Each level
+// takes the previewer's style for it (live only; a raw row keeps the plain heading style).
 func (m *markdownHighlighter) liveHeading(v *ast.Heading) {
 	if v.Lines().Len() == 0 {
 		if pos := v.Pos(); pos >= 0 { // "#" alone: the whole row is markup
@@ -218,16 +218,10 @@ func (m *markdownHighlighter) liveHeading(v *ast.Heading) {
 	if hashes == at {
 		return // setext
 	}
-	pad := ""
-	if level == mdStyleH1 {
-		pad = " "
-	}
-	m.addOp(hashes, seg.Start, pad, level)
+	m.addOp(hashes, seg.Start, "", mdStyleNone)
 	lineEnd := lineStart + len(m.lines[r])
 	if seg.Stop < lineEnd {
-		m.addOp(seg.Stop, lineEnd, pad, level)
-	} else if pad != "" {
-		m.addOp(lineEnd, lineEnd, pad, level)
+		m.addOp(seg.Stop, lineEnd, "", mdStyleNone)
 	}
 }
 
@@ -245,9 +239,9 @@ func (m *markdownHighlighter) liveFence(v *ast.FencedCodeBlock) {
 			label = "─── " + info
 		}
 	}
-	m.fills[open] = liveFill{set: true, label: label, id: mdStyleCode}
+	m.fills[open] = liveFill{set: true, label: label, id: mdStyleRule}
 	if closeRow, ok := m.fenceCloserRow(v); ok {
-		m.fills[closeRow] = liveFill{set: true, id: mdStyleCode}
+		m.fills[closeRow] = liveFill{set: true, id: mdStyleRule}
 	}
 }
 
@@ -257,7 +251,7 @@ func (m *markdownHighlighter) liveQuote(first, last int) {
 	for r := first; r <= last; r++ {
 		for c, ch := range []rune(m.lines[r]) {
 			if ch == '>' {
-				m.ops[r] = append(m.ops[r], liveOp{c, c + 1, "▌", mdStyleQuote})
+				m.ops[r] = append(m.ops[r], liveOp{c, c + 1, components.MarkdownQuoteBar, mdStyleRule})
 			} else if ch != ' ' && ch != '\t' {
 				break
 			}
@@ -266,7 +260,7 @@ func (m *markdownHighlighter) liveQuote(first, last int) {
 }
 
 // liveBullets are the bullet glyphs by list depth.
-var liveBullets = []string{"•", "◦", "▪"}
+var liveBullets = []string{components.MarkdownBullet, "◦", "▪"}
 
 // liveListItem swaps a bullet marker for a depth glyph, and a task box for a check glyph.
 func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
@@ -283,10 +277,10 @@ func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
 			}
 		}
 		bullet := liveBullets[max(depth, 0)%len(liveBullets)]
-		m.addOp(pos, end, bullet, mdStyleList)
+		m.addOp(pos, end, bullet, mdStyleNone) // plain, as the previewer draws bullets
 		r := m.rowOf(pos)
 		m.glyphs[r] = append(m.glyphs[r], editor.Glyph{Col: m.runeCol(r, pos), From: rune(m.src[pos]),
-			Text: []rune(bullet)[0], Style: m.style(mdStyleList, mdStyleNone)})
+			Text: []rune(bullet)[0]})
 	}
 	at := end
 	for at < len(m.src) && m.src[at] == ' ' {
@@ -295,9 +289,9 @@ func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
 	if at+3 <= len(m.src) && (at+3 == len(m.src) || m.src[at+3] == ' ' || m.src[at+3] == '\n') {
 		switch string(m.src[at : at+3]) {
 		case "[ ]":
-			m.addOp(at, at+3, "☐", mdStyleList)
+			m.addOp(at, at+3, "☐", mdStyleNone)
 		case "[x]", "[X]":
-			m.addOp(at, at+3, "☑", mdStyleList)
+			m.addOp(at, at+3, "☑", mdStyleNone)
 		}
 	}
 }
@@ -500,11 +494,11 @@ func (m *markdownHighlighter) liveTableOps(t liveTable) {
 				pending += strings.Repeat(" ", widths[c]) + " │ "
 				continue
 			}
-			m.ops[r] = append(m.ops[r], liveOp{prev, cell[0], pending + strings.Repeat(" ", left), mdStyleQuote})
+			m.ops[r] = append(m.ops[r], liveOp{prev, cell[0], pending + strings.Repeat(" ", left), mdStyleRule})
 			prev = cell[1]
 			pending = strings.Repeat(" ", pad-left) + " │ "
 		}
-		m.ops[r] = append(m.ops[r], liveOp{prev, n, strings.TrimRight(pending, " "), mdStyleQuote})
+		m.ops[r] = append(m.ops[r], liveOp{prev, n, strings.TrimRight(pending, " "), mdStyleRule})
 		if i == 0 && t.header+1 < len(m.lines) {
 			dr := t.header + 1
 			segs := make([]string, cols)
@@ -512,7 +506,7 @@ func (m *markdownHighlighter) liveTableOps(t liveTable) {
 				segs[c] = strings.Repeat("─", w)
 			}
 			m.ops[dr] = append(m.ops[dr], liveOp{0, utf8.RuneCountInString(m.lines[dr]),
-				"├─" + strings.Join(segs, "─┼─") + "─┤", mdStyleQuote})
+				"├─" + strings.Join(segs, "─┼─") + "─┤", mdStyleRule})
 			for _, cell := range t.cells[0] {
 				if cell[0] >= 0 {
 					m.liveIntervals[r] = append(m.liveIntervals[r], mdInterval{lo: cell[0], hi: cell[1], id: mdStyleStrong, prio: 1})
@@ -609,82 +603,105 @@ func (m *markdownHighlighter) styleIDs(r, n int) (block, inline []int) {
 	return block, inline
 }
 
-// liveStyles are the live preview's own styles, built per parse so the adaptive ones
-// (the code chip's tint, h3's dimmed color) follow the detected background.
-func newLiveStyles() map[int]*lipgloss.Style {
-	p := mdPalette
-	chip := lipgloss.NewStyle().Foreground(p.mdCode).
-		Background(core.Resolve(core.Color{Light: 254, Dark: 236})) // the previewer's code span tint
-	return map[int]*lipgloss.Style{
-		mdStyleH1:         styleRef(lipgloss.NewStyle().Bold(true).Background(p.mdHeading)),
-		mdStyleH2:         styleRef(lipgloss.NewStyle().Bold(true).Foreground(p.mdHeading)),
-		mdStyleH3:         styleRef(lipgloss.NewStyle().Bold(true).Foreground(dimColor(p.mdHeading, liveSubheadingDim))),
-		mdStyleCodeSpan:   styleRef(chip),
-		mdStyleLiveStrong: styleRef(lipgloss.NewStyle().Bold(true)),
-		mdStyleLiveEm:     styleRef(lipgloss.NewStyle().Italic(true)),
+// Live rows draw in the full previewer's palette (components.CurrentMarkdownStyles), not
+// the md_* syntax colors the source rows keep. Each highlighter owns its style pointers,
+// and spans hold them, so a theme or background change rewrites them in place
+// (refreshLiveStyles) with no reparse.
+
+// liveStyleFor is the previewer's style for a live style id; false leaves the run unstyled
+// (list markers, which the previewer draws plain).
+func liveStyleFor(id int, ms components.MarkdownStyles) (lipgloss.Style, bool) {
+	switch id {
+	case mdStyleHeading, mdStyleH2:
+		return ms.Heading, true
+	case mdStyleH1:
+		return ms.H1, true
+	case mdStyleH3:
+		return ms.Subheading, true
+	case mdStyleEmphasis:
+		return ms.Italic, true
+	case mdStyleStrong:
+		return ms.Bold, true
+	case mdStyleCode:
+		return ms.Code, true
+	case mdStyleCodeSpan:
+		return ms.CodeSpan, true
+	case mdStyleQuote:
+		return ms.QuoteText, true
+	case mdStyleRule:
+		return ms.Rule, true
+	case mdStyleLink:
+		return ms.Link, true
+	}
+	return lipgloss.Style{}, false
+}
+
+// liveInline maps an inline id whose live style differs from the block one: a code span
+// is a chip, while a fenced block's text is plain code.
+var liveInline = map[int]int{mdStyleCode: mdStyleCodeSpan}
+
+// liveStylesKey names the palette the tables were built for.
+func liveStylesKey() string {
+	return fmt.Sprint(core.CurrentTheme(), core.BackgroundIsDark())
+}
+
+// refreshLiveStyles rewrites every style pointer after a theme or background change.
+func (m *markdownHighlighter) refreshLiveStyles() {
+	key := liveStylesKey()
+	if m.liveTab == nil || key == m.liveKey {
+		return
+	}
+	m.liveKey = key
+	ms := components.CurrentMarkdownStyles()
+	for id, p := range m.liveTab {
+		*p, _ = liveStyleFor(id, ms)
+	}
+	for k, p := range m.pairStyles {
+		*p = m.inherit(k)
 	}
 }
 
-// liveInline maps an inline highlight id to its live counterpart: emphasis keeps only its
-// weight or slant, and a code span becomes a chip.
-var liveInline = map[int]int{
-	mdStyleStrong:   mdStyleLiveStrong,
-	mdStyleEmphasis: mdStyleLiveEm,
-	mdStyleCode:     mdStyleCodeSpan,
-}
-
-// liveSubheadingDim is how far h3+ recede from the heading color, as the previewer's
-// subheadings do.
-const liveSubheadingDim = 0.3
-
-// dimColor blends c toward the terminal's ground by amount.
-func dimColor(c color.Color, amount float64) color.Color {
-	if c == nil {
-		return c
+// base is the shared pointer for a live style id, or nil for an unstyled one.
+func (m *markdownHighlighter) base(id int) *lipgloss.Style {
+	if m.liveTab == nil {
+		m.liveTab, m.pairStyles = map[int]*lipgloss.Style{}, map[[2]int]*lipgloss.Style{}
+		m.liveKey = liveStylesKey()
 	}
-	ground := 0.0
-	if !core.BackgroundIsDark() {
-		ground = 255
+	if p, ok := m.liveTab[id]; ok {
+		return p
 	}
-	r, g, b, _ := c.RGBA()
-	mix := func(v uint32) uint8 {
-		x := float64(v >> 8)
-		return uint8(x + (ground-x)*amount)
-	}
-	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", mix(r), mix(g), mix(b)))
-}
-
-// style resolves a (block, inline) pair to one style, the inline one inheriting what it
-// leaves unset from the block (so bold in an h1 keeps its background). Pairs are cached
-// per parse.
-func (m *markdownHighlighter) style(block, inline int) *lipgloss.Style {
-	if m.liveStyles == nil {
-		m.liveStyles = newLiveStyles()
-		m.pairStyles = map[[2]int]*lipgloss.Style{}
-	}
-	one := func(id int) *lipgloss.Style {
-		if st, ok := m.liveStyles[id]; ok {
-			return st
-		}
-		if id > 0 && id < len(mdStyles) {
-			return mdStyles[id]
-		}
+	st, ok := liveStyleFor(id, components.CurrentMarkdownStyles())
+	if !ok {
 		return nil
 	}
-	if inline == mdStyleNone {
-		return one(block)
-	}
-	key := [2]int{block, inline}
-	if st, ok := m.pairStyles[key]; ok {
-		return st
-	}
+	p := styleRef(st)
+	m.liveTab[id] = p
+	return p
+}
+
+// inherit is an inline style over a block one: what the inline leaves unset comes from the
+// block, so bold in an h1 keeps its background.
+func (m *markdownHighlighter) inherit(k [2]int) lipgloss.Style {
+	return m.base(k[1]).Inherit(*m.base(k[0]))
+}
+
+// style resolves a (block, inline) pair to the style its run draws in.
+func (m *markdownHighlighter) style(block, inline int) *lipgloss.Style {
 	if id, ok := liveInline[inline]; ok {
 		inline = id
 	}
-	st := one(inline)
-	if b := one(block); b != nil && st != nil {
-		st = styleRef(st.Inherit(*b))
+	b, in := m.base(block), m.base(inline)
+	switch {
+	case in == nil:
+		return b
+	case b == nil:
+		return in
 	}
-	m.pairStyles[key] = st
-	return st
+	k := [2]int{block, inline}
+	if p, ok := m.pairStyles[k]; ok {
+		return p
+	}
+	p := styleRef(m.inherit(k))
+	m.pairStyles[k] = p
+	return p
 }

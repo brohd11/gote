@@ -69,9 +69,10 @@ Markdown inside the editor itself: headings lose their `#`, bullets and task box
 glyphs, emphasis, code and link markup is hidden, and tables line up. Lines never re-flow.
 The caret's line, any selected lines and lines with search hits show their source, so
 editing always happens on the raw text; a list bullet stays drawn there unless the caret
-or selection touches its marker. Level-1 headings draw on the heading color, level-2
-headings are bold in it and deeper ones a step dimmer; bold and italic show only their
-weight and slant, inline code is a tinted chip, and rules span the pane. Like wrap, it is a per-document toggle. Tab bars remain visible when the split closes. Splits are
+or selection touches its marker. Rendered lines use the full preview's theme palette
+(headings, links, code chips, quote bars and rules match alt+p), while source lines keep
+the `md_*` syntax colors, and rules span the pane. Fenced blocks that name a language are
+highlighted like the preview's while live preview is on; plain editing keeps one code color. Like wrap, it is a per-document toggle. Tab bars remain visible when the split closes. Splits are
 unavailable in minimal single-file mode. **Actions → Editor groups** also provides both move actions and group closing.
 
 When the terminal regains focus, gote checks loaded open documents for changes on
