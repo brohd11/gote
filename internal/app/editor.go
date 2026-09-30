@@ -96,17 +96,25 @@ func (s *homeScreen) editorLanguageItems(sh *core.Shared) []components.MenuItem 
 			return core.Seq(core.Pop(), s.requestAt(sh, kind))
 		}}
 	}
-	return []components.MenuItem{
+	items := []components.MenuItem{
 		request("Hover info", lspReqHover),
 		request("Go to definition", lspReqDefinition),
 		request("Find references", lspReqReferences),
-		request("Format document", lspReqFormat),
 	}
+	// Formatting acts on the document, not the click: the menu bar has it (Options → LSP).
+	if s.minimal {
+		items = append(items, request("Format document", lspReqFormat))
+	}
+	return items
 }
 
 // Rows the panel lock or LSP gate disable for the whole launch are omitted, as in
-// editorLanguageItems.
+// editorLanguageItems. With a menu bar every one of these rows is the bar's (View,
+// Options → LSP), so only minimal mode, which has no bar, shows them here.
 func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
+	if !s.minimal {
+		return nil // all of these are the menu bar's View and Options
+	}
 	items := []components.MenuItem{
 		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.cyclePreview())

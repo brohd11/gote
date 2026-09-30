@@ -104,6 +104,7 @@ func (s *homeScreen) newGroupedPanel(c *Ctx) *components.TreePanel {
 			}
 			return core.Action{}
 		},
+		OnPointer: s.groupedPointer,
 		OnKey: func(sh *core.Shared, k string, node components.TreeNode) (core.Action, bool) {
 			if item, ok := node.Item.(groupedDocItem); ok {
 				return s.docsKey(sh, k, item.docItem)

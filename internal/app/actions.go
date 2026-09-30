@@ -23,7 +23,8 @@ func (s *homeScreen) actionsMenu(sh *core.Shared) *components.PickerScreen {
 		Name: "Editor Settings", Desc: "change the git gutter",
 		Pick: func(*core.Shared) core.Action { return core.Push(s.editorSettingsMenu()) },
 	})
-	if lspEnabled(sh) {
+	// With a menu bar these live in Options → LSP; minimal mode has none.
+	if lspEnabled(sh) && s.minimal {
 		extra = append(extra, components.Item{
 			Name: "LSP", Desc: "diagnostics, outline, and language-server actions",
 			Pick: func(*core.Shared) core.Action { return core.Push(s.lspActionsMenu()) },
@@ -74,13 +75,7 @@ func (s *homeScreen) lspActionsMenu() *components.PickerScreen {
 	if s.panelToggles {
 		items = append(items, components.Item{
 			Name: "⚠ Diagnostics", Desc: "show open-file diagnostics in the bottom panel",
-			Pick: func(sh *core.Shared) core.Action {
-				s.bottom.selectTab(bottomDiagnostics)
-				if s.bottomVisible {
-					return core.Async(s.modular.FocusSlot(s.panelSlot(s.bottom)))
-				}
-				return s.toggleBottom(sh)
-			},
+			Pick: s.showDiagnostics,
 		}, s.outlineActionItem())
 	}
 	items = append(items,
@@ -104,6 +99,15 @@ func (s *homeScreen) lspActionsMenu() *components.PickerScreen {
 			Pick: s.restartLanguageServers,
 		})
 	return actionsSubmenu("LSP", items...)
+}
+
+// showDiagnostics brings the dock's diagnostics panel up and focuses it.
+func (s *homeScreen) showDiagnostics(sh *core.Shared) core.Action {
+	s.bottom.selectTab(bottomDiagnostics)
+	if s.bottomVisible {
+		return core.Async(s.modular.FocusSlot(s.panelSlot(s.bottom)))
+	}
+	return s.toggleBottom(sh)
 }
 
 func (s *homeScreen) outlineActionItem() components.Item {

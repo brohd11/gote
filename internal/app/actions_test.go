@@ -112,16 +112,19 @@ func TestActionsSubmenuMembershipAndNavigation(t *testing.T) {
 	model, _ = model.Update(keyMsg("a"))
 	actions := model.(core.Router).Top().(*components.PickerScreen)
 	top := pickerLabels(actions)
-	for _, name := range []string{"Editor groups", "Editor Settings", "LSP", "⌕ Find in Files", "▣ Vaults"} {
+	for _, name := range []string{"Editor groups", "Editor Settings", "⌕ Find in Files", "▣ Vaults"} {
 		if !slices.Contains(top, name) {
 			t.Fatalf("Actions missing %q: %v", name, top)
 		}
+	}
+	// With a menu bar, the language-server commands are Options → LSP (menubar_test.go).
+	if slices.Contains(top, "LSP") {
+		t.Fatalf("Actions should leave LSP to the menu bar: %v", top)
 	}
 	for _, tc := range []struct {
 		name string
 		want []string
 	}{
-		{"LSP", []string{"⚠ Diagnostics", "Show outline", "Toggle diagnostics gutter", "Find references", "Format document", "Restart language servers"}},
 		{"Editor Settings", []string{"Toggle git gutter"}},
 	} {
 		model = choosePickerRow(t, model, tc.name)
@@ -165,22 +168,6 @@ func TestActionsSubmenuTogglesReturnHome(t *testing.T) {
 		if s.gitGutter == before || !s.editorPanel.Focused() {
 			t.Fatal("git gutter did not toggle and retain editor focus")
 		}
-		before = s.diagnosticsGutter
-		selectAction("LSP", "Toggle diagnostics gutter")
-		if s.diagnosticsGutter == before || !s.editorPanel.Focused() {
-			t.Fatal("diagnostics gutter did not toggle and retain editor focus")
-		}
-	}
-	selectAction("LSP", "Show outline")
-	if !s.outlineVisible {
-		t.Fatal("outline was not shown")
-	}
-	selectAction("LSP", "Hide outline")
-	if s.outlineVisible {
-		t.Fatal("outline was not hidden")
-	}
-	for _, name := range []string{"Find references", "Format document", "Restart language servers"} {
-		selectAction("LSP", name)
 	}
 }
 

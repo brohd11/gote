@@ -144,12 +144,12 @@ func TestHeaderCapturesMouse(t *testing.T) {
 	if s.focusedPane() != s.docsPane() {
 		t.Fatal("opening a menu must not move pane focus")
 	}
-	if !strings.Contains(ansi.Strip(menu.View(sh)), "Nothing here yet") {
-		t.Fatal("the placeholder item is missing")
+	if !strings.Contains(ansi.Strip(menu.View(sh)), "Preview") {
+		t.Fatal("the View menu's first row is missing")
 	}
 	// The box's top border lies on the rule: label, border, items — no doubled line.
 	rows := strings.Split(stripANSI(view(model)), "\n")
-	if !strings.Contains(rows[top+headerRows-1], "╭") || !strings.Contains(rows[top+headerRows], "Nothing here yet") {
+	if !strings.Contains(rows[top+headerRows-1], "╭") || !strings.Contains(rows[top+headerRows], "Preview") {
 		t.Fatalf("menu should open on the rule:\n%s", strings.Join(rows[:top+headerRows+2], "\n"))
 	}
 }

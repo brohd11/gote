@@ -2326,6 +2326,14 @@ func TestReselectOpenDocKeepsBuffer(t *testing.T) {
 func TestHomeEditorContextItems(t *testing.T) {
 	s, sh := newHome(t)
 
+	// With the menu bar, the view rows all moved to View and Options; with no language
+	// server ready here, gote adds nothing to the editor's own clipboard rows.
+	if bar := s.editorContextItems(sh); len(bar) != 0 {
+		t.Fatalf("right-click rows with a menu bar = %v", menuLabels(bar))
+	}
+
+	// Minimal mode has no menu bar, so everything stays on the right-click menu.
+	s.minimal = true
 	rows := s.editorContextItems(sh)
 	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Show outline", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
 	if len(rows) != len(want) {
@@ -2380,10 +2388,13 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 		t.Fatalf("a right click in the editor should raise the menu, top is %T", model.(core.Router).Top())
 	}
 	view := stripANSI(view(model))
-	for _, want := range []string{"Copy", "Cut", "Paste", "Toggle wrap"} {
+	for _, want := range []string{"Copy", "Cut", "Paste"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the menu should offer %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "Toggle wrap") {
+		t.Errorf("the view toggles belong to the menu bar now:\n%s", view)
 	}
 	// It has to land just under the pointer, not merely exist: same column, one row down
 	// so the clicked text stays readable. The editor receives the click pane-relative, so
@@ -2397,10 +2408,11 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 		t.Fatalf("esc should dismiss the menu, top is %T", model.(core.Router).Top())
 	}
 
-	// The sidebar is not the editor: its panels never claimed the right button.
+	// The sidebar is not the editor: empty sidebar space raises nothing (a doc row raises
+	// the docs menu instead — docsmenu_test.go).
 	drive(right(5, 15))
 	if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
-		t.Fatalf("a right click in the sidebar should raise nothing, top is %T", model.(core.Router).Top())
+		t.Fatalf("a right click on empty sidebar space should raise nothing, top is %T", model.(core.Router).Top())
 	}
 }
 

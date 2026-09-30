@@ -82,6 +82,8 @@ type homeScreen struct {
 	bottomVisible        bool
 	header               *headerPanel // the layout's breadcrumb leaf; nil in minimal mode
 	statusSpans          []statusSpan // the status bar's clickable items, as last rendered
+	rightClickX          int          // where the last right press landed (docsmenu.go)
+	rightClickY          int
 	bottomFraction       float64
 	bottom               *bottomDock
 	diagnostics          *diagnosticsPanel
@@ -175,6 +177,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	s.docsPanel = components.NewCompactListPanel(s.docRows(c), "Docs", components.ListPanelOpts{
 		OnSelect:  s.pickDoc,
 		OnKey:     s.docsKey,
+		OnPointer: s.docsPointer,
 		Border:    true,
 		Selection: sidebarSelection,
 	})
@@ -323,6 +326,7 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 		return s, act
 	}
 	s.notePane()
+	s.noteRightClick(msg)
 	if act, handled := s.statusBarInput(sh, msg); handled {
 		return s, act
 	}

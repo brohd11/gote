@@ -205,6 +205,10 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		editors := components.LayoutNode{ID: "editors", Axis: components.LayoutHorizontal,
 			Children: []components.LayoutNode{leaf(s.editorPanel)}}
 		if panel := s.previewTarget(); panel != nil {
+			// Under the tab bar, not the header rule: the pane needs its own top edge.
+			frame := s.columnFrame()
+			frame.Top = components.TopBox
+			panel.SetFrame(frame)
 			editors.Children = append(editors.Children, leaf(panel))
 		}
 		main.Children = append(main.Children, components.LayoutNode{ID: "documents", Axis: components.LayoutVertical,

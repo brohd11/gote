@@ -32,6 +32,7 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 		Include:    s.includeDoc(c),
 		OnSelect:   func(sh *core.Shared, e components.FileEntry) core.Action { return s.openDoc(sh, e.Path) },
 		OnKey:      s.fileKey,
+		OnPointer:  s.filePointer,
 		OnError:    func(_ *core.Shared, err error) core.Action { return core.Push(errPopup("open folder", err)) },
 	}
 }
