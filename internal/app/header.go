@@ -27,7 +27,8 @@ func (p *headerPanel) View(bool) string {
 }
 
 // joinRule renders a width-cell rule in the border color, with ┬ over every cell of below
-// (the rendered row under the rule) that carries a line upward, so dividers meet it.
+// (the rendered row under the rule) that carries a line upward, so dividers meet it; at
+// either end that is a corner, capping a box whose top the rule is.
 func joinRule(width int, below string) string {
 	if width <= 0 {
 		return ""
@@ -42,7 +43,14 @@ func joinRule(width int, below string) string {
 			break
 		}
 		if strings.ContainsRune("│┃├┤┼┴└┘╰╯", r) {
-			cells[x] = '┬'
+			switch x {
+			case 0:
+				cells[x] = '┌'
+			case width - 1:
+				cells[x] = '┐'
+			default:
+				cells[x] = '┬'
+			}
 		}
 		x += ansi.StringWidth(string(r))
 	}

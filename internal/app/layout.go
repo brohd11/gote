@@ -171,6 +171,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	}
 	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
 	if panels := s.sideColumnPanels(); len(panels) > 0 {
+		s.frameSidebar(panels)
 		children := make([]components.LayoutNode, 0, len(panels))
 		for _, panel := range panels {
 			children = append(children, leaf(panel))
@@ -229,6 +230,27 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	}
 	opts.Resize = &components.ResizeOpts{State: s.resizeState(), OnChange: s.saveResize}
 	return components.NewModularLayout(root, opts)
+}
+
+// frameSidebar stacks the side column's frames into one box: the header's rule (or a box
+// top without one) caps the first, each later pane tees off the one above, and only the
+// last closes the bottom.
+func (s *homeScreen) frameSidebar(panels []components.Panel) {
+	for i, panel := range panels {
+		f, ok := panel.(interface{ SetFrame(components.FrameStyle) })
+		if !ok {
+			continue
+		}
+		// Only the legend shows focus: the edges meet the header rule, which never lights up.
+		frame := components.TitledFrame{Top: components.TopTee, Bottom: i == len(panels)-1, Focus: components.FocusLegend}
+		if i == 0 {
+			frame.Top = components.TopNone
+			if s.header == nil {
+				frame.Top = components.TopBox
+			}
+		}
+		f.SetFrame(frame)
+	}
 }
 
 // resizeState maps gote's pane identities onto ModularScreen's positional state; the side
