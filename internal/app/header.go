@@ -23,38 +23,58 @@ func (p *headerPanel) SetSize(w, _ int) { p.w = w }
 
 func (p *headerPanel) View(bool) string {
 	crumbs := []core.Crumb{{Full: p.host.CrumbLabel(false), Short: p.host.CrumbLabel(true)}}
-	return core.RenderBreadcrumb(crumbs, p.w) + "\n" + joinRule(p.w, "")
+	return core.RenderBreadcrumb(crumbs, p.w) + "\n" + joinRule(p.w, "", "")
 }
 
-// joinRule renders a width-cell rule in the border color, with ┬ over every cell of below
-// (the rendered row under the rule) that carries a line upward, so dividers meet it; at
-// either end that is a corner, capping a box whose top the rule is.
-func joinRule(width int, below string) string {
+// joinRule renders a width-cell rule in the border color that the lines around it meet:
+// a cell gets an arm up where the row above (rendered) carries a line down into it, and an
+// arm down where the row below carries one up. Mid-rule that is ┬ ┴ ┼; at either end it is
+// the matching corner or tee, so the rule can be the top or the shared edge of a box.
+func joinRule(width int, above, below string) string {
 	if width <= 0 {
 		return ""
 	}
+	up := armCells(above, width, "│┃├┤┼┬┌┐╭╮")
+	down := armCells(below, width, "│┃├┤┼┴└┘╰╯")
 	cells := make([]rune, width)
-	for i := range cells {
-		cells[i] = '─'
+	for x := range cells {
+		// Glyphs indexed by [up][down] for the left end, the middle and the right end.
+		glyphs := [3][2][2]rune{
+			{{'─', '┌'}, {'└', '├'}},
+			{{'─', '┬'}, {'┴', '┼'}},
+			{{'─', '┐'}, {'┘', '┤'}},
+		}
+		pos := 1
+		switch x {
+		case 0:
+			pos = 0
+		case width - 1:
+			pos = 2
+		}
+		cells[x] = glyphs[pos][b2i(up[x])][b2i(down[x])]
 	}
+	return lipgloss.NewStyle().Foreground(core.BorderColor).Render(string(cells))
+}
+
+// armCells marks the cells of row (ANSI and all) holding one of glyphs, over width cells.
+func armCells(row string, width int, glyphs string) []bool {
+	arms := make([]bool, width)
 	x := 0
-	for _, r := range ansi.Strip(below) {
+	for _, r := range ansi.Strip(row) {
 		if x >= width {
 			break
 		}
-		if strings.ContainsRune("│┃├┤┼┴└┘╰╯", r) {
-			switch x {
-			case 0:
-				cells[x] = '┌'
-			case width - 1:
-				cells[x] = '┐'
-			default:
-				cells[x] = '┬'
-			}
-		}
+		arms[x] = strings.ContainsRune(glyphs, r)
 		x += ansi.StringWidth(string(r))
 	}
-	return lipgloss.NewStyle().Foreground(core.BorderColor).Render(string(cells))
+	return arms
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // headerHeight is the body rows the header leaf takes above the panes: 0 without one.
@@ -63,6 +83,21 @@ func (s *homeScreen) headerHeight() int {
 		return 0
 	}
 	return headerRows
+}
+
+// joinDockRule redraws the open dock's top edge against the rows on either side, so the
+// columns above close onto it and its own sides meet it. A no-op without the dock.
+func (s *homeScreen) joinDockRule(sh *core.Shared, body string) string {
+	if !s.bottomVisible {
+		return body
+	}
+	r := s.bottom.y - sh.BodyY()
+	lines := strings.Split(body, "\n")
+	if r < 1 || r+1 >= len(lines) {
+		return body
+	}
+	lines[r] = joinRule(s.w, lines[r-1], lines[r+1])
+	return strings.Join(lines, "\n")
 }
 
 // joinHeaderRule redraws the header's rule row in body against the row below it. A
@@ -75,6 +110,6 @@ func (s *homeScreen) joinHeaderRule(body string) string {
 	if len(lines) <= headerRows {
 		return body
 	}
-	lines[headerRows-1] = joinRule(s.w, lines[headerRows])
+	lines[headerRows-1] = joinRule(s.w, "", lines[headerRows])
 	return strings.Join(lines, "\n")
 }

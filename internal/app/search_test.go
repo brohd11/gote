@@ -97,7 +97,9 @@ func TestResolveSearchRoot(t *testing.T) {
 	}
 }
 
-func TestBottomDockUsesBottomBorderForTabs(t *testing.T) {
+// TestBottomDockSwitchesPanels: the dock shows only its active panel (its tabs live in
+// the status bar), and left/right switch panels and focus.
+func TestBottomDockSwitchesPanels(t *testing.T) {
 	diagnostics := newDiagnosticsPanel(nil)
 	diagnostics.entries = []diagnosticEntry{{diagnostic: lspDiagnostic{Message: "problem"}}}
 	diagnostics.reflow()
@@ -112,11 +114,8 @@ func TestBottomDockUsesBottomBorderForTabs(t *testing.T) {
 	if lipgloss.Height(view) != 8 || !strings.Contains(rows[0], "Diagnostics (1)") {
 		t.Fatalf("diagnostics title or dock height changed:\n%s", view)
 	}
-	if !strings.Contains(rows[len(rows)-1], "Diag") || !strings.Contains(rows[len(rows)-1], "Search") {
-		t.Fatalf("compact tabs are not on the bottom border:\n%s", view)
-	}
-	if !strings.Contains(rows[len(rows)-1], "─") {
-		t.Fatalf("tabs should replace only their part of the bottom edge:\n%s", view)
+	if strings.Contains(rows[len(rows)-1], "Diag") {
+		t.Fatalf("the dock's tabs moved to the status bar, not its bottom border:\n%s", view)
 	}
 
 	dock.UpdatePanel(nil, keyMsg("right"))
@@ -127,9 +126,9 @@ func TestBottomDockUsesBottomBorderForTabs(t *testing.T) {
 	if !strings.Contains(strings.Split(view, "\n")[0], "Search (1)") {
 		t.Fatalf("search title should remain on the top edge:\n%s", view)
 	}
-	dock.UpdatePanel(nil, tea.MouseClickMsg{X: 2, Y: 7, Button: tea.MouseLeft})
-	if dock.active != bottomDiagnostics {
-		t.Fatal("clicking the bottom Diag tab should activate diagnostics")
+	dock.UpdatePanel(nil, keyMsg("left"))
+	if dock.active != bottomDiagnostics || !diagnostics.Focused() {
+		t.Fatal("left should switch back to diagnostics")
 	}
 }
 

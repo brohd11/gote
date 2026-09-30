@@ -81,6 +81,7 @@ type homeScreen struct {
 	gitDocs              docsGit
 	bottomVisible        bool
 	header               *headerPanel // the layout's breadcrumb leaf; nil in minimal mode
+	statusSpans          []statusSpan // the status bar's clickable items, as last rendered
 	bottomFraction       float64
 	bottom               *bottomDock
 	diagnostics          *diagnosticsPanel
@@ -210,6 +211,11 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	}
 	s.diagnostics = newDiagnosticsPanel(s.activateDiagnostic)
 	s.search = newSearchPanel(s.activateSearchResult)
+	// Titleless and unlit: the dock's top row is a rule the panes above join
+	// (joinDockRule), and its tabs and focus show in the status bar.
+	for _, p := range []*components.ScrollContainer{s.diagnostics.ScrollContainer, s.search.ScrollContainer} {
+		p.SetFrame(components.SideFrame{Top: components.TopBox, Bottom: true})
+	}
 	s.bottom = newBottomDock(s.diagnostics, s.search)
 	s.modular = s.buildModular()
 	return s
@@ -317,6 +323,9 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 		return s, act
 	}
 	s.notePane()
+	if act, handled := s.statusBarInput(sh, msg); handled {
+		return s, act
+	}
 	if act, handled := s.documentTabInput(sh, msg); handled {
 		return s, s.finishHomeUpdate(sh, act)
 	}
@@ -497,7 +506,7 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 // minimal mode the body's last row takes the status.
 func (s *homeScreen) View(sh *core.Shared) string {
 	s.refreshOpenTabs(sh)
-	body := s.joinHeaderRule(s.modular.View(sh))
+	body := s.joinDockRule(sh, s.joinHeaderRule(s.modular.View(sh)))
 	if s.minimal {
 		body = statusOver(sh, body, s.h)
 	}
@@ -508,7 +517,7 @@ func (s *homeScreen) View(sh *core.Shared) string {
 }
 
 func (s *homeScreen) HelpView(sh *core.Shared) string {
-	return statusRow(sh)
+	return s.statusBar(sh)
 }
 
 func (s *homeScreen) SetSize(sh *core.Shared, width, bodyHeight int) {

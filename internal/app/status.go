@@ -8,7 +8,7 @@ import (
 // The status line, drawn by gote rather than the router: the router's status row takes a
 // row from the body, so panes would jump on each message. With ChromeMask.Status set, the
 // screen paints it into space the frame already reserves:
-//   - into the screen's own one-row status row, drawn as its help bar (statusRow), or
+//   - into the middle of the status bar, drawn as its help bar (statusbar.go), or
 //   - over the body's last row when that row is masked away (statusOver).
 //
 // Every screen that masks the status must use one of these, or messages are lost.
@@ -28,15 +28,6 @@ func statusLine(sh *core.Shared) string {
 		clamp = clamp.MaxWidth(w)
 	}
 	return clamp.Render(line)
-}
-
-// statusRow is the one-row status line the home screen draws in the help bar's place.
-// It is always one row, blank without a message, so a message never resizes the body.
-func statusRow(sh *core.Shared) string {
-	if line := statusLine(sh); line != "" {
-		return line
-	}
-	return " " // vheight("") is 0: the row must exist even when empty
 }
 
 // statusOver paints the status over the body's last row (minimal mode, no status row),

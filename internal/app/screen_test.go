@@ -804,11 +804,11 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		t.Fatalf("alt chords should be spelled \"alt+\" throughout, not ⌥:\n%s", help)
 	}
 
-	// The help bar's place is the one-row status line, with no hints on it. Checked with
-	// the docs list focused, the state that used to carry the most.
+	// The help bar's place is the one-row status bar, with no key hints on it. Checked
+	// with the docs list focused, the state that used to carry the most.
 	bar := stripANSI(s.HelpView(sh))
-	if lipgloss.Height(bar) != 1 || strings.TrimSpace(bar) != "" {
-		t.Fatalf("the help bar should be just the (empty) status row, got %q", bar)
+	if lipgloss.Height(bar) != 1 || strings.Contains(bar, "select") || strings.Contains(bar, "ctrl+") {
+		t.Fatalf("the help bar should be just the status bar, got %q", bar)
 	}
 }
 
@@ -1533,8 +1533,8 @@ func TestMinimalFrame(t *testing.T) {
 	if !strings.Contains(ordLines[0], "docs") {
 		t.Fatalf("the ordinary launch's top row should be the breadcrumb, got %q", ordLines[0])
 	}
-	if last := ordLines[len(ordLines)-1]; strings.TrimSpace(last) != "" {
-		t.Fatalf("the ordinary launch's last row should be the empty status row, got %q", last)
+	if last := ordLines[len(ordLines)-1]; !strings.HasPrefix(last, " ≡ ▁") {
+		t.Fatalf("the ordinary launch's last row should be the status bar, got %q", last)
 	}
 	if !strings.Contains(ordLines[len(ordLines)-2], "└") {
 		t.Fatalf("the row above the status row should be the panes' bottom border, got %q", ordLines[len(ordLines)-2])

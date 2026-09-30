@@ -94,7 +94,7 @@ func TestBottomTogglePreservesEditorAndSplit(t *testing.T) {
 	if !s.bottomVisible || !s.editorPanel.Focused() || ed.CursorPosition() != before || ed.Text() != text {
 		t.Fatal(`alt+\ changed editor state or focus`)
 	}
-	if !strings.Contains(s.View(sh), "Diagnostics") {
+	if !strings.Contains(s.View(sh), "No diagnostics.") { // the dock is titleless now
 		t.Fatal("bottom missing from view")
 	}
 	s.modular.Nudge(0, -3)

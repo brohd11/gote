@@ -122,10 +122,11 @@ func (p *entryList[T]) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, b
 		return core.Action{}, false
 	}
 	if click, ok := msg.(tea.MouseClickMsg); ok {
-		// Inside the frame: one border cell plus one padding cell on each side.
-		if click.Button == tea.MouseLeft && click.Mod == 0 && click.X >= 2 && click.X < p.width-2 && click.Y >= 1 && click.Y < p.height-1 {
-			row := click.Y - 1 + p.ScrollOffset()
-			if row >= 0 && row < len(p.owners) && p.owners[row] >= 0 && click.X-2 < ansi.StringWidth(p.lines[row]) {
+		// Inside the frame's content area (ContentRect), whatever frame the host set.
+		cx, cy, cw, ch := p.ContentRect()
+		if click.Button == tea.MouseLeft && click.Mod == 0 && click.X >= cx && click.X < cx+cw && click.Y >= cy && click.Y < cy+ch {
+			row := click.Y - cy + p.ScrollOffset()
+			if row >= 0 && row < len(p.owners) && p.owners[row] >= 0 && click.X-cx < ansi.StringWidth(p.lines[row]) {
 				p.selectEntry(p.owners[row])
 				return p.activate(sh), true
 			}

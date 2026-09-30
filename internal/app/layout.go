@@ -170,6 +170,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		header.Size, header.FixedSize = headerRows, true
 	}
 	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
+	s.previewPanel.SetFrame(s.columnFrame())
 	if panels := s.sideColumnPanels(); len(panels) > 0 {
 		s.frameSidebar(panels)
 		children := make([]components.LayoutNode, 0, len(panels))
@@ -234,7 +235,8 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 
 // frameSidebar stacks the side column's frames into one box: the header's rule (or a box
 // top without one) caps the first, each later pane tees off the one above, and only the
-// last closes the bottom.
+// last closes the bottom — unless the dock is open, whose rule closes the column.
+// frameColumn is the same cap for the preview pane, a column of one.
 func (s *homeScreen) frameSidebar(panels []components.Panel) {
 	for i, panel := range panels {
 		f, ok := panel.(interface{ SetFrame(components.FrameStyle) })
@@ -242,15 +244,23 @@ func (s *homeScreen) frameSidebar(panels []components.Panel) {
 			continue
 		}
 		// Only the legend shows focus: the edges meet the header rule, which never lights up.
-		frame := components.TitledFrame{Top: components.TopTee, Bottom: i == len(panels)-1, Focus: components.FocusLegend}
-		if i == 0 {
-			frame.Top = components.TopNone
-			if s.header == nil {
-				frame.Top = components.TopBox
-			}
+		frame := s.columnFrame()
+		frame.Bottom = frame.Bottom && i == len(panels)-1
+		if i > 0 {
+			frame.Top = components.TopTee
 		}
 		f.SetFrame(frame)
 	}
+}
+
+// columnFrame is the frame for the top of a column that runs down to the dock or the
+// bottom of the screen.
+func (s *homeScreen) columnFrame() components.TitledFrame {
+	frame := components.TitledFrame{Top: components.TopNone, Bottom: !s.bottomVisible, Focus: components.FocusLegend}
+	if s.header == nil {
+		frame.Top = components.TopBox
+	}
+	return frame
 }
 
 // resizeState maps gote's pane identities onto ModularScreen's positional state; the side
