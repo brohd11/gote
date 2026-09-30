@@ -362,6 +362,9 @@ func (s *homeScreen) previewMenuItems() []components.MenuItem {
 		row(previewModeOff, "Off", "", 'o'),
 		row(previewModeSide, "Side by side", hint(previewKey), 's'),
 		row(previewModeFull, "Full", hint(fullPreviewKey), 'f'),
+		{Separator: true},
+		{Label: checked(s.editor.LiveRender(), "Live"), Hint: hint(livePreviewKey), Key: 'l',
+			Pick: menuPick(2, func(*core.Shared) core.Action { return s.toggleLivePreview() })},
 	}
 }
 

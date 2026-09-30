@@ -80,6 +80,17 @@ func (s *homeScreen) previewScreen() *components.DocScreen {
 	})
 }
 
+// toggleLivePreview is alt+m: the editor renders markdown in place, showing source only on
+// the caret's line, the selection and search hits. A per-document toggle like wrap; a
+// rename out of markdown drops the renderer with the highlighter, so nothing enforces it.
+func (s *homeScreen) toggleLivePreview() core.Action {
+	if !s.previewable() {
+		return core.Action{}
+	}
+	s.editor.SetLiveRender(!s.editor.LiveRender())
+	return core.Action{}
+}
+
 // toggleFullPreview is alt+p: the reader takes the editor pane or gives it back. Nothing is
 // pushed, so the sidebar works while it is up (a picked doc opens into the preview).
 func (s *homeScreen) toggleFullPreview() core.Action {

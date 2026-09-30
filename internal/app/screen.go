@@ -27,6 +27,8 @@ var (
 	// The reader has its own key rather than a third ctrl+p state: it is a mode you stay in.
 	// It covers the editor, not the app. alt+p because terminals deliver ctrl+shift+p as "P".
 	fullPreviewKey = key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "full preview"))
+	// Live preview renders markdown in the editor itself, per document like wrap.
+	livePreviewKey = key.NewBinding(key.WithKeys("alt+m"), key.WithHelp("alt+m", "live preview"))
 	// alt+z, not ctrl+w: ctrl+w is the editor's own delete-word-back (and readline's),
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey       = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
@@ -300,6 +302,8 @@ func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 		return s.cyclePreview
 	case core.MatchKey(k, fullPreviewKey):
 		return s.toggleFullPreview
+	case core.MatchKey(k, livePreviewKey):
+		return s.toggleLivePreview
 	// esc closes the reader ahead of the panes, whose Pop the router would clamp away at
 	// the root. A list's /-filter keeps its own esc.
 	case s.fullPreview != nil && core.MatchKey(k, core.Keys.Back) && !s.modular.Filtering():

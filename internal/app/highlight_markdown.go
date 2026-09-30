@@ -10,6 +10,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/text"
 )
 
@@ -25,6 +26,10 @@ var (
 	mdListStyle     lipgloss.Style
 )
 
+// mdPalette is the palette the styles above came from; live preview derives its own
+// styles from it per parse (live_markdown.go).
+var mdPalette syntaxPalette
+
 // mdStyle IDs index mdStyles (0 is unstyled), so grouping compares IDs rather than
 // lipgloss.Style values.
 const (
@@ -36,6 +41,14 @@ const (
 	mdStyleQuote
 	mdStyleLink
 	mdStyleList
+
+	// Live preview only, resolved through liveStyles rather than mdStyles.
+	mdStyleH1
+	mdStyleH2
+	mdStyleH3
+	mdStyleCodeSpan
+	mdStyleLiveStrong
+	mdStyleLiveEm
 )
 
 // Pointers, freshly allocated on every rebuild: see chromaStyles for why a span holds a
@@ -51,6 +64,7 @@ func applyMarkdownPalette(p syntaxPalette) {
 	mdQuoteStyle = lipgloss.NewStyle().Foreground(p.mdQuote)
 	mdLinkStyle = lipgloss.NewStyle().Foreground(p.mdLink).Underline(true)
 	mdListStyle = lipgloss.NewStyle().Foreground(p.mdList).Bold(true)
+	mdPalette = p
 
 	mdStyles = []*lipgloss.Style{
 		mdStyleNone:     nil, // the unstyled run
@@ -79,6 +93,17 @@ type markdownHighlighter struct {
 	intervals [][]mdInterval  // per line, in discovery order
 	spans     [][]editor.Span // the baked answer; nil per unstyled line
 	restart   []int           // nearest block opener usable for a preview parse
+
+	// Live preview (live_markdown.go): per-line markup ops, live-only style intervals,
+	// and the baked display with its rune → source-column map. nil rows render as source.
+	ops           [][]liveOp
+	liveIntervals [][]mdInterval
+	live          [][]editor.Span
+	liveCols      [][]int
+	liveStyles    map[int]*lipgloss.Style    // live-only styles for this parse (newLiveStyles)
+	pairStyles    map[[2]int]*lipgloss.Style // resolved (block, inline) pairs
+	fills         []liveFill                 // rows drawn as a rule to the render width
+	glyphs        [][]editor.Glyph           // bullets kept while a row shows its source
 }
 
 var _ editor.HighlightRestartProvider = (*markdownHighlighter)(nil)
@@ -106,7 +131,9 @@ func (m *markdownHighlighter) Parse(doc string) {
 		m.restart[row] = row
 	}
 
-	root := goldmark.New().Parser().Parse(text.NewReader(m.src))
+	m.liveIntervals = make([][]mdInterval, len(m.lines))
+
+	root := goldmark.New(goldmark.WithExtensions(extension.Table)).Parser().Parse(text.NewReader(m.src))
 	ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
@@ -164,6 +191,8 @@ func (m *markdownHighlighter) Parse(doc string) {
 		return ast.WalkContinue, nil
 	})
 	m.bake()
+	m.collectLive(root)
+	m.bakeLive()
 }
 
 // HighlightLine returns the baked spans for row — covering the line in full —
@@ -302,12 +331,40 @@ func (m *markdownHighlighter) fencedLastRow(v *ast.FencedCodeBlock) int {
 	return m.rowOf(v.Pos()) + 1
 }
 
+// fenceCloserRow is the row of v's closing fence, when it has one: the row after the body
+// holding a run of the opener's marker (past any quote prefix).
+func (m *markdownHighlighter) fenceCloserRow(v *ast.FencedCodeBlock) (int, bool) {
+	pos := v.Pos()
+	if pos < 0 {
+		return 0, false
+	}
+	open, row := m.rowOf(pos), m.fencedLastRow(v)
+	if row <= open || row >= len(m.lines) {
+		return 0, false
+	}
+	marker := "`"
+	if i := strings.IndexAny(m.lines[open], "`~"); i >= 0 {
+		marker = m.lines[open][i : i+1]
+	}
+	t := strings.TrimLeft(strings.TrimSpace(m.lines[row]), "> ")
+	if !strings.HasPrefix(t, strings.Repeat(marker, 3)) || strings.Trim(t, marker) != "" {
+		return 0, false
+	}
+	return row, true
+}
+
 // lastRow is the deepest row a container block reaches, from its descendant blocks
 // (inline children are skipped; they panic on Lines()).
 func (m *markdownHighlighter) lastRow(n ast.Node) int {
 	last := m.rowOf(n.Pos())
 	if ls := n.Lines(); ls.Len() > 0 {
 		last = m.rowOf(ls.At(ls.Len()-1).Stop - 1)
+	}
+	if f, ok := n.(*ast.FencedCodeBlock); ok {
+		// Lines() stops at the body; the closing fence is the block's too.
+		if r, ok := m.fenceCloserRow(f); ok {
+			last = max(last, r)
+		}
 	}
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 		if c.Type() != ast.TypeBlock {

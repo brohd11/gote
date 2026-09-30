@@ -123,6 +123,9 @@ func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
 		{Label: "Full preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
 			return core.Seq(core.Pop(), s.toggleFullPreview())
 		}},
+		{Label: "Toggle live preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
+			return core.Seq(core.Pop(), s.toggleLivePreview())
+		}},
 		{Label: "Toggle wrap", Pick: func(*core.Shared) core.Action {
 			s.editor.ToggleWrap()
 			return core.Pop()

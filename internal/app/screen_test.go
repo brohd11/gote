@@ -2335,7 +2335,7 @@ func TestHomeEditorContextItems(t *testing.T) {
 	// Minimal mode has no menu bar, so everything stays on the right-click menu.
 	s.minimal = true
 	rows := s.editorContextItems(sh)
-	want := []string{"Toggle preview", "Full preview", "Toggle wrap", "Toggle line numbers", "Show outline", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
+	want := []string{"Toggle preview", "Full preview", "Toggle live preview", "Toggle wrap", "Toggle line numbers", "Show outline", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
 	if len(rows) != len(want) {
 		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
 	}
@@ -2348,18 +2348,18 @@ func TestHomeEditorContextItems(t *testing.T) {
 		}
 	}
 
-	// The scratch buffer is previewable; a .txt doc is not. Both preview rows are gated.
-	if rows[0].Disabled || rows[1].Disabled {
+	// The scratch buffer is previewable; a .txt doc is not. All three preview rows are gated.
+	if rows[0].Disabled || rows[1].Disabled || rows[2].Disabled {
 		t.Error("the scratch buffer is markdown-previewable, so the rows should be live")
 	}
 	s.currentPath = filepath.Join(t.TempDir(), "notes.txt")
 	muted := s.editorContextItems(sh)
-	if !muted[0].Disabled || !muted[1].Disabled {
+	if !muted[0].Disabled || !muted[1].Disabled || !muted[2].Disabled {
 		t.Error("the preview rows should be muted for a document the preview refuses")
 	}
 
 	before := s.editor.WrapMode()
-	if act := rows[2].Pick(sh); act.Msg == nil {
+	if act := rows[3].Pick(sh); act.Msg == nil {
 		t.Error("a row's Pick must pop the menu itself")
 	}
 	if s.editor.WrapMode() == before {
