@@ -86,24 +86,31 @@ func (s *homeScreen) pickDoc(sh *core.Shared, it list.Item) core.Action {
 }
 
 // openDoc switches the editor pane to path and focuses it. An open doc is just switched
-// to, keeping its edits, caret and history (editors read their file only once).
+// to, keeping its edits, caret, history and mode (editors read their file only once).
 func (s *homeScreen) openDoc(sh *core.Shared, path string) core.Action {
+	return s.openDocAs(sh, path, false)
+}
+
+// openDocAs is openDoc, putting a markdown doc in Reader first when reader is set.
+func (s *homeScreen) openDocAs(sh *core.Shared, path string, reader bool) core.Action {
 	c := Of(sh)
 	if owner := c.groupFor(path); owner != nil {
 		s.activateGroup(owner)
 	}
 	s.invalidateDocumentTools()
 	// Asked before OpenDoc, which registers the doc. A newly opened doc must be seeded by hand
-	// while the reader holds the pane (seedForPreview).
+	// when it opens in the reader (seedForPreview).
 	_, was := c.Doc(path)
 	ed := c.OpenDoc(path, s.editorOpts(c))
+	if reader && previewablePath(path) {
+		c.setReader(ed, true)
+	}
 	s.seedForPreview(ed, path, !was || c.unread(path))
 	s.currentID, s.currentPath, s.currentName = path, path, docName(path)
 	c.SetActive(s.currentID)
 	s.editor = ed
 	s.configureSignColumns()
-	// paneChild rather than SetChild: with the reader up, a pick opens INTO the preview —
-	// the pane keeps a reader, rebuilt around the doc that was just picked.
+	// paneChild rather than SetChild: a doc in Reader shows its reader.
 	cmd := s.paneChild()
 	// After the swap, so the layout enforcePreview rebuilds is sized around the new buffer.
 	cmd = tea.Batch(cmd, s.enforcePreview())
@@ -202,6 +209,10 @@ func (s *homeScreen) submitRename(sh *core.Shared, doc DocFile, rel, name string
 			c.SetActive(path)
 			// A rename can take a file out of markdown under a live preview.
 			act.Cmd = tea.Batch(act.Cmd, s.enforcePreview())
+		} else if !previewablePath(path) {
+			// A background doc's group repaints through needsRefresh (rekeyGroups).
+			c.setReader(ed, false)
+			ed.SetLiveRender(false)
 		}
 	}
 	return core.Seq(core.Pop(), act, core.PropagateAll(ReseedMsg{}))

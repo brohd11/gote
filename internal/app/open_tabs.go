@@ -128,7 +128,7 @@ func (s *homeScreen) refreshGroupTabs(sh *core.Shared) {
 		if ed, ok := c.buffer(doc.ID); ok && ed != nil && ed.ChangeMark() != "" {
 			marks = append(marks, strings.TrimSpace(ed.ChangeMark()))
 		}
-		if doc.ID == s.currentID && s.fullPreview != nil {
+		if ed, ok := c.buffer(doc.ID); ok && c.inReader(ed) {
 			marks = append(marks, "[P]")
 		}
 		marker := ""

@@ -189,7 +189,7 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 
 	// With the preview present, setPreview focuses the editor. Its trailing edge
 	// is the editor/preview flex seam, whose ratio must survive both column toggles.
-	s.setPreview(previewPane)
+	s.setSidePreview(true)
 	s.modular.SetResizing(true)
 	s.modular.Nudge(7, 0)
 	s.modular.SetResizing(false)
@@ -197,9 +197,9 @@ func TestHomeResizeStateSurvivesRebuilds(t *testing.T) {
 		t.Fatalf("saved editor flex share = %g, want greater than half", s.editorFlex)
 	}
 	wantFlex := s.editorFlex
-	s.setPreview(previewOff)
+	s.setSidePreview(false)
 	s.setSidebar(false)
-	s.setPreview(previewPane)
+	s.setSidePreview(true)
 	state = s.modular.ResizeState()
 	if weights := state.Splits["editors"].Weights; len(weights) != 2 || math.Abs(weights[0]/(weights[0]+weights[1])-wantFlex) > 1e-9 {
 		t.Fatalf("editor flex after rebuilds = %v, want leading share %g", weights, wantFlex)
@@ -452,9 +452,9 @@ func TestCtrlNLeavesFullPreviewForNewEditor(t *testing.T) {
 	s, sh := newHome(t)
 	s.Update(sh, keyMsg("ctrl+n"))
 	s.Update(sh, keyMsg("# first"))
-	s.Update(sh, altP)
+	s.toggleFullPreview()
 	if s.fullPreview == nil {
-		t.Fatal("setup: alt+p should put the reader in the editor pane")
+		t.Fatal("setup: the reader should be in the editor pane")
 	}
 
 	s.Update(sh, keyMsg("ctrl+n"))
@@ -545,34 +545,33 @@ func TestEscOverExitPromptStillCancels(t *testing.T) {
 	}
 }
 
-// TestPreviewCycle walks ctrl+p through its two rungs: off → the live side pane →
-// off. Both are layout changes, so neither shows up as a navigation Action.
-func TestPreviewCycle(t *testing.T) {
+// TestSidePreviewToggle: the side preview is a chrome column, toggled like the outline.
+// Neither toggle navigates or moves focus, and ctrl+p no longer does anything.
+func TestSidePreviewToggle(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 
-	ctrlP := keyMsg("ctrl+p")
-
+	if s.Update(sh, keyMsg("ctrl+p")); s.sidePreview {
+		t.Fatal("ctrl+p should no longer open the side preview")
+	}
 	for _, step := range []struct {
-		mode    int
-		legend  bool // is the pane's border title on screen?
+		on      bool
 		summary string
 	}{
-		{previewPane, true, "the first ctrl+p opens the pane"},
-		{previewOff, false, "the second closes the cycle"},
+		{true, "the first toggle opens the pane"},
+		{false, "the second closes it"},
 	} {
-		_, act := s.Update(sh, ctrlP)
-		if s.preview != step.mode {
-			t.Fatalf("%s: mode is %d, want %d", step.summary, s.preview, step.mode)
+		act := s.toggleSidePreview(sh)
+		if s.sidePreview != step.on {
+			t.Fatalf("%s: side preview = %v", step.summary, s.sidePreview)
 		}
-		// Every rung is a layout change now — nothing touches the router's stack.
 		if got := msgType(act); got != "" {
 			t.Fatalf("%s: expected no navigation, got %s", step.summary, got)
 		}
 		v := stripANSI(s.View(sh))
-		if got := strings.Contains(v, "preview"); got != step.legend {
+		if got := strings.Contains(v, "Preview"); got != step.on {
 			t.Fatalf("%s: pane legend on screen = %v, want %v, render:\n%s",
-				step.summary, got, step.legend, v)
+				step.summary, got, step.on, v)
 		}
 		if got := focusedPane(s, sh); got != "editor" {
 			t.Fatalf("%s: toggling the preview must not move focus, got %s", step.summary, got)
@@ -589,12 +588,12 @@ func TestPreviewReopenRerenders(t *testing.T) {
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	s.Update(sh, keyMsg("# Title"))
 
-	s.Update(sh, keyMsg("ctrl+p")) // open
+	s.toggleSidePreview(sh) // open
 	if v := stripANSI(s.View(sh)); !strings.Contains(v, "Title") {
 		t.Fatalf("the pane should have rendered, got:\n%s", v)
 	}
-	s.Update(sh, keyMsg("ctrl+p")) // close
-	s.Update(sh, keyMsg("ctrl+p")) // open again, same buffer
+	s.toggleSidePreview(sh) // close
+	s.toggleSidePreview(sh) // open again, same buffer
 	if v := stripANSI(s.View(sh)); !strings.Contains(v, "Title") {
 		t.Fatalf("the reopened pane should have rendered without an edit, got:\n%s", v)
 	}
@@ -669,7 +668,7 @@ func TestHomeLeavesCtrlWToTheEditor(t *testing.T) {
 }
 
 // TestHomeLeavesClipboardChordsToTheEditor: ctrl+c/ctrl+x/ctrl+v are the editor's clipboard
-// verbs, so gote's own keys (alt+z wrap, alt+p full preview) must not grow into them.
+// verbs, so gote's own keys (alt+z wrap, alt+p side preview) must not grow into them.
 // The cut is the observable half — the clipboard write itself is async and would shell out
 // to pbcopy, so the returned command is left unrun.
 func TestHomeLeavesClipboardChordsToTheEditor(t *testing.T) {
@@ -841,7 +840,7 @@ func TestMinimalEditorSearchKeepsTitleRow(t *testing.T) {
 func TestPreviewPaneTracksEdits(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, keyMsg("ctrl+p"))
+	s.setSidePreview(true)
 
 	s.Update(sh, keyMsg("# Title"))
 	v := stripANSI(s.View(sh))
@@ -869,7 +868,7 @@ func TestPreviewFollowsEditorScroll(t *testing.T) {
 	// Typed with real Enters — rune input carries no newlines, and a file load is a
 	// cmd no test runs.
 	typeMarkdownBullets(s, sh, 200)
-	s.Update(sh, keyMsg("ctrl+p"))
+	s.setSidePreview(true)
 
 	// Typing left the caret (and so the view) at the buffer's end; the pane opens
 	// synced to that, not parked at the top.
@@ -927,7 +926,7 @@ func TestPreviewScrollsByHand(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 	typeMarkdownBullets(s, sh, 60)
-	s.Update(sh, keyMsg("ctrl+p"))
+	s.setSidePreview(true)
 
 	// The preview column: the sidebar owns x<30 and the editor and preview split what is
 	// left of the 100 cells, putting the pane's left edge at 65.
@@ -1011,7 +1010,7 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 		type_("```")
 		type_("")
 	}
-	s.Update(sh, keyMsg("ctrl+p"))
+	s.setSidePreview(true)
 
 	wheel := func(btn tea.MouseButton, n int) {
 		for ; n > 0; n-- {
@@ -1072,9 +1071,8 @@ func TestPreviewScrollIsExactNotProportional(t *testing.T) {
 	}
 }
 
-// altP is the full-screen reader's key. A terminal cannot deliver ctrl+shift+p — v1
-// bubbletea attaches shift to navigation keys only — so alt+p is what opens the reader.
-var altP = keyMsg("alt+p")
+// ctrlP cycles the current doc's mode: off → live → reader → off.
+var ctrlP = keyMsg("ctrl+p")
 
 // TestReaderRendersLiveBuffer: the reader renders the LIVE buffer, not a snapshot
 // taken when it was built.
@@ -1093,19 +1091,19 @@ func TestReaderRendersLiveBuffer(t *testing.T) {
 	}
 }
 
-// TestReaderCloses: alt+p and esc both put the editor back in its pane. The
+// TestReaderCloses: ctrl+p (reader → off) and esc both put the editor back in its pane. The
 // reader is the pane's CHILD, not a pushed screen, so closing it is a change to this
 // screen's own state — which is why the home screen claims esc rather than letting the
 // pane answer it with a pop the router would clamp away at the root.
 func TestReaderCloses(t *testing.T) {
-	for _, key := range []tea.KeyPressMsg{altP, keyMsg("esc")} {
+	for _, key := range []tea.KeyPressMsg{ctrlP, keyMsg("esc")} {
 		s, sh := newHome(t)
 		s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
 		s.Update(sh, keyMsg("# Title"))
 
-		s.Update(sh, altP)
+		s.toggleFullPreview()
 		if s.fullPreview == nil {
-			t.Fatal("alt+p should put the reader in the editor pane")
+			t.Fatal("setup: the reader should be in the editor pane")
 		}
 		if _, a := s.Update(sh, key); msgType(a) == "core.pushMsg" || msgType(a) == "core.popMsg" {
 			t.Errorf("%s should close the reader in place, not navigate (%s)", key, msgType(a))
@@ -1121,15 +1119,16 @@ func TestReaderCloses(t *testing.T) {
 	}
 }
 
-// TestReaderKeepsTheSidebar is what alt+p was changed FOR: the reader covers the editor
-// and nothing else, so the sidebar is still drawn beside it, still toggles, and a doc
-// picked from it opens INTO the preview rather than kicking the reader out.
+// TestReaderKeepsTheSidebar is what the reader was changed FOR: the reader covers the editor
+// and nothing else, so the sidebar is still drawn beside it and still toggles. Reader is
+// the doc's mode, so a pick shows the picked doc in its own mode and coming back finds
+// the reader again.
 func TestReaderKeepsTheSidebar(t *testing.T) {
 	dir := t.TempDir()
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(dir, "a.md"))
 	s.Update(sh, keyMsg("# Title"))
-	s.Update(sh, altP)
+	s.toggleFullPreview()
 
 	view := stripANSI(s.View(sh))
 	if !strings.Contains(view, "Docs") || !strings.Contains(view, "a.md") {
@@ -1148,98 +1147,134 @@ func TestReaderKeepsTheSidebar(t *testing.T) {
 	}
 	s.Update(sh, keyMsg(`alt+|`))
 
-	// A doc picked while the reader is up is READ, not edited: the pane keeps a reader and
-	// the new buffer is seeded synchronously, since the editor is out of the tree and its
-	// async load would reach nothing.
+	s.openDoc(sh, filepath.Join(dir, "b.md"))
+	if s.fullPreview != nil {
+		t.Fatal("a doc never put in Reader should show its editor")
+	}
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+	if s.fullPreview == nil || s.docMode() != docModeReader {
+		t.Fatal("a.md should still be in Reader when switched back to")
+	}
+}
+
+// TestLinkOpensInReader: a doc opened from a rendered link lands in Reader — a new buffer
+// seeded synchronously (its editor is out of the tree, so the async load would reach
+// nothing), and an already-open one switched out of its mode.
+func TestLinkOpensInReader(t *testing.T) {
+	dir := t.TempDir()
+	s, sh := newHome(t)
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+
 	other := filepath.Join(dir, "b.md")
 	if err := os.WriteFile(other, []byte("- from disk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.openDoc(sh, other)
-	if s.fullPreview == nil {
-		t.Fatal("picking a doc should open it into the preview, not close it")
+	link := components.Link{Path: other, Exists: true}
+	s.previewLinks().Text(sh, link)
+	if s.currentPath != other || s.fullPreview == nil {
+		t.Fatal("the link target should open in the reader")
 	}
 	if got := s.editor.Text(); got != "- from disk" {
-		t.Fatalf("the picked doc should have been seeded from disk, got %q", got)
+		t.Fatalf("the target should have been seeded from disk, got %q", got)
 	}
 	if v := stripANSI(s.View(sh)); !strings.Contains(v, "• from disk") {
-		t.Fatalf("the reader should follow the pick, frame:\n%s", v)
+		t.Fatalf("the reader should show the target, frame:\n%s", v)
+	}
+
+	// Already open, in Live: the link still takes it to Reader.
+	s.toggleFullPreview()
+	s.setDocMode(docModeLive)
+	if s.docMode() != docModeLive {
+		t.Fatalf("setup: b.md should be in Live, got %d", s.docMode())
+	}
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+	s.previewLinks().Text(sh, link)
+	if s.docMode() != docModeReader {
+		t.Fatalf("a link to an open doc should switch it to Reader, got %d", s.docMode())
+	}
+	// Leaving the reader returns to the mode underneath.
+	s.toggleFullPreview()
+	if s.docMode() != docModeLive {
+		t.Errorf("leaving Reader should return to Live, got %d", s.docMode())
 	}
 }
 
-// TestReaderRestoresTheSidePane: the two previews are mutually exclusive — alt+p folds a
-// live ctrl+p column away and puts it back on the way out, so the reader is a look at the
-// document rather than a rearrangement of the layout.
-func TestReaderRestoresTheSidePane(t *testing.T) {
+// TestSidePreviewIsChrome: the side preview stays up whatever the doc's mode, and over a
+// doc it cannot render it says so rather than closing, so the layout holds still.
+func TestSidePreviewIsChrome(t *testing.T) {
+	dir := t.TempDir()
 	s, sh := newHome(t)
-	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+	s.Update(sh, keyMsg("# Title"))
+	s.toggleSidePreview(sh)
 
-	s.Update(sh, keyMsg("ctrl+p"))
-	if s.preview != previewPane {
-		t.Fatal("ctrl+p should open the side pane")
+	s.toggleFullPreview()
+	if !s.sidePreview || s.previewTarget() == nil {
+		t.Fatal("the reader should leave the side preview up")
 	}
-	s.Update(sh, altP)
-	if s.preview != previewOff {
-		t.Error("the reader should fold the side pane away")
+	s.openDoc(sh, filepath.Join(dir, "a.go"))
+	s.refreshPreview() // Update's once-per-message refresh
+	if !s.sidePreview {
+		t.Fatal("a doc that cannot be previewed should not close the side preview")
 	}
-	s.Update(sh, altP)
-	if s.preview != previewPane {
-		t.Error("closing the reader should put the side pane back")
+	if v := stripANSI(s.View(sh)); !strings.Contains(v, noPreview) {
+		t.Fatalf("the side preview should say it cannot preview a .go file, frame:\n%s", v)
 	}
-	// ctrl+p is the side pane's key, so it takes the editor back from the reader rather
-	// than opening a second preview beside it: the pane it folded away comes back and the
-	// cycle then steps that pane off, leaving neither preview up.
-	s.Update(sh, altP)
-	s.Update(sh, keyMsg("ctrl+p"))
-	if s.fullPreview != nil {
-		t.Error("ctrl+p should hand the editor back before touching the side pane")
-	}
-	if s.preview != previewOff {
-		t.Errorf("ctrl+p should step the restored pane off, got %d", s.preview)
-	}
-
-	// And a reader opened with no pane up leaves none behind.
-	s.Update(sh, altP)
-	s.Update(sh, altP)
-	if s.preview != previewOff {
-		t.Errorf("no pane was up, so none should come back, got %d", s.preview)
+	s.openDoc(sh, filepath.Join(dir, "a.md"))
+	s.refreshPreview()
+	if v := stripANSI(s.View(sh)); strings.Contains(v, noPreview) || s.docMode() != docModeReader {
+		t.Fatalf("back on a.md the pane should render and the doc still be in Reader, frame:\n%s", v)
 	}
 }
 
-// TestFullPreviewKey: alt+p puts the reader in the editor pane over a markdown doc, and
-// does nothing at all over a file its renderer would mangle — the same gate ctrl+p uses.
-// Nothing is pushed either way: the reader is a pane child, so the stack never moves.
-func TestFullPreviewKey(t *testing.T) {
+// TestDocModeKey: ctrl+p cycles a markdown doc off → live → reader → off, and does nothing
+// at all over a file its renderer would mangle. Nothing is pushed: the reader is a pane
+// child, so the stack never moves. alt+p toggles the side preview on any doc.
+func TestDocModeKey(t *testing.T) {
 	s, sh := newHomeCfg(t, testConfig(), Options{})
 	dir := t.TempDir()
 
 	s.openDoc(sh, filepath.Join(dir, "a.md"))
-	if _, a := s.Update(sh, altP); msgType(a) == "core.pushMsg" {
-		t.Error("the reader should not be pushed onto the stack")
+	for _, want := range []int{docModeLive, docModeReader, docModeOff} {
+		if _, a := s.Update(sh, ctrlP); msgType(a) == "core.pushMsg" {
+			t.Error("the reader should not be pushed onto the stack")
+		}
+		if s.docMode() != want {
+			t.Fatalf("ctrl+p reached mode %d, want %d", s.docMode(), want)
+		}
+		if (s.fullPreview != nil) != (want == docModeReader) {
+			t.Fatalf("mode %d: reader in the pane = %v", want, s.fullPreview != nil)
+		}
 	}
-	if s.fullPreview == nil {
-		t.Error("alt+p should open the reader on a markdown doc")
+	if s.editor.LiveRender() {
+		t.Error("cycling to Off should clear Live too")
 	}
-	s.Update(sh, altP)
 
 	s.openDoc(sh, filepath.Join(dir, "a.go"))
-	if _, a := s.Update(sh, altP); msgType(a) != "" {
-		t.Errorf("alt+p should do nothing on a .go file, got %q", msgType(a))
+	if _, a := s.Update(sh, ctrlP); msgType(a) != "" {
+		t.Errorf("ctrl+p should do nothing on a .go file, got %q", msgType(a))
 	}
-	if s.fullPreview != nil {
-		t.Error("alt+p should refuse a file the renderer would mangle")
+	if s.fullPreview != nil || s.editor.LiveRender() {
+		t.Error("ctrl+p should refuse a file the renderer would mangle")
+	}
+	s.Update(sh, keyMsg("alt+p"))
+	if !s.sidePreview {
+		t.Error("alt+p should open the side preview, even on a .go file")
+	}
+	s.Update(sh, keyMsg("alt+p"))
+	if s.sidePreview {
+		t.Error("a second alt+p should close the side preview")
 	}
 }
 
 // TestEnforcePreviewClosesTheReader: a save-as (or a rename) can take the open document
-// out of markdown underneath the reader, and the reader must go with it — the same rule
-// that closes the ctrl+p pane.
+// out of markdown underneath the reader, and the doc's modes must go with it.
 func TestEnforcePreviewClosesTheReader(t *testing.T) {
 	s, sh := newHome(t)
 	s.openDoc(sh, filepath.Join(t.TempDir(), "a.md"))
-	s.Update(sh, altP)
+	s.toggleFullPreview()
 	if s.fullPreview == nil {
-		t.Fatal("alt+p should open the reader")
+		t.Fatal("setup: the reader should open")
 	}
 
 	s.currentPath = filepath.Join(t.TempDir(), "a.txt")
@@ -1700,7 +1735,7 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	s.openDoc(sh, oldPath)
 	oldEditor := s.editor
 	s.Update(sh, keyMsg("unsaved"))
-	s.preview = previewPane
+	s.sidePreview = true
 
 	if act := s.requestVaultSwitch(sh, "notes"); msgType(act) != "core.pushMsg" {
 		t.Fatalf("dirty switch should push the unsaved popup, got %s", msgType(act))
@@ -1722,8 +1757,8 @@ func TestVaultSwitchGatesDirtyBufferThenResetsSession(t *testing.T) {
 	if s.editor == oldEditor || s.editor.Dirty() || s.currentPath != "" {
 		t.Fatal("confirmed switch should install a fresh clean scratch editor")
 	}
-	if s.preview != previewOff || !s.sidebar || s.minimal {
-		t.Fatalf("switch layout = preview %d sidebar %v minimal %v", s.preview, s.sidebar, s.minimal)
+	if s.sidePreview || !s.sidebar || s.minimal {
+		t.Fatalf("switch layout = side preview %v sidebar %v minimal %v", s.sidePreview, s.sidebar, s.minimal)
 	}
 	view := stripANSI(s.View(sh))
 	if !strings.Contains(view, "vault.md") || strings.Contains(view, "old.md") || strings.Contains(view, "(*)") {
@@ -2320,50 +2355,36 @@ func TestReselectOpenDocKeepsBuffer(t *testing.T) {
 	}
 }
 
-// TestHomeEditorContextItems: gote's rows on the shared editor's right-click menu. The
-// preview row is gated the same way ctrl+p is, so it must go muted for a document the
-// preview refuses.
+// TestHomeEditorContextItems: gote's rows on the shared editor's right-click menu are only
+// the language-server requests at the click. Minimal mode keeps Hover info alone, since the
+// others can navigate away from its one file; with no server there is nothing to add.
 func TestHomeEditorContextItems(t *testing.T) {
 	s, sh := newHome(t)
-
-	// With the menu bar, the view rows all moved to View and Options; with no language
-	// server ready here, gote adds nothing to the editor's own clipboard rows.
-	if bar := s.editorContextItems(sh); len(bar) != 0 {
-		t.Fatalf("right-click rows with a menu bar = %v", menuLabels(bar))
-	}
-
-	// Minimal mode has no menu bar, so everything stays on the right-click menu.
-	s.minimal = true
-	rows := s.editorContextItems(sh)
-	want := []string{"Toggle preview", "Full preview", "Toggle live preview", "Toggle wrap", "Toggle line numbers", "Show outline", "Toggle diagnostics panel", "Toggle diagnostics gutter", "Toggle git gutter", "Restart language servers"}
-	if len(rows) != len(want) {
-		t.Fatalf("editorContextItems returned %d rows, want %d", len(rows), len(want))
-	}
-	for i, label := range want {
-		if rows[i].Label != label {
-			t.Errorf("row %d is %q, want %q", i, rows[i].Label, label)
-		}
-		if rows[i].Hint != "" {
-			t.Errorf("row %d carries hint %q; the menu dispatches no accelerators", i, rows[i].Hint)
+	for _, minimal := range []bool{false, true} {
+		s.minimal = minimal
+		if rows := s.editorContextItems(sh); len(rows) != 0 {
+			t.Fatalf("minimal=%v: right-click rows with no language server = %v", minimal, menuLabels(rows))
 		}
 	}
 
-	// The scratch buffer is previewable; a .txt doc is not. All three preview rows are gated.
-	if rows[0].Disabled || rows[1].Disabled || rows[2].Disabled {
-		t.Error("the scratch buffer is markdown-previewable, so the rows should be live")
-	}
-	s.currentPath = filepath.Join(t.TempDir(), "notes.txt")
-	muted := s.editorContextItems(sh)
-	if !muted[0].Disabled || !muted[1].Disabled || !muted[2].Disabled {
-		t.Error("the preview rows should be muted for a document the preview refuses")
-	}
-
-	before := s.editor.WrapMode()
-	if act := rows[3].Pick(sh); act.Msg == nil {
-		t.Error("a row's Pick must pop the menu itself")
-	}
-	if s.editor.WrapMode() == before {
-		t.Error("the wrap row should have toggled the editor's wrap mode")
+	ls, lsh := completionHomeFor(t, "main.go")
+	for _, step := range []struct {
+		minimal bool
+		want    []string
+	}{
+		{true, []string{"Hover info"}},
+		{false, []string{"Hover info", "Go to definition", "Find references"}},
+	} {
+		ls.minimal = step.minimal
+		rows := ls.editorContextItems(lsh)
+		if got := menuLabels(rows); !reflect.DeepEqual(got, step.want) {
+			t.Errorf("minimal=%v: rows = %v, want %v", step.minimal, got, step.want)
+		}
+		for _, row := range rows {
+			if row.Hint != "" {
+				t.Errorf("%q carries hint %q; the menu dispatches no accelerators", row.Label, row.Hint)
+			}
+		}
 	}
 }
 
@@ -2692,4 +2713,39 @@ func TestEscReturnsToTheDockWithoutOpeningTheSidebar(t *testing.T) {
 	if s.sidebar {
 		t.Fatal("the dock was a pane to hand the keys to; esc should not have reopened the sidebar")
 	}
+}
+
+// setSidePreview shows or hides the side preview and relays out around the editor.
+func (s *homeScreen) setSidePreview(on bool) {
+	s.sidePreview = on
+	s.relayout()
+}
+
+// TestCloseDropsReader: Reader belongs to the buffer, so closing it forgets the mark.
+func TestCloseDropsReader(t *testing.T) {
+	s, sh := newHome(t)
+	path := filepath.Join(t.TempDir(), "a.md")
+	s.openDoc(sh, path)
+	ed := s.editor
+	s.toggleFullPreview()
+	c := Of(sh)
+	if !c.inReader(ed) {
+		t.Fatal("setup: the buffer should be marked in Reader")
+	}
+	c.CloseDoc(path)
+	if c.inReader(ed) || len(c.readerDocs) != 0 {
+		t.Fatal("closing the buffer should drop its Reader mark")
+	}
+}
+
+// toggleFullPreview puts the current doc in Reader or returns it to the mode under it —
+// what ctrl+p reaches in two or three presses, in one.
+func (s *homeScreen) toggleFullPreview() core.Action {
+	if s.readerOn() {
+		return s.setReader(false)
+	}
+	if !s.previewable() {
+		return core.Action{}
+	}
+	return s.setReader(true)
 }

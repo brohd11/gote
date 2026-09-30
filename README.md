@@ -48,7 +48,7 @@ are ignored.
 **Alt+9 / Alt+0** switch to the previous/next open document while editing
 within the active editor group. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
 show `(*)` for unsaved changes, `(!)` for changes on disk, `(!*)` for both, and
-`[P]` on the current document in full preview. The same change markers appear in
+`[P]` on documents in Reader mode. The same change markers appear in
 the editor title in single-file mode.
 
 **Alt+T** moves the current tab right. At the rightmost group it creates a
@@ -63,16 +63,28 @@ An emptied group closes automatically. **Actions → Editor groups → Close edi
 remaining tabs to a neighbor. Group tabs, selections, widths, and the active group
 restore with the project or vault; unsaved buffers are not restored.
 
-The Markdown side preview follows the active document. Full preview replaces only
-that group's editor. **Live preview** (`alt+m`, or View → Preview → Live) renders
+Each Markdown document has a **doc mode**, kept for as long as its buffer is open:
+**Off** (syntax highlighting), **Live** or **Reader**. `ctrl+p` cycles them
+(off → live → reader → off), and View → Preview → Doc sets any of them (grayed out on non-Markdown files). Reader replaces only that document's
+editor; `esc` leaves it for the mode it had before. New
+documents start in the **default mode**, `default_doc_mode: off` or `live` in
+`config.yml` (also View → Preview → Default, which writes the file and applies to
+documents opened afterwards). A document opened from a link in rendered Markdown opens
+in Reader.
+
+The **side preview** (`alt+p`, or View → Preview → Side by side) is a column beside the editors that
+renders the active document whatever its mode, Reader included. On a file it cannot
+render it shows "Could not preview", so switching documents never moves the layout.
+
+**Live preview** renders
 Markdown inside the editor itself: headings lose their `#`, bullets and task boxes become
 glyphs, emphasis, code and link markup is hidden, and tables line up. Lines never re-flow.
 The caret's line, any selected lines and lines with search hits show their source, so
 editing always happens on the raw text; a list bullet stays drawn there unless the caret
 or selection touches its marker. Rendered lines use the full preview's theme palette
-(headings, links, code chips, quote bars and rules match alt+p), while source lines keep
+(headings, links, code chips, quote bars and rules match the reader), while source lines keep
 the `md_*` syntax colors, and rules span the pane. Fenced blocks that name a language are
-highlighted like the preview's while live preview is on; plain editing keeps one code color. Like wrap, it is a per-document toggle. Tab bars remain visible when the split closes. Splits are
+highlighted like the preview's while live preview is on; plain editing keeps one code color. It is one of the per-document modes above. Tab bars remain visible when the split closes. Splits are
 unavailable in minimal single-file mode. **Actions → Editor groups** also provides both move actions and group closing.
 
 When the terminal regains focus, gote checks loaded open documents for changes on
@@ -81,14 +93,14 @@ where possible and clearing undo history. Dirty buffers keep your edits. Saving
 checks the file again and asks for acknowledgement before overwriting external
 changes (or recreating a deleted file). Cancelling keeps your buffer and its marker.
 Click a tab to open it; overflow arrows scroll the bar without changing documents.
-Tabs replace the filename header in the editor and full preview.
+Tabs replace the filename header in the editor and the reader.
 The bar remains visible with the sidebar hidden. Single-file mode starts minimal.
 
 Unfocused editors keep their syntax colors and hide the caret. Their scrollbars and
 selected tab backgrounds use the muted theme color; the focused group keeps the accent.
 
 `esc` toggles between the editor and the pane you were last in. Leaving the editor hands
-the keys back to the docs list, the outline, the preview column or the
+the keys back to the docs list, the outline, the side preview or the
 bottom panel — whichever held them last — and `esc` there returns to the editor. With
 nothing yet to remember, and when the remembered pane has since been closed, it falls back
 to the docs list; with the sidebar hidden and nowhere else to go, it brings the sidebar
@@ -235,8 +247,9 @@ original action. Alt+D and the editor's word-motion shortcuts keep their existin
 
 In Actions, **LSP** contains diagnostics, the outline, the diagnostics gutter, references,
 formatting, and language-server restart. **Editor Settings** contains the open-document
-list/tab switch and the git gutter. The editor context menu also provides the gutter
-toggles and language-server restart. Which of the two columns a launch *starts* with is
+list/tab switch and the git gutter. The editor's right-click menu holds only the clipboard
+and Hover info, Go to definition and Find references at the click (single-file mode keeps
+just Hover info, since the others can leave the file). Which of the two columns a launch *starts* with is
 `default_git_gutter` and `default_diagnostics_gutter` in the config section for its mode:
 
 ```yaml
@@ -359,8 +372,7 @@ single_file_mode:
 ```
 
 With `allow_panel_toggle: false` (the default) the launch is taken at its word: `alt+\`,
-`alt+shift+o` and `ctrl+alt+f` do nothing, and the panel rows leave the Actions and right-click
-menus. Find in files is locked with them because a result opens the bottom panel whether
+`alt+shift+o` and `ctrl+alt+f` do nothing. Find in files is locked with them because a result opens the bottom panel whether
 or not it was asked for. The `?` overlay still lists every locked key, marked off and
 naming the setting — a binding that silently vanished would read as a bug rather than a
 choice. Set it to `true` and `alt+shift+o` adds the outline and `alt+\` the diagnostics panel,
@@ -372,7 +384,7 @@ and going through it re-asks all four questions against `project_mode` below.
 
 `gote -P <my/file.md>`
 
-Open a markdown file straight into the full-screen reader, with the rest of the interface out of the way.
+Open a markdown file straight into Reader mode, with the rest of the interface out of the way.
 `esc` drops into the editor. Preview only works for `md` files, otherwise just launches gote.
 
 

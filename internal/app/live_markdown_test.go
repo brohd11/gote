@@ -106,16 +106,19 @@ func TestLiveMarkdownSourceColumns(t *testing.T) {
 
 func TestLivePreviewToggleIsMarkdownOnly(t *testing.T) {
 	s, sh := newHome(t)
-	s.Update(sh, tuitest.KeyMsg("alt+m"))
-	if !s.editor.LiveRender() {
-		t.Fatal("alt+m on the markdown scratch buffer should turn live preview on")
+	if s.Update(sh, tuitest.KeyMsg("alt+m")); s.editor.LiveRender() {
+		t.Fatal("alt+m is retired; ctrl+p cycles the doc mode")
 	}
-	s.Update(sh, tuitest.KeyMsg("alt+m"))
+	s.setDocMode(docModeLive)
+	if !s.editor.LiveRender() {
+		t.Fatal("Live on the markdown scratch buffer should turn live preview on")
+	}
+	s.setDocMode(docModeOff)
 	if s.editor.LiveRender() {
-		t.Fatal("a second alt+m should turn it off")
+		t.Fatal("Off should turn it off")
 	}
 	s.currentPath = "notes.txt"
-	s.Update(sh, tuitest.KeyMsg("alt+m"))
+	s.setDocMode(docModeLive)
 	if s.editor.LiveRender() {
 		t.Fatal("live preview is markdown-only")
 	}

@@ -445,8 +445,8 @@ func TestRestoreSessionAbsentInstallsScratch(t *testing.T) {
 }
 
 // A restored buffer sits in the open set without having read its file, which is a state
-// that could not previously exist. Opening one while the full-screen reader holds the
-// pane must still seed it: the reader would otherwise swallow the editor's asynchronous
+// that could not previously exist. Opening one into Reader (from a link) must still
+// seed it: the reader would otherwise swallow the editor's asynchronous
 // load, leaving an empty buffer aimed at a file that is not empty — and the first save
 // would truncate it. That is the loss seedForPreview exists to prevent.
 func TestRestoredBufferIsSeededUnderTheReader(t *testing.T) {
@@ -474,12 +474,11 @@ func TestRestoredBufferIsSeededUnderTheReader(t *testing.T) {
 	}
 	s.editor.SetText(string(b))
 
-	s.Update(sh, altP)
+	// A link opens its target in Reader, so the unread buffer never reaches the tree.
+	s.openDocAs(sh, first, true)
 	if s.fullPreview == nil {
-		t.Fatal("setup: alt+p should put the reader in the editor pane")
+		t.Fatal("setup: the link should open the target in the reader")
 	}
-
-	s.openDoc(sh, first)
 	want, err := os.ReadFile(first)
 	if err != nil {
 		t.Fatal(err)

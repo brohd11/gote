@@ -248,9 +248,9 @@ func TestBottomLayoutModesAndMenus(t *testing.T) {
 	path, _ := seedDoc(t, s, sh, "doc.md", "# text")
 	s.openDoc(sh, path)
 	for _, sidebar := range []bool{true, false} {
-		for _, preview := range []int{previewOff, previewPane} {
+		for _, preview := range []bool{false, true} {
 			s.setSidebar(sidebar)
-			s.setPreview(preview)
+			s.setSidePreview(preview)
 			if !s.bottomVisible {
 				s.toggleBottom(sh)
 			}
@@ -269,16 +269,6 @@ func TestBottomLayoutModesAndMenus(t *testing.T) {
 	if s.diagnostics.width != 60 || !s.bottomVisible {
 		t.Fatal("minimal mode lost bottom")
 	}
-	for _, item := range s.editorViewItems(sh) {
-		if item.Label == "Toggle diagnostics panel" {
-			act := item.Pick(sh)
-			if s.bottomVisible || act.Msg == nil {
-				t.Fatal("menu toggle must close panel and dismiss menu")
-			}
-			return
-		}
-	}
-	t.Fatal("missing diagnostics menu")
 }
 
 func TestDiagnosticsSortSeverityAtPosition(t *testing.T) {

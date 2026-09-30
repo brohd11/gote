@@ -54,17 +54,18 @@ func TestSingleFilePanelLockKeys(t *testing.T) {
 		t.Errorf("a locked launch opened a panel anyway: bottom=%v outline=%v",
 			s.bottomVisible, s.outlineVisible)
 	}
-	// ctrl+p is deliberately NOT locked: the preview is the editor's own reader, and
-	// --preview is a single-file feature. Checked on markdown, since previewable() refuses
-	// anything else whatever the lock says.
+	// ctrl+p is deliberately NOT locked: the reader is the doc's own mode, and --preview is
+	// a single-file feature. Checked on markdown, since previewable() refuses anything else
+	// whatever the lock says.
 	md := filepath.Join(t.TempDir(), "notes.md")
 	if err := os.WriteFile(md, []byte("# hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	reader, rsh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: md})
-	reader.Update(rsh, keyMsg("ctrl+p"))
-	if reader.preview == previewOff {
-		t.Error("ctrl+p should still cycle the preview under the panel lock")
+	reader.Update(rsh, ctrlP)
+	reader.Update(rsh, ctrlP)
+	if reader.fullPreview == nil {
+		t.Error("ctrl+p should still reach the reader under the panel lock")
 	}
 }
 
@@ -85,30 +86,6 @@ func TestSingleFilePanelUnlockKeys(t *testing.T) {
 	}
 }
 
-// TestSingleFilePanelLockMenus: the rows the lock takes away are omitted from the menu,
-// and the rows beside them are untouched.
-func TestSingleFilePanelLockMenus(t *testing.T) {
-	locked, lsh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: soloFile(t)})
-	labels := contextLabels(locked, lsh)
-	for _, gone := range []string{"Show outline", "Hide outline", "Toggle diagnostics panel"} {
-		if hasLabel(labels, gone) {
-			t.Errorf("the right-click menu still offers %q under the lock: %v", gone, labels)
-		}
-	}
-	for _, kept := range []string{"Toggle preview", "Toggle wrap", "Toggle git gutter"} {
-		if !hasLabel(labels, kept) {
-			t.Errorf("the lock removed %q, which is not a panel: %v", kept, labels)
-		}
-	}
-
-	// Unlocked, every removed row comes back.
-	open, osh := newHomeCfg(t, minimalCfg(), Options{Mode: ModeFile, File: soloFile(t)})
-	if labels := contextLabels(open, osh); !hasLabel(labels, "Show outline") ||
-		!hasLabel(labels, "Toggle diagnostics panel") {
-		t.Errorf("unlocking did not restore the right-click panel rows: %v", labels)
-	}
-}
-
 // TestSingleFileAllowLSP: default_allow_lsp: false denies the launch a manager, which is
 // the same state auto-lsp: false produces — so every LSP-derived row falls away from the
 // right-click menu with it.
@@ -123,16 +100,8 @@ func TestSingleFileAllowLSP(t *testing.T) {
 		t.Error("a launch with no manager has nothing to draw in the diagnostics column")
 	}
 
-	labels := contextLabels(s, sh)
-	for _, gone := range []string{"Hover info", "Go to definition", "Find references",
-		"Format document", "Toggle diagnostics gutter", "Restart language servers"} {
-		if hasLabel(labels, gone) {
-			t.Errorf("the right-click menu still offers %q with no manager: %v", gone, labels)
-		}
-	}
-	// The git column is not an LSP feature and must survive.
-	if !hasLabel(labels, "Toggle git gutter") {
-		t.Error("the git gutter row should survive a launch with no language server")
+	if labels := contextLabels(s, sh); len(labels) != 0 {
+		t.Errorf("the right-click menu should add nothing with no manager: %v", labels)
 	}
 
 	// The project section still speaks for a project launch.

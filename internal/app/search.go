@@ -211,13 +211,14 @@ func (s *homeScreen) finishFindFiles(result findFilesResult) {
 }
 
 func (s *homeScreen) activateSearchResult(sh *core.Shared, entry searchEntry) core.Action {
-	preview := s.closeFullPreview()
 	jump := s.jumpToLocation(sh, lspLocation{Path: entry.path, Range: protocol.Range{
 		Start: protocol.Position{Line: entry.line, Character: entry.start},
 		End:   protocol.Position{Line: entry.line, Character: entry.end},
 	}})
+	// After the jump: a target doc in Reader leaves it so the location shows.
+	preview := s.closeFullPreview()
 	focus := core.Async(s.modular.FocusSlot(s.editorSlot()))
-	return core.Seq(preview, jump, focus)
+	return core.Seq(jump, preview, focus)
 }
 
 func searchFiles(ctx context.Context, root, query string, snapshots map[string]string, limit int) ([]searchEntry, bool, error) {

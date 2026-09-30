@@ -30,8 +30,7 @@ type editorGroup struct {
 	editor                              *editor.Screen
 	editorPanel                         *groupPanel
 	openTabs                            *documentTabBar
-	fullPreview                         *components.DocScreen
-	previewPrior                        int
+	fullPreview                         *components.DocScreen // the current doc's reader, while it is in Reader
 	gitGutter, diagnosticsGutter        bool
 	gutter                              gutter
 	needsRefresh                        bool
@@ -229,17 +228,7 @@ func (s *homeScreen) activateGroup(g *editorGroup) {
 		return
 	}
 	s.invalidateDocumentTools()
-	hadPreview := s.previewTarget() != nil
-	if s.fullPreview != nil {
-		s.preview = s.previewPrior
-	}
 	s.editorGroup = g
-	if g.fullPreview != nil {
-		g.previewPrior, s.preview = s.preview, previewOff
-	}
-	if hadPreview != (s.previewTarget() != nil) {
-		s.groupLayoutDirty = true
-	}
 	if s.sh != nil {
 		c := Of(s.sh)
 		c.activeGroup = g
@@ -393,10 +382,6 @@ func (s *homeScreen) reconcileGroups(sh *core.Shared) tea.Cmd {
 			cmds = append(cmds, s.withGroup(g, func() tea.Cmd {
 				g.needsRefresh = false
 				g.gutter = gutter{}
-				if !s.previewable() && g.fullPreview != nil {
-					g.fullPreview = nil
-					changed = true
-				}
 				return s.paneChild()
 			}))
 		} else if g.currentPath != "" {

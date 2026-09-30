@@ -51,7 +51,6 @@ func (s *homeScreen) installScratch(c *Ctx) {
 func (s *homeScreen) newUnsavedBuffer(sh *core.Shared) core.Action {
 	c := Of(sh)
 	s.invalidateDocumentTools()
-	closePreview := s.closeFullPreview()
 	if _, tracked := c.buffer(s.currentID); !tracked && s.currentPath == "" && !s.editor.Dirty() {
 		c.trackUnsaved(s.currentID, s.currentName, s.editor)
 	} else {
@@ -61,7 +60,7 @@ func (s *homeScreen) newUnsavedBuffer(sh *core.Shared) core.Action {
 	}
 	s.gutter = gutter{}
 	cmd := tea.Batch(s.paneChild(), s.enforcePreview(), s.modular.FocusSlot(s.editorSlot()))
-	return core.Seq(closePreview, core.Async(cmd))
+	return core.Async(cmd)
 }
 
 // promoteEditedScratch retains the startup/after-close scratch as soon as an actual
@@ -77,18 +76,13 @@ func (s *homeScreen) promoteEditedScratch(sh *core.Shared) {
 	c.trackUnsaved(s.currentID, s.currentName, s.editor)
 }
 
-// editorContextItems are gote's view toggles on the editor's right-click menu, rebuilt per
-// press so Disabled tracks the document (the preview is markdown-only). Picks pop the
+// editorContextItems are gote's rows on the editor's right-click menu, after its clipboard
+// rows: the language-server requests that act on what was clicked (a right press has
+// already moved the caret there). Everything else is a key chord or the menu bar. Minimal
+// mode keeps only Hover info: definition and references can navigate away from the one
+// file it edits. Omitted when no server can answer, to keep the menu short. Picks pop the
 // menu; no Hints, since the menu dispatches no accelerators.
 func (s *homeScreen) editorContextItems(sh *core.Shared) []components.MenuItem {
-	return append(s.editorViewItems(sh), s.editorLanguageItems(sh)...)
-}
-
-// editorLanguageItems are the mouse-driven language-server rows. A right press has
-// already moved the caret to the click, so they act on what was clicked (a hover without
-// motion events, reachable even where modified clicks are eaten). They are omitted when
-// no server can answer, to keep the menu short.
-func (s *homeScreen) editorLanguageItems(sh *core.Shared) []components.MenuItem {
 	if !s.lspFeatureReady(sh) {
 		return nil
 	}
@@ -97,79 +91,13 @@ func (s *homeScreen) editorLanguageItems(sh *core.Shared) []components.MenuItem 
 			return core.Seq(core.Pop(), s.requestAt(sh, kind))
 		}}
 	}
-	items := []components.MenuItem{
-		request("Hover info", lspReqHover),
-		request("Go to definition", lspReqDefinition),
-		request("Find references", lspReqReferences),
-	}
-	// Formatting acts on the document, not the click: the menu bar has it (Options → LSP).
+	items := []components.MenuItem{request("Hover info", lspReqHover)}
 	if s.minimal {
-		items = append(items, request("Format document", lspReqFormat))
+		return items
 	}
-	return items
-}
-
-// Rows the panel lock or LSP gate disable for the whole launch are omitted, as in
-// editorLanguageItems. With a menu bar every one of these rows is the bar's (View,
-// Options → LSP), so only minimal mode, which has no bar, shows them here.
-func (s *homeScreen) editorViewItems(sh *core.Shared) []components.MenuItem {
-	if !s.minimal {
-		return nil // all of these are the menu bar's View and Options
-	}
-	items := []components.MenuItem{
-		{Label: "Toggle preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.cyclePreview())
-		}},
-		{Label: "Full preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.toggleFullPreview())
-		}},
-		{Label: "Toggle live preview", Disabled: !s.previewable(), Pick: func(*core.Shared) core.Action {
-			return core.Seq(core.Pop(), s.toggleLivePreview())
-		}},
-		{Label: "Toggle wrap", Pick: func(*core.Shared) core.Action {
-			s.editor.ToggleWrap()
-			return core.Pop()
-		}},
-		{Label: "Toggle line numbers", Pick: func(*core.Shared) core.Action {
-			s.editor.ToggleLineNums()
-			return core.Pop()
-		}},
-	}
-	if s.panelToggles {
-		outlineLabel := "Show outline"
-		if s.outlineVisible {
-			outlineLabel = "Hide outline"
-		}
-		items = append(items,
-			components.MenuItem{Label: outlineLabel, Pick: func(*core.Shared) core.Action {
-				return core.Seq(core.Pop(), s.toggleOutline(sh))
-			}},
-			components.MenuItem{Label: "Toggle diagnostics panel", Pick: func(*core.Shared) core.Action {
-				return core.Seq(core.Pop(), s.toggleBottom(sh))
-			}})
-	}
-	// The diagnostics column has nothing to draw without a manager; the git column stands
-	// on its own (it is not even gated on being in a repo — see setGitGutter).
-	if lspEnabled(sh) {
-		items = append(items,
-			components.MenuItem{Label: "Toggle diagnostics gutter", Pick: func(*core.Shared) core.Action {
-				s.setDiagnosticsGutter(!s.diagnosticsGutter)
-				return core.Pop()
-			}})
-	}
-	items = append(items,
-		components.MenuItem{Label: "Toggle git gutter", Pick: func(*core.Shared) core.Action {
-			// Seq rather than a bare Pop: turning the column on hands back a baseline
-			// read, and the router collects the cmd lane of every Action in a Seq.
-			return core.Seq(core.Pop(), core.Async(s.setGitGutter(!s.gitGutter)))
-		}})
-	if lspEnabled(sh) {
-		items = append(items,
-			components.MenuItem{Label: "Restart language servers", Pick: func(sh *core.Shared) core.Action {
-				return core.Seq(core.Pop(), s.restartLanguageServers(sh))
-			}})
-	}
-	return items
+	return append(items,
+		request("Go to definition", lspReqDefinition),
+		request("Find references", lspReqReferences))
 }
 
 // editorSaved is the ctrl+s hook: the buffer stays and gote catches up. A save-as rekeys
@@ -242,10 +170,6 @@ func (s *homeScreen) showBuffer(c *Ctx, id string) tea.Cmd {
 	s.configureSignColumns()
 	cmd := s.paneChild()
 	if c.activeGroup != s.editorGroup {
-		if !s.previewable() && s.fullPreview != nil {
-			s.fullPreview = nil
-			return s.paneChild()
-		}
 		return cmd
 	}
 	return tea.Batch(cmd, s.enforcePreview())

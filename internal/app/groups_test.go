@@ -258,17 +258,17 @@ func TestGroupPreviewAndStaleRequests(t *testing.T) {
 	b, _ := seedDoc(t, s, sh, "b.md", "# Right")
 	s.openDoc(sh, b)
 	s.moveTab(sh, 1)
-	s.setPreview(previewPane)
+	s.setSidePreview(true)
 	s.toggleFullPreview()
 	reader := s.fullPreview
 	s.lspRequestID = 42
 	s.openDoc(sh, a)
 	if s.previewTarget() == nil || s.fullPreview != nil || s.lspRequestID != 0 {
-		t.Fatal("focus did not restore shared preview / invalidate request")
+		t.Fatal("focus did not keep the side preview / show a's editor / invalidate request")
 	}
 	s.openDoc(sh, b)
-	if s.fullPreview != reader || s.previewTarget() != nil {
-		t.Fatal("reader state not retained")
+	if s.fullPreview != reader || s.previewTarget() == nil {
+		t.Fatal("b's reader and the side preview should both be retained")
 	}
 	s.applyRequestResult(sh, &lspRequestResult{id: 42, path: b, kind: lspReqFormat, editSeq: s.editor.EditSeq(),
 		edits: []lspTextEdit{{Range: protocol.Range{}, NewText: "WRONG"}}})

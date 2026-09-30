@@ -45,6 +45,9 @@ type Ctx struct {
 	// open owns buffer identities, paths, editors and global opening order.
 	open openSet
 	lsp  *lspManager
+	// readerDocs are the buffers in Reader mode (docmode.go), keyed by editor so the mark
+	// survives a rekey and dies with the buffer.
+	readerDocs map[*editor.Screen]bool
 
 	// activeID is the buffer in the editor pane, kept here because the session save runs
 	// after the screen is gone (see session.go).
@@ -388,6 +391,10 @@ func (c *Ctx) newEditor(opts editor.Opts) *editor.Screen {
 		return core.Pop()
 	}
 	ed = editor.New(opts)
+	// A new doc starts in the configured mode; after this its mode is its own.
+	if c.Config.liveByDefault() && previewablePath(opts.Path) {
+		ed.SetLiveRender(true)
+	}
 	return ed
 }
 
@@ -485,6 +492,9 @@ func (c *Ctx) OpenDocs() []DocFile { return c.open.docs() }
 // CloseDoc removes id from the open set (unknown ids are ignored) and returns the buffer
 // to show next: the one after it, else the last, else "".
 func (c *Ctx) CloseDoc(id string) (next string) {
+	if entry, ok := c.open.get(id); ok {
+		c.setReader(entry.editor, false)
+	}
 	next = c.open.remove(id)
 	if g := c.groupFor(id); g != nil {
 		next = g.remove(id)

@@ -99,9 +99,8 @@ func (s *homeScreen) menuBarKey(sh *core.Shared, current, k string) (core.Action
 }
 
 // The menu bar is where gote's commands live (it replaced the Actions picker); the
-// right-click menu keeps only what acts on the click. Minimal mode has no header, so its
-// right-click menu keeps the view and language-server rows (editorViewItems,
-// editorLanguageItems); otherwise it has only its key chords.
+// right-click menu keeps only what acts on the click (editorContextItems). Minimal mode has
+// no header, so it has only its key chords.
 
 // menuPick wraps run so the pick first closes levels menus (1 for a dropdown row, 2 for a
 // submenu row) and then acts.
@@ -261,7 +260,7 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 
 func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 	items := []components.MenuItem{
-		keyed(submenu(checked(false, "Preview"), !s.previewable(), s.previewMenuItems), 'p'),
+		keyed(submenu(checked(false, "Preview"), false, func() []components.MenuItem { return s.previewMenuItems(sh) }), 'p'),
 		keyed(submenu(checked(false, "Tab Groups"), false, s.tabGroupMenuItems), 't'),
 		keyed(submenu(checked(false, "File view"), !s.sidebar, s.fileViewMenuItems), 'f'),
 		{Separator: true},
@@ -316,55 +315,42 @@ func (s *homeScreen) showDiagnostics(sh *core.Shared) core.Action {
 	return s.toggleBottom(sh)
 }
 
-// Preview modes as the View → Preview submenu offers them.
-const (
-	previewModeOff = iota
-	previewModeSide
-	previewModeFull
-)
-
-// previewMode is the current mode, reading the full reader first: it folds the side pane
-// away while it is up.
-func (s *homeScreen) previewMode() int {
-	switch {
-	case s.fullPreview != nil:
-		return previewModeFull
-	case s.preview == previewPane:
-		return previewModeSide
+// previewMenuItems are View → Preview: the current doc's mode (markdown only), the mode
+// new docs start in (written to config.yml), and the side preview, which is chrome and so
+// available on any doc.
+func (s *homeScreen) previewMenuItems(sh *core.Shared) []components.MenuItem {
+	return []components.MenuItem{
+		keyed(submenu(checked(false, "Doc"), !s.previewable(), s.docModeMenuItems), 'd'),
+		keyed(submenu(checked(false, "Default"), false, func() []components.MenuItem { return s.defaultModeMenuItems(sh) }), 'e'),
+		{Separator: true},
+		{Label: checked(s.sidePreview, "Side by side"), Key: 's', Hint: hint(sidePreviewKey), Pick: menuPick(2, s.toggleSidePreview)},
 	}
-	return previewModeOff
 }
 
-// setPreviewMode moves to mode from any other, through the same paths as ctrl+p and alt+p.
-func (s *homeScreen) setPreviewMode(mode int) core.Action {
-	if mode == s.previewMode() || !s.previewable() {
-		return core.Action{}
-	}
-	if mode == previewModeFull {
-		return s.toggleFullPreview()
-	}
-	act := s.closeFullPreview() // restores the side pane the reader folded away
-	if mode == previewModeSide {
-		s.setPreview(previewPane)
-	} else {
-		s.setPreview(previewOff)
-	}
-	return act
-}
-
-func (s *homeScreen) previewMenuItems() []components.MenuItem {
-	current := s.previewMode()
+// docModeMenuItems are View → Preview → Doc.
+func (s *homeScreen) docModeMenuItems() []components.MenuItem {
+	current := s.docMode()
 	row := func(mode int, label, chord string, accel rune) components.MenuItem {
 		return components.MenuItem{Label: selected(current == mode, label), Hint: chord, Key: accel,
-			Pick: menuPick(2, func(*core.Shared) core.Action { return s.setPreviewMode(mode) })}
+			Pick: menuPick(3, func(*core.Shared) core.Action { return s.setDocMode(mode) })}
 	}
 	return []components.MenuItem{
-		row(previewModeOff, "Off", "", 'o'),
-		row(previewModeSide, "Side by side", hint(previewKey), 's'),
-		row(previewModeFull, "Full", hint(fullPreviewKey), 'f'),
-		{Separator: true},
-		{Label: checked(s.editor.LiveRender(), "Live"), Hint: hint(livePreviewKey), Key: 'l',
-			Pick: menuPick(2, func(*core.Shared) core.Action { return s.toggleLivePreview() })},
+		row(docModeOff, "Off", "", 'o'),
+		row(docModeLive, "Live", "", 'l'),
+		row(docModeReader, "Reader", "", 'r'),
+	}
+}
+
+// defaultModeMenuItems are View → Preview → Default.
+func (s *homeScreen) defaultModeMenuItems(sh *core.Shared) []components.MenuItem {
+	live := Of(sh).Config.liveByDefault()
+	row := func(name, label string, on bool, accel rune) components.MenuItem {
+		return components.MenuItem{Label: selected(on, label), Key: accel,
+			Pick: menuPick(3, func(sh *core.Shared) core.Action { return s.setDefaultDocMode(sh, name) })}
+	}
+	return []components.MenuItem{
+		row(docModeOffName, "Off", !live, 'o'),
+		row(docModeLiveName, "Live", live, 'l'),
 	}
 }
 

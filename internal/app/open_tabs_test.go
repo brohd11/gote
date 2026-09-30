@@ -48,7 +48,7 @@ func TestDocumentTabColorsFollowGroupFocus(t *testing.T) {
 	s.modular.FocusSlot(s.panelSlot(s.docsPane()))
 	assertTabs(nil)
 	s.modular.FocusSlot(s.panelSlot(right.editorPanel))
-	s.setPreview(previewPane)
+	s.setSidePreview(true)
 	s.modular.FocusSlot(s.panelSlot(s.previewPanel))
 	assertTabs(nil)
 	s.toggleBottom(sh)
@@ -145,7 +145,7 @@ func TestOpenTabsGeometryAndFocus(t *testing.T) {
 	s.Update(sh, keyMsg("A"))
 	ed, id, position := s.editor, s.currentID, s.editor.CursorPosition()
 	s.sidebarW = 34
-	s.setPreview(previewPane)
+	s.setSidePreview(true)
 	s.toggleBottom(sh)
 	s.View(sh)
 	if s.openTabs.h != 1 || s.openTabs.x != 34 || s.openTabs.y != sh.BodyY()+headerRows {
@@ -189,8 +189,9 @@ func TestOpenTabsMouseAndPreview(t *testing.T) {
 	}
 	x := s.openTabs.x + strings.Index(row, firstName)
 	model, _ = model.Update(tea.MouseClickMsg{X: x, Y: s.openTabs.y, Button: tea.MouseLeft})
-	if s.currentID != firstID || s.currentID == secondID || s.fullPreview == nil || !s.editorPanel.Focused() {
-		t.Fatal("tab click failed to activate document in reader")
+	// Reader is the second doc's mode, not the pane's: the first shows its editor.
+	if s.currentID != firstID || s.currentID == secondID || s.fullPreview != nil || !s.editorPanel.Focused() {
+		t.Fatal("tab click failed to activate document in its own mode")
 	}
 	// Release and motion from the tab must not start a gesture in the new child.
 	model, _ = model.Update(tea.MouseMotionMsg{X: 50, Y: 10, Button: tea.MouseLeft})

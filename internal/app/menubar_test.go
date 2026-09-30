@@ -90,33 +90,94 @@ func TestHeaderMenuContents(t *testing.T) {
 	}
 }
 
-// TestViewMenuPreviewModes: the Preview submenu checks the current mode, and each row
-// reaches its mode from any other, leaving the menus closed.
+// TestViewMenuPreviewModes: Preview → Doc checks the doc's mode and each row reaches its
+// mode from any other; Side by side toggles the column; the menus close after each pick.
 func TestViewMenuPreviewModes(t *testing.T) {
 	model, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
 	s.newUnsavedBuffer(sh) // a scratch buffer is markdown-previewable
+	names := []string{"Off", "Live", "Reader"}
 	for _, step := range []struct {
 		label string
 		mode  int
 	}{
-		{"Side by side", previewModeSide},
-		{"Full", previewModeFull},
-		{"Side by side", previewModeSide},
-		{"Full", previewModeFull},
-		{"Off", previewModeOff},
+		{"Live", docModeLive},
+		{"Reader", docModeReader},
+		{"Off", docModeOff},
+		{"Reader", docModeReader},
+		{"Live", docModeLive},
 	} {
 		model = openHeaderMenu(t, model, s, sh, "view")
 		model = chooseMenuRow(t, model, "Preview")
+		model = chooseMenuRow(t, model, "Doc")
 		for _, it := range model.(core.Router).Top().(*components.MenuScreen).Items() {
-			if strings.HasPrefix(it.Label, menuRadioMark) != strings.HasSuffix(it.Label, []string{"Off", "Side by side", "Full"}[s.previewMode()]) {
+			if strings.HasPrefix(it.Label, menuRadioMark) != strings.HasSuffix(it.Label, names[s.docMode()]) {
 				t.Fatalf("the radio mark should mark only the current mode: %q", it.Label)
 			}
 		}
 		model = chooseMenuRow(t, model, step.label)
-		if model.(core.Router).Top() != s || s.previewMode() != step.mode {
-			t.Fatalf("%s: mode %d with top %T, want mode %d home", step.label, s.previewMode(), model.(core.Router).Top(), step.mode)
+		if model.(core.Router).Top() != s || s.docMode() != step.mode {
+			t.Fatalf("%s: mode %d with top %T, want mode %d home", step.label, s.docMode(), model.(core.Router).Top(), step.mode)
 		}
+	}
+	for _, want := range []bool{true, false} {
+		model = openHeaderMenu(t, model, s, sh, "view")
+		model = chooseMenuRow(t, model, "Preview")
+		model = chooseMenuRow(t, model, "Side by side")
+		if model.(core.Router).Top() != s || s.sidePreview != want {
+			t.Fatalf("Side by side: side preview %v with top %T, want %v home", s.sidePreview, model.(core.Router).Top(), want)
+		}
+	}
+}
+
+// TestViewMenuDocDisabledOffMarkdown: on a file the renderer refuses, Doc is grayed out but
+// Default and Side by side still work.
+func TestViewMenuDocDisabledOffMarkdown(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	defer Of(sh).close()
+	s.openDoc(sh, filepath.Join(t.TempDir(), "main.go"))
+	model = openHeaderMenu(t, model, s, sh, "view")
+	model = chooseMenuRow(t, model, "Preview")
+	for _, it := range model.(core.Router).Top().(*components.MenuScreen).Items() {
+		if it.Separator {
+			continue
+		}
+		if want := unmark(it.Label) == "Doc"; it.Disabled != want {
+			t.Errorf("%q disabled = %v, want %v", it.Label, it.Disabled, want)
+		}
+	}
+	_ = model
+}
+
+// TestDefaultDocMode: Preview → Default writes default_doc_mode to config.yml, and only
+// docs opened afterwards start in Live.
+func TestDefaultDocMode(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	defer Of(sh).close()
+	dir := t.TempDir()
+	s.openDoc(sh, filepath.Join(dir, "before.md"))
+
+	model = openHeaderMenu(t, model, s, sh, "view")
+	model = chooseMenuRow(t, model, "Preview")
+	model = chooseMenuRow(t, model, "Default")
+	model = chooseMenuRow(t, model, "Live")
+	if model.(core.Router).Top() != s {
+		t.Fatalf("the menus should close, top is %T", model.(core.Router).Top())
+	}
+	cfg, err := LoadConfig()
+	if err != nil || cfg.DefaultDocMode != docModeLiveName {
+		t.Fatalf("config.yml default_doc_mode = %q (%v), want live", cfg.DefaultDocMode, err)
+	}
+	if s.docMode() != docModeOff {
+		t.Error("an open doc should keep its mode when the default changes")
+	}
+	s.openDoc(sh, filepath.Join(dir, "after.md"))
+	if s.docMode() != docModeLive {
+		t.Errorf("a doc opened after the change should start in Live, got %d", s.docMode())
+	}
+	s.openDoc(sh, filepath.Join(dir, "after.go"))
+	if s.editor.LiveRender() {
+		t.Error("a non-markdown doc should never start in Live")
 	}
 }
 

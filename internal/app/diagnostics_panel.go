@@ -166,11 +166,12 @@ func (s *homeScreen) activateDiagnostic(sh *core.Shared, entry diagnosticEntry) 
 	// An LSP range stays in protocol coordinates until the destination buffer is
 	// available; the shared jump path handles Unicode and return navigation.
 	d := entry.diagnostic
-	preview := s.closeFullPreview()
 	jump := s.jumpToLocation(sh, lspLocation{Path: entry.path, Range: protocol.Range{
 		Start: protocol.Position{Line: d.Line, Character: d.Character},
 		End:   protocol.Position{Line: d.EndLine, Character: d.EndCharacter},
 	}})
+	// After the jump: a target doc in Reader leaves it so the location shows.
+	preview := s.closeFullPreview()
 	focus := core.Async(s.modular.FocusSlot(s.editorSlot()))
-	return core.Seq(preview, jump, focus)
+	return core.Seq(jump, preview, focus)
 }

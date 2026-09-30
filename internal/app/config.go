@@ -38,6 +38,10 @@ type Config struct {
 	// usually selection). "none" disables a gesture.
 	ClickDefinition string `yaml:"click_definition"` // alt (default), ctrl, shift, none
 	ClickContext    string `yaml:"click_context"`    // ctrl (default), alt, shift, none
+	// DefaultDocMode is how a newly opened markdown doc starts: "off" (syntax highlighting)
+	// or "live" (rendered in place). Anything else reads as off. Each doc's mode is
+	// then its own until the buffer closes (docmode.go).
+	DefaultDocMode string `yaml:"default_doc_mode"`
 	// FormatOnSave formats (and organizes imports) after each ctrl+s. The reformat lands
 	// after the write, leaving the buffer dirty until the next save. Off by default.
 	FormatOnSave bool `yaml:"format_on_save"`
@@ -155,6 +159,7 @@ func DefaultConfig() Config {
 		LanguageServers: defaultLanguageServers(),
 		ClickDefinition: clickAlt,
 		ClickContext:    clickCtrl,
+		DefaultDocMode:  docModeOffName,
 		SyntaxColors:    defaultSyntaxColors(),
 		Default:         defaultDocsRef,
 		Vaults:          map[string]VaultConfig{},

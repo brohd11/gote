@@ -23,12 +23,10 @@ const sidebarWidth = 30
 var (
 	bottomKey  = key.NewBinding(key.WithKeys("alt+\\"), key.WithHelp("alt+\\", "bottom panel"))
 	sidebarKey = key.NewBinding(key.WithKeys("alt+|"), key.WithHelp("alt+|", "sidebar"))
-	previewKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "preview"))
-	// The reader has its own key rather than a third ctrl+p state: it is a mode you stay in.
-	// It covers the editor, not the app. alt+p because terminals deliver ctrl+shift+p as "P".
-	fullPreviewKey = key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "full preview"))
-	// Live preview renders markdown in the editor itself, per document like wrap.
-	livePreviewKey = key.NewBinding(key.WithKeys("alt+m"), key.WithHelp("alt+m", "live preview"))
+	// ctrl+p cycles the current doc's mode (docmode.go): off, live, reader.
+	docModeKey = key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "doc mode"))
+	// The side preview is chrome, a column toggle like the sidebar.
+	sidePreviewKey = key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "side preview"))
 	// alt+z, not ctrl+w: ctrl+w is the editor's own delete-word-back (and readline's),
 	// and intercepting it here would swallow it before the editor ever sees it.
 	wrapKey       = key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "wrap"))
@@ -56,14 +54,6 @@ var (
 	symbolsKey    = altShiftKey("o", "toggle outline")
 	referencesKey = altShiftKey("r", "find references")
 	formatKey     = altShiftKey("m", "format document")
-)
-
-// ctrl+p's preview modes: a side pane beside the editor, so it can be read against the
-// source. The alt+p reader is separate (the editor pane's child) and never shown together
-// with the side pane.
-const (
-	previewOff  = iota // editor only
-	previewPane        // the custom reader, live, beside the editor
 )
 
 // ReseedMsg is gote's "reload the doc list" broadcast: the Actions ▸ Refresh row
@@ -111,7 +101,7 @@ type homeScreen struct {
 	gitDiff              *gitDiffUI           // anchored, scrollable diff; nil also cancels pending opens
 	gutterDebounce       time.Duration        // internal test seam; production uses gitGutterDebounce
 	launchPreview        bool                 // --preview: open the reader from Init, once
-	preview              int                  // previewOff/previewPane
+	sidePreview          bool                 // the side preview column: chrome, following the active doc
 	previewSrc           string               // the buffer text the pane was last rendered from
 	previewW             int                  // the width it was last rendered at (a resize must re-wrap)
 	previewMap           []int                // that render's source line → pane row map (RenderMarkdownMapped)
@@ -202,8 +192,8 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// ignore it.
 	s.launchPreview = c.Preview && minimal && s.previewable()
 	s.initGroupPanels(c)
-	s.previewPanel = components.NewScrollContainer("preview")
-	// A bare "preview" on the edge, matching the bordered Docs panel beside it —
+	s.previewPanel = components.NewScrollContainer("Preview")
+	// A bare "Preview" on the edge, matching the bordered Docs panel beside it —
 	// the pane's keys are in the help bar (PanelHelp) where the rest of the screen's are.
 	s.previewPanel.SetKeyHints(false)
 	// Wired once; the hooks are rebuilt per click because the directory a relative link
@@ -233,9 +223,9 @@ func (s *homeScreen) Init(sh *core.Shared) (initCmd tea.Cmd) {
 	if s.launchPreview {
 		s.launchPreview = false
 		_ = s.editor.LoadFile()
-		s.fullPreview = s.previewScreen()
+		Of(sh).setReader(s.editor, true)
+		_ = s.paneChild()
 		s.modular = s.buildModular() // rebuilt so the bar names the way back to the editor
-		_ = s.editorPanel.SetChild(s.fullPreview)
 	}
 	c := Of(sh)
 	if c.lsp == nil {
@@ -298,12 +288,10 @@ func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 	// "?" is text whenever it has the keys.
 	case core.MatchKey(k, helpKey) && (!s.modular.Filtering() || k == "alt+?"):
 		return func() core.Action { return core.Push(s.helpScreen()) }
-	case core.MatchKey(k, previewKey):
-		return s.cyclePreview
-	case core.MatchKey(k, fullPreviewKey):
-		return s.toggleFullPreview
-	case core.MatchKey(k, livePreviewKey):
-		return s.toggleLivePreview
+	case core.MatchKey(k, docModeKey):
+		return s.cycleDocMode
+	case core.MatchKey(k, sidePreviewKey):
+		return func() core.Action { return s.toggleSidePreview(sh) }
 	// esc closes the reader ahead of the panes, whose Pop the router would clamp away at
 	// the root. A list's /-filter keeps its own esc.
 	case s.fullPreview != nil && core.MatchKey(k, core.Keys.Back) && !s.modular.Filtering():

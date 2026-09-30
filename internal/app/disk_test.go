@@ -122,7 +122,7 @@ func TestMenuRefreshUpdatesPreviews(t *testing.T) {
 				if mode == "full" {
 					model = pumpModel(model, s.toggleFullPreview().Cmd)
 				} else {
-					s.cyclePreview()
+					s.setSidePreview(!s.sidePreview)
 				}
 			}
 			writeDiskDoc(t, path, "updated preview text")
@@ -208,7 +208,7 @@ func TestFocusRefreshesBothPreviewModes(t *testing.T) {
 			if full {
 				model = pumpModel(model, s.toggleFullPreview().Cmd)
 			} else {
-				s.cyclePreview()
+				s.setSidePreview(!s.sidePreview)
 			}
 			writeDiskDoc(t, filepath.Join(dir, "first.md"), "updated preview text")
 			model, cmd := model.Update(tea.FocusMsg{})

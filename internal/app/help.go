@@ -94,7 +94,7 @@ func (s *homeScreen) helpText() string {
 	}
 	general := []key.Binding{quitKey, sidebarKey, mark(bottomKey, panelLock),
 		mark(findFilesKey, panelLock),
-		previewKey, fullPreviewKey, livePreviewKey, wrapKey, lineNumsKey, helpKey}
+		docModeKey, sidePreviewKey, wrapKey, lineNumsKey, helpKey}
 	if !s.minimal {
 		general = append([]key.Binding{quitKey, newBufferKey}, general[1:]...)
 		general = append(general, previousDocumentKey, nextDocumentKey, moveTabLeftKey, moveTabRightKey)

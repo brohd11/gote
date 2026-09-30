@@ -73,7 +73,7 @@ func (s *homeScreen) activateRoot(sh *core.Shared, switchRoot func(*Ctx) error, 
 	if s.outlineVisible {
 		s.prepareOutlineDocument()
 	}
-	s.preview, s.previewPrior = previewOff, previewOff
+	s.sidePreview = false
 	s.resetPreviewCache()
 	s.sidebar = true
 	// A vault or the default root is the full editor, so re-ask every mode default rather

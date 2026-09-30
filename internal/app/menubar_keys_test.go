@@ -107,7 +107,7 @@ func TestMenuAcceleratorsUnique(t *testing.T) {
 	defer Of(sh).close()
 	menus := map[string][]components.MenuItem{
 		"file": s.fileMenuItems(), "edit": s.editMenuItems(), "view": s.viewMenuItems(sh),
-		"options": s.optionsMenuItems(sh), "preview": s.previewMenuItems(),
+		"options": s.optionsMenuItems(sh), "preview": s.previewMenuItems(sh), "doc mode": s.docModeMenuItems(), "default mode": s.defaultModeMenuItems(sh),
 		"file view": s.fileViewMenuItems(), "tab groups": s.tabGroupMenuItems(),
 		"lsp": s.lspMenuItems(sh), "vaults": s.vaultMenuItems(),
 	}
