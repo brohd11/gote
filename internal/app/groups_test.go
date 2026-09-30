@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	"github.com/charmbracelet/x/ansi"
 	"go.lsp.dev/protocol"
 )
 
@@ -492,4 +494,79 @@ func TestGroupResizeAndTabBarRouting(t *testing.T) {
 	s.SetSize(sh, 18, 8)
 	s.View(sh)
 	groupInvariant(t, s, sh)
+}
+
+func TestGroupTabSeparator(t *testing.T) {
+	s, sh := groupHome(t)
+	seedDoc(t, s, sh, "a.txt", "a")
+	b, _ := seedDoc(t, s, sh, "b.txt", strings.Repeat("b", 40))
+	s.openDoc(sh, b)
+	s.moveTab(sh, 1)
+	s.rebuildGroups(sh)
+	s.View(sh)
+	left, right := s.groups()[0], s.groups()[1]
+	if row := ansi.Strip(left.openTabs.View(false)); strings.HasPrefix(row, "│") || ansi.StringWidth(row) != left.openTabs.w {
+		t.Fatalf("left bar %q", row)
+	}
+	row := ansi.Strip(right.openTabs.View(false))
+	if !strings.HasPrefix(row, "│") || ansi.StringWidth(row) != right.openTabs.w {
+		t.Fatalf("right bar %q", row)
+	}
+	// The divider runs down the right editor too, in the border color whatever the focus.
+	for _, focused := range []bool{false, true} {
+		if focused {
+			s.activateGroup(right)
+		} else {
+			s.activateGroup(left)
+		}
+		s.View(sh)
+		if got := right.openTabs.View(false); !strings.HasPrefix(got, groupSeparator()) {
+			t.Fatalf("tab separator styling follows focus (focused=%v): %q", focused, got)
+		}
+		lines := strings.Split(right.editorPanel.View(false), "\n")
+		if len(lines) != right.editorPanel.h {
+			t.Fatalf("editor rows %d, want %d", len(lines), right.editorPanel.h)
+		}
+		for i, line := range lines {
+			if !strings.HasPrefix(line, groupSeparator()) || ansi.StringWidth(line) > right.editorPanel.w+1 {
+				t.Fatalf("editor row %d %q", i, ansi.Strip(line))
+			}
+		}
+	}
+	for _, line := range strings.Split(ansi.Strip(left.editorPanel.View(false)), "\n") {
+		if strings.HasPrefix(line, "│") {
+			t.Fatal("left editor drew a separator")
+		}
+	}
+	if right.editorPanel.x != right.openTabs.x+1 {
+		t.Fatalf("editor content x %d, want %d", right.editorPanel.x, right.openTabs.x+1)
+	}
+	s.activateGroup(left)
+	s.Update(sh, tea.MouseClickMsg{X: right.openTabs.x + 1, Y: right.openTabs.y, Button: tea.MouseLeft})
+	if s.currentID != b {
+		t.Fatal("click past the separator did not reach the right group's tab")
+	}
+	// A click in the text lands the caret under the pointer.
+	cx, cy := right.editorPanel.x+10, right.editorPanel.y
+	s.Update(sh, tea.MouseClickMsg{X: cx, Y: cy, Button: tea.MouseLeft})
+	s.Update(sh, tea.MouseReleaseMsg{X: cx, Y: cy, Button: tea.MouseLeft})
+	s.View(sh)
+	if x, _, ok := right.editor.CursorAnchor(); !ok || x != cx {
+		t.Fatalf("caret at x=%d (visible %v), clicked %d", x, ok, cx)
+	}
+	// A drag from the separator resizes the groups.
+	x, y := right.openTabs.x, right.openTabs.y
+	s.Update(sh, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	s.Update(sh, tea.MouseMotionMsg{X: x + 5, Y: y, Button: tea.MouseLeft})
+	s.Update(sh, tea.MouseReleaseMsg{X: x + 5, Y: y, Button: tea.MouseLeft})
+	s.View(sh)
+	if right.openTabs.x != x+5 {
+		t.Fatalf("separator drag moved the edge to %d, want %d", right.openTabs.x, x+5)
+	}
+	s.moveTab(sh, -1)
+	s.rebuildGroups(sh)
+	s.View(sh)
+	if len(s.groups()) != 1 || strings.HasPrefix(ansi.Strip(s.openTabs.View(false)), "│") {
+		t.Fatal("collapsed bar kept its separator")
+	}
 }

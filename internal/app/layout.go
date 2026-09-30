@@ -164,9 +164,13 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 			Children: children,
 		})
 	}
+	// Only a group with a neighbor on its left draws a divider; a collapsed split's
+	// survivor must drop its own.
+	s.openTabs.separator, s.editorPanel.separator = false, false
 	if len(s.groups()) > 1 {
 		groups := components.LayoutNode{ID: "groups", Axis: components.LayoutHorizontal}
 		for i, g := range s.groups() {
+			g.openTabs.separator, g.editorPanel.separator = i > 0, i > 0
 			bar := leaf(g.openTabs)
 			bar.Size, bar.FixedSize = 1, true
 			groups.Children = append(groups.Children, components.LayoutNode{ID: fmt.Sprintf("group-%d", i), Axis: components.LayoutVertical, Weight: g.weight,

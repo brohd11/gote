@@ -23,16 +23,31 @@ type documentTabBar struct {
 	group      *editorGroup
 	x, y, w, h int
 	mouseDown  bool
+	// separator draws a │ in the first column, the top of the divider its group's
+	// editor continues below. Every group right of the leftmost sets it.
+	separator bool
 }
 
 func (p *documentTabBar) SetPaneOrigin(x, y int) { p.x, p.y = x, y }
 func (p *documentTabBar) SetSize(w, h int) {
 	p.w, p.h = w, h
-	p.TabBar.SetSize(w, h)
+	p.TabBar.SetSize(max(0, w-p.sepW()), h)
+}
+
+// sepW is the width the separator takes from the tabs.
+func (p *documentTabBar) sepW() int {
+	if p.separator && p.w > 0 {
+		return 1
+	}
+	return 0
 }
 
 func (p *documentTabBar) View(bool) string {
-	return p.TabBar.View(p.group != nil && p.group.editorPanel != nil && p.group.editorPanel.Focused())
+	focused := p.group != nil && p.group.editorPanel != nil && p.group.editorPanel.Focused()
+	if p.sepW() == 0 {
+		return p.TabBar.View(focused)
+	}
+	return groupSeparator() + p.TabBar.View(focused)
 }
 
 func (s *homeScreen) tabsVisible() bool { return !s.minimal }
@@ -204,11 +219,15 @@ func (s *homeScreen) groupTabInput(sh *core.Shared, msg tea.Msg, mm tea.MouseMsg
 	if m.X < p.x || m.X >= p.x+p.w || m.Y != p.y || p.h == 0 {
 		return core.Action{}, false
 	}
+	// The separator sits on the group resize edge; leave it to ModularScreen.
+	if p.sepW() > 0 && m.X == p.x {
+		return core.Action{}, false
+	}
 	if click, ok := msg.(tea.MouseClickMsg); ok {
 		p.mouseDown = true
 		if click.Button == tea.MouseLeft && click.Mod == 0 {
 			s.refreshOpenTabs(sh)
-			if id, _ := p.Click(m.X-p.x, m.Y-p.y); id != "" {
+			if id, _ := p.Click(m.X-p.x-p.sepW(), m.Y-p.y); id != "" {
 				s.activateGroup(g)
 				return s.activateTab(sh, id), true
 			}

@@ -2,9 +2,11 @@ package app
 
 import (
 	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
@@ -42,7 +44,10 @@ type groupPanel struct {
 	*components.ScreenPanel
 	host       *homeScreen
 	group      *editorGroup
-	x, y, w, h int
+	x, y, w, h int // the editor's bounds, right of any separator
+	// separator draws a │ down the first column, dividing this group from the one on its
+	// left. The tab bar above draws the same column.
+	separator bool
 }
 
 func (p *groupPanel) Focus() {
@@ -52,14 +57,47 @@ func (p *groupPanel) Focus() {
 	p.ScreenPanel.Focus()
 }
 
+func (p *groupPanel) sepW() int {
+	if p.separator {
+		return 1
+	}
+	return 0
+}
+
 func (p *groupPanel) SetPaneOrigin(x, y int) {
-	p.x, p.y = x, y
-	p.ScreenPanel.SetPaneOrigin(x, y)
+	p.x, p.y = x+p.sepW(), y
+	p.ScreenPanel.SetPaneOrigin(p.x, y)
 }
 
 func (p *groupPanel) SetSize(w, h int) {
-	p.w, p.h = w, h
-	p.ScreenPanel.SetSize(w, h)
+	p.w, p.h = max(0, w-p.sepW()), h
+	p.ScreenPanel.SetSize(p.w, h)
+}
+
+func (p *groupPanel) View(focused bool) string {
+	body := p.ScreenPanel.View(focused)
+	if p.sepW() == 0 {
+		return body
+	}
+	sep := groupSeparator()
+	lines := strings.Split(body, "\n")
+	var b strings.Builder
+	for i := 0; i < p.h; i++ {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(sep)
+		if i < len(lines) {
+			b.WriteString(lines[i])
+		}
+	}
+	return b.String()
+}
+
+// groupSeparator is the divider cell between editor groups: chrome, so it keeps the
+// border color whichever group has focus.
+func groupSeparator() string {
+	return lipgloss.NewStyle().Foreground(core.BorderColor).Render("│")
 }
 
 func (p *groupPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bool) {
@@ -68,7 +106,28 @@ func (p *groupPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, boo
 	if _, paste := msg.(tea.PasteMsg); paste && !p.Focused() {
 		return core.Action{}, true
 	}
+	// Pane-local coordinates count the separator; the editor's start after it.
+	if mm, ok := msg.(tea.MouseMsg); ok && p.sepW() > 0 {
+		msg = shiftMouseX(mm, -p.sepW())
+	}
 	return p.ScreenPanel.UpdatePanel(sh, msg)
+}
+
+// shiftMouseX moves a mouse message dx columns, keeping its concrete type.
+func shiftMouseX(mm tea.MouseMsg, dx int) tea.Msg {
+	m := mm.Mouse()
+	m.X += dx
+	switch mm.(type) {
+	case tea.MouseClickMsg:
+		return tea.MouseClickMsg(m)
+	case tea.MouseReleaseMsg:
+		return tea.MouseReleaseMsg(m)
+	case tea.MouseWheelMsg:
+		return tea.MouseWheelMsg(m)
+	case tea.MouseMotionMsg:
+		return tea.MouseMotionMsg(m)
+	}
+	return mm
 }
 
 func (s *homeScreen) groups() []*editorGroup {
