@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -24,17 +25,14 @@ type headerPanel struct {
 func (p *headerPanel) SetSize(w, _ int) { p.w = w }
 
 func (p *headerPanel) View(bool) string {
-	p.menuSpans = p.menuSpans[:0]
+	p.menuSpans = headerMenuSpans()
 	var b strings.Builder
-	x := 0
 	for _, m := range headerMenus {
-		b.WriteString(" ")
-		p.menuSpans = append(p.menuSpans, statusSpan{m.id, x + 1, x + 1 + lipgloss.Width(m.label)})
-		b.WriteString(m.label + " ")
-		x += lipgloss.Width(m.label) + 2
+		// The first letter is the alt+ chord that opens the menu (menuKeys).
+		b.WriteString(" " + components.AccelLabel(m.label, []rune(m.label)[0], lipgloss.NewStyle()) + " ")
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(core.BorderColor).Render("│"))
-	x++
+	x := headerMenusWidth + 1
 	// The breadcrumb gets what the menus leave; it truncates, the menus never do.
 	crumbs := []core.Crumb{{Full: p.host.CrumbLabel(false), Short: p.host.CrumbLabel(true)}}
 	b.WriteString(core.RenderBreadcrumb(crumbs, max(p.w-x, 0)))

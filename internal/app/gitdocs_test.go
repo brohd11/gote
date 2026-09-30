@@ -111,13 +111,13 @@ func TestDocsGitColorsAcrossViews(t *testing.T) {
 	if flat.TitleColor() != want {
 		t.Fatal("flat missing git color")
 	}
-	s.Update(sh, keyMsg("alt+f"))
+	nextFileView(s)
 	selectRow(t, s.filePanel.List(), "notes.md")
 	folder := s.filePanel.List().SelectedItem().(core.ColorItem)
 	if folder.TitleColor() != want {
 		t.Fatal("folder missing git color")
 	}
-	s.Update(sh, keyMsg("alt+f"))
+	nextFileView(s)
 	selectRow(t, s.groupedPanel.List(), "notes.md")
 	grouped := s.groupedPanel.List().SelectedItem().(core.ColorItem)
 	if grouped.TitleColor() != want || !s.groupedPanel.List().SelectedItem().(core.KeepColorItem).KeepColor() {

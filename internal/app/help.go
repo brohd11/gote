@@ -101,6 +101,8 @@ func (s *homeScreen) helpText() string {
 	}
 	writeSection("general", general)
 	if !s.minimal {
+		b.WriteString("Menus: alt+f/e/v/o opens File, Edit, View or Options (alt+f is word-forward while the editor types;\n" +
+			"reach File from another menu). In a menu, a row's underlined letter picks it, ←/→ move between menus.\n")
 		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. View → Tab Groups can move tabs or close a group.\n\n")
 	}
 	// Language-server keys fire from the editor only. The outline key opens a panel, so the
@@ -126,7 +128,7 @@ func (s *homeScreen) helpText() string {
 		core.Hint("toggle fold", core.Keys.Toggle),
 		core.Hint("filter", s.outlinePanel.List().KeyMap.Filter),
 	})
-	writeSection("docs list", []key.Binding{renameKey, deleteKey, fileViewKey, densityKey, descendKey, hiddenKey,
+	writeSection("docs list", []key.Binding{renameKey, deleteKey, densityKey, descendKey, hiddenKey,
 		core.Hint("up a folder (folder view)", s.filePanel.UpKey()),
 		core.Hint("collapse/expand (grouped view)", core.Keys.Left, core.Keys.Right),
 		core.Hint("toggle folder fold (grouped view)", core.Keys.Select, core.Keys.Toggle)})

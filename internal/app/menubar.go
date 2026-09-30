@@ -10,12 +10,92 @@ import (
 	"github.com/brohd11/bubblestack/core"
 )
 
-// headerMenus are the header's menus, left to right.
-var headerMenus = []struct{ id, label string }{
-	{"file", "File"},
-	{"edit", "Edit"},
-	{"view", "View"},
-	{"options", "Options"},
+// headerMenus are the header's menus, left to right. key opens each one from anywhere on
+// the home screen (alt + its first letter, underlined on the label) — except that a menu
+// that yieldsToEditor leaves its chord to a focused editor: alt+f is the byte pair many
+// terminals send for Option+→, the editor's word-forward (see
+// TestHomeLeavesWordMotionsToTheEditor). From the editor, File is one ← away from Edit.
+var headerMenus = []struct {
+	id, label      string
+	key            key.Binding
+	yieldsToEditor bool
+}{
+	{"file", "File", key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "File menu")), true},
+	{"edit", "Edit", key.NewBinding(key.WithKeys("alt+e"), key.WithHelp("alt+e", "Edit menu")), false},
+	{"view", "View", key.NewBinding(key.WithKeys("alt+v"), key.WithHelp("alt+v", "View menu")), false},
+	{"options", "Options", key.NewBinding(key.WithKeys("alt+o"), key.WithHelp("alt+o", "Options menu")), false},
+}
+
+// headerMenusWidth is the cells the labels take: " File  Edit  View  Options ".
+var headerMenusWidth = func() int {
+	w := 0
+	for _, m := range headerMenus {
+		w += len([]rune(m.label)) + 2
+	}
+	return w
+}()
+
+// headerMenuSpans are the labels' columns on the header row. They depend only on the
+// labels, so a menu opens from the keyboard before anything has been drawn.
+func headerMenuSpans() []statusSpan {
+	spans := make([]statusSpan, 0, len(headerMenus))
+	x := 0
+	for _, m := range headerMenus {
+		w := len([]rune(m.label))
+		spans = append(spans, statusSpan{m.id, x + 1, x + 1 + w})
+		x += w + 2
+	}
+	return spans
+}
+
+// headerMenuKey opens the menu whose chord is k, if one is.
+func (s *homeScreen) headerMenuKey(sh *core.Shared, k string) (core.Action, bool) {
+	if s.header == nil {
+		return core.Action{}, false
+	}
+	for i, m := range headerMenus {
+		if core.MatchKey(k, m.key) {
+			if m.yieldsToEditor && s.editorHasKeys() {
+				return core.Action{}, false
+			}
+			return s.openHeaderMenu(sh, headerMenuSpans()[i]), true
+		}
+	}
+	return core.Action{}, false
+}
+
+// editorHasKeys reports whether an editor pane holds focus (and so is typing).
+func (s *homeScreen) editorHasKeys() bool {
+	for _, g := range s.groups() {
+		if g.editorPanel.Focused() {
+			return true
+		}
+	}
+	return false
+}
+
+// menuBarKey is an open header menu's OnKeyOutside: another menu's chord opens it, and
+// ←/→ walk to the neighboring menu, wrapping. The menu has already closed its cascade.
+func (s *homeScreen) menuBarKey(sh *core.Shared, current, k string) (core.Action, bool) {
+	spans := headerMenuSpans()
+	at := 0
+	for i, span := range spans {
+		if span.id == current {
+			at = i
+		}
+	}
+	switch {
+	case core.MatchKey(k, core.Keys.Left):
+		return s.openHeaderMenu(sh, spans[(at+len(spans)-1)%len(spans)]), true
+	case core.MatchKey(k, core.Keys.Right):
+		return s.openHeaderMenu(sh, spans[(at+1)%len(spans)]), true
+	}
+	for i, m := range headerMenus {
+		if core.MatchKey(k, m.key) && m.id != current {
+			return s.openHeaderMenu(sh, spans[i]), true
+		}
+	}
+	return core.Action{}, false
 }
 
 // The menu bar is where gote's commands live (it replaced the Actions picker); the
@@ -73,10 +153,10 @@ func (s *homeScreen) headerMenuItems(sh *core.Shared, id string) []components.Me
 // fileMenuItems are the session's document roots and the app itself.
 func (s *homeScreen) fileMenuItems() []components.MenuItem {
 	return []components.MenuItem{
-		submenu("Vaults", false, s.vaultMenuItems),
-		{Label: "Refresh", Pick: menuPick(1, refreshAction)},
+		keyed(submenu("Vaults", false, s.vaultMenuItems), 'v'),
+		{Label: "Refresh", Key: 'r', Pick: menuPick(1, refreshAction)},
 		{Separator: true},
-		{Label: "Update gote", Pick: menuPick(1, func(sh *core.Shared) core.Action {
+		{Label: "Update gote", Key: 'u', Pick: menuPick(1, func(sh *core.Shared) core.Action {
 			return core.Push(components.NewSelfUpdateLoading(selfUpdateHooks(Of(sh).Version)))
 		})},
 	}
@@ -130,7 +210,7 @@ func (s *homeScreen) vaultMenuItems() []components.MenuItem {
 		items = append(items, components.MenuItem{Separator: true})
 	}
 	// Marked like the rows above, so its label lines up with theirs.
-	return append(items, components.MenuItem{Label: selected(false, menuMoreLabel), Pick: menuPick(2, func(sh *core.Shared) core.Action {
+	return append(items, components.MenuItem{Label: selected(false, menuMoreLabel), Key: 'm', Pick: menuPick(2, func(sh *core.Shared) core.Action {
 		return core.Push(vaultsMenu(sh))
 	})})
 }
@@ -155,6 +235,12 @@ func submenu(label string, disabled bool, items func() []components.MenuItem) co
 	return components.MenuItem{Label: label, Disabled: disabled, Submenu: items}
 }
 
+// keyed gives item accelerator k.
+func keyed(item components.MenuItem, k rune) components.MenuItem {
+	item.Key = k
+	return item
+}
+
 // editMenuItems are the editor's own clipboard rows, labeled with gote's chords.
 func (s *homeScreen) editMenuItems() []components.MenuItem {
 	items := s.editor.ClipboardItems()
@@ -166,7 +252,7 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 	// Search results open the bottom panel, so this respects the panel lock.
 	if s.panelToggles {
 		items = append(items, components.MenuItem{Separator: true},
-			components.MenuItem{Label: "Find in Files", Hint: hint(findFilesKey), Pick: menuPick(1, func(sh *core.Shared) core.Action {
+			components.MenuItem{Label: "Find in Files", Key: 'f', Hint: hint(findFilesKey), Pick: menuPick(1, func(sh *core.Shared) core.Action {
 				return core.Push(s.findFilesForm(sh))
 			})})
 	}
@@ -175,34 +261,35 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 
 func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 	items := []components.MenuItem{
-		submenu(checked(false, "Preview"), !s.previewable(), s.previewMenuItems),
-		submenu(checked(false, "Tab Groups"), false, s.tabGroupMenuItems),
+		keyed(submenu(checked(false, "Preview"), !s.previewable(), s.previewMenuItems), 'p'),
+		keyed(submenu(checked(false, "Tab Groups"), false, s.tabGroupMenuItems), 't'),
+		keyed(submenu(checked(false, "File view"), !s.sidebar, s.fileViewMenuItems), 'f'),
 		{Separator: true},
-		{Label: checked(s.sidebar, "Sidebar"), Hint: hint(sidebarKey), Pick: menuPick(1, func(*core.Shared) core.Action {
+		{Label: checked(s.sidebar, "Sidebar"), Key: 's', Hint: hint(sidebarKey), Pick: menuPick(1, func(*core.Shared) core.Action {
 			s.setSidebar(!s.sidebar)
 			return core.Action{}
 		})},
 	}
 	if s.panelToggles {
 		items = append(items,
-			components.MenuItem{Label: checked(s.outlineVisible, "Outline"), Hint: hint(symbolsKey), Pick: menuPick(1, s.toggleOutline)},
-			components.MenuItem{Label: checked(s.bottomVisible, "Bottom panel"), Hint: hint(bottomKey), Pick: menuPick(1, s.toggleBottom)})
+			components.MenuItem{Label: checked(s.outlineVisible, "Outline"), Key: 'o', Hint: hint(symbolsKey), Pick: menuPick(1, s.toggleOutline)},
+			components.MenuItem{Label: checked(s.bottomVisible, "Bottom panel"), Key: 'b', Hint: hint(bottomKey), Pick: menuPick(1, s.toggleBottom)})
 	}
 	return append(items,
 		components.MenuItem{Separator: true},
-		components.MenuItem{Label: checked(s.editor.WrapMode(), "Wrap"), Hint: hint(wrapKey), Pick: menuPick(1, func(*core.Shared) core.Action {
+		components.MenuItem{Label: checked(s.editor.WrapMode(), "Wrap"), Key: 'w', Hint: hint(wrapKey), Pick: menuPick(1, func(*core.Shared) core.Action {
 			s.editor.ToggleWrap()
 			return core.Action{}
 		})},
-		components.MenuItem{Label: checked(s.editor.LineNumMode(), "Line numbers"), Hint: hint(lineNumsKey), Pick: menuPick(1, func(*core.Shared) core.Action {
+		components.MenuItem{Label: checked(s.editor.LineNumMode(), "Line numbers"), Key: 'l', Hint: hint(lineNumsKey), Pick: menuPick(1, func(*core.Shared) core.Action {
 			s.editor.ToggleLineNums()
 			return core.Action{}
 		})},
-		components.MenuItem{Label: checked(s.gitGutter, "Git gutter"), Pick: menuPick(1, func(*core.Shared) core.Action {
+		components.MenuItem{Label: checked(s.gitGutter, "Git gutter"), Key: 'g', Pick: menuPick(1, func(*core.Shared) core.Action {
 			return core.Async(s.setGitGutter(!s.gitGutter))
 		})},
 		components.MenuItem{Separator: true},
-		components.MenuItem{Label: checked(false, "Theme"), Pick: menuPick(1, func(*core.Shared) core.Action {
+		components.MenuItem{Label: checked(false, "Theme"), Key: 'h', Pick: menuPick(1, func(*core.Shared) core.Action {
 			return core.Push(components.ThemePicker())
 		})},
 	)
@@ -212,11 +299,11 @@ func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 // same reasons the shortcuts refuse (tabMoveUnavailable).
 func (s *homeScreen) tabGroupMenuItems() []components.MenuItem {
 	return []components.MenuItem{
-		{Label: "Move tab left", Hint: hint(moveTabLeftKey), Disabled: s.tabMoveUnavailable(-1) != "",
+		{Label: "Move tab left", Key: 'l', Hint: hint(moveTabLeftKey), Disabled: s.tabMoveUnavailable(-1) != "",
 			Pick: menuPick(2, func(sh *core.Shared) core.Action { return s.moveTab(sh, -1) })},
-		{Label: "Move tab right / split", Hint: hint(moveTabRightKey), Disabled: s.tabMoveUnavailable(1) != "",
+		{Label: "Move tab right / split", Key: 'r', Hint: hint(moveTabRightKey), Disabled: s.tabMoveUnavailable(1) != "",
 			Pick: menuPick(2, func(sh *core.Shared) core.Action { return s.moveTab(sh, 1) })},
-		{Label: "Close editor group", Disabled: len(s.groups()) < 2, Pick: menuPick(2, s.closeEditorGroup)},
+		{Label: "Close editor group", Key: 'c', Disabled: len(s.groups()) < 2, Pick: menuPick(2, s.closeEditorGroup)},
 	}
 }
 
@@ -267,20 +354,33 @@ func (s *homeScreen) setPreviewMode(mode int) core.Action {
 
 func (s *homeScreen) previewMenuItems() []components.MenuItem {
 	current := s.previewMode()
-	row := func(mode int, label, chord string) components.MenuItem {
-		return components.MenuItem{Label: selected(current == mode, label), Hint: chord,
+	row := func(mode int, label, chord string, accel rune) components.MenuItem {
+		return components.MenuItem{Label: selected(current == mode, label), Hint: chord, Key: accel,
 			Pick: menuPick(2, func(*core.Shared) core.Action { return s.setPreviewMode(mode) })}
 	}
 	return []components.MenuItem{
-		row(previewModeOff, "Off", ""),
-		row(previewModeSide, "Side by side", hint(previewKey)),
-		row(previewModeFull, "Full", hint(fullPreviewKey)),
+		row(previewModeOff, "Off", "", 'o'),
+		row(previewModeSide, "Side by side", hint(previewKey), 's'),
+		row(previewModeFull, "Full", hint(fullPreviewKey), 'f'),
+	}
+}
+
+// fileViewMenuItems are View → File view: how the docs sidebar lists documents.
+func (s *homeScreen) fileViewMenuItems() []components.MenuItem {
+	row := func(view fileView, label string, accel rune) components.MenuItem {
+		return components.MenuItem{Label: selected(s.fileView == view, label), Key: accel,
+			Pick: menuPick(2, func(*core.Shared) core.Action { s.setFileView(view); return core.Action{} })}
+	}
+	return []components.MenuItem{
+		row(fileViewFlat, "Flat", 'f'),
+		row(fileViewFolder, "Folder", 'o'),
+		row(fileViewGrouped, "Grouped", 'g'),
 	}
 }
 
 func (s *homeScreen) optionsMenuItems(sh *core.Shared) []components.MenuItem {
 	return []components.MenuItem{
-		submenu("LSP", !lspEnabled(sh), func() []components.MenuItem { return s.lspMenuItems(sh) }),
+		keyed(submenu("LSP", !lspEnabled(sh), func() []components.MenuItem { return s.lspMenuItems(sh) }), 'l'),
 	}
 }
 
@@ -289,20 +389,20 @@ func (s *homeScreen) optionsMenuItems(sh *core.Shared) []components.MenuItem {
 func (s *homeScreen) lspMenuItems(sh *core.Shared) []components.MenuItem {
 	var items []components.MenuItem
 	if s.panelToggles {
-		items = append(items, components.MenuItem{Label: checked(false, "Show diagnostics"), Pick: menuPick(2, s.showDiagnostics)})
+		items = append(items, components.MenuItem{Label: checked(false, "Show diagnostics"), Key: 'd', Pick: menuPick(2, s.showDiagnostics)})
 	}
 	return append(items,
-		components.MenuItem{Label: checked(s.diagnosticsGutter, "Diagnostics gutter"), Pick: menuPick(2, func(*core.Shared) core.Action {
+		components.MenuItem{Label: checked(s.diagnosticsGutter, "Diagnostics gutter"), Key: 'g', Pick: menuPick(2, func(*core.Shared) core.Action {
 			s.setDiagnosticsGutter(!s.diagnosticsGutter)
 			return core.Action{}
 		})},
-		components.MenuItem{Label: checked(false, "Find references"), Hint: hint(referencesKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
+		components.MenuItem{Label: checked(false, "Find references"), Key: 'r', Hint: hint(referencesKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
 			return s.requestAt(sh, lspReqReferences)
 		})},
-		components.MenuItem{Label: checked(false, "Format document"), Hint: hint(formatKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
+		components.MenuItem{Label: checked(false, "Format document"), Key: 'f', Hint: hint(formatKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
 			return s.requestAt(sh, lspReqFormat)
 		})},
-		components.MenuItem{Label: checked(false, "Restart language servers"), Pick: menuPick(2, s.restartLanguageServers)},
+		components.MenuItem{Label: checked(false, "Restart language servers"), Key: 's', Pick: menuPick(2, s.restartLanguageServers)},
 	)
 }
 
@@ -370,6 +470,9 @@ func (s *homeScreen) openHeaderMenu(sh *core.Shared, span statusSpan) core.Actio
 		Style:  menuStyle,
 		OnPointerOutside: func(sh *core.Shared, x, y int) (core.Action, bool) {
 			return s.menuBarSwitch(sh, span.id, x, y)
+		},
+		OnKeyOutside: func(sh *core.Shared, k string) (core.Action, bool) {
+			return s.menuBarKey(sh, span.id, k)
 		},
 	}))
 }

@@ -59,7 +59,7 @@ func TestGroupedFilesRetainFoldsFilterAndSelection(t *testing.T) {
 	writeSearchFile(t, root, "sub/later.md", "later")
 	s.Receive(sh, ReseedMsg{})
 	for range 3 {
-		s.Update(sh, keyMsg("alt+f"))
+		nextFileView(s)
 	}
 	if hasRow(rowTitles(p.List()), "later.md") || hasRow(rowTitles(p.List()), "deep.md") {
 		t.Fatal("reseed or cycling lost the fold")
@@ -73,7 +73,7 @@ func TestGroupedFilesRetainFoldsFilterAndSelection(t *testing.T) {
 		t.Fatalf("collapsed file missing from search: %v", got)
 	}
 	for range 3 {
-		s.Update(sh, keyMsg("alt+f"))
+		nextFileView(s)
 	}
 	s.Receive(sh, ReseedMsg{})
 	if p.List().FilterValue() != "deep" {

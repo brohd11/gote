@@ -73,7 +73,7 @@ func TestHeaderMenuContents(t *testing.T) {
 	for id, want := range map[string]string{
 		"file":    "Vaults | Refresh | Update gote",
 		"edit":    "Copy | Cut | Paste | Find in Files",
-		"view":    "Preview | Tab Groups | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter | Theme",
+		"view":    "Preview | Tab Groups | File view | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter | Theme",
 		"options": "LSP",
 	} {
 		if got := strings.Join(menuLabels(s.headerMenuItems(sh, id)), " | "); got != want {

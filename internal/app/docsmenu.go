@@ -27,11 +27,11 @@ func (s *homeScreen) docMenu(doc DocFile, open func(*core.Shared) core.Action) c
 		Anchor: components.AnchorAt(s.rightClickX, s.rightClickY),
 		Style:  menuStyle,
 		Items: []components.MenuItem{
-			{Label: "Open", Pick: menuPick(1, open)},
-			{Label: "Rename", Hint: hint(renameKey), Disabled: unsaved, Pick: menuPick(1, func(sh *core.Shared) core.Action {
+			{Label: "Open", Key: 'o', Pick: menuPick(1, open)},
+			{Label: "Rename", Key: 'r', Hint: hint(renameKey), Disabled: unsaved, Pick: menuPick(1, func(sh *core.Shared) core.Action {
 				return s.renameFile(sh, doc)
 			})},
-			{Label: "Delete", Hint: hint(deleteKey), Disabled: unsaved, Pick: menuPick(1, func(sh *core.Shared) core.Action {
+			{Label: "Delete", Key: 'd', Hint: hint(deleteKey), Disabled: unsaved, Pick: menuPick(1, func(sh *core.Shared) core.Action {
 				return s.deleteFile(sh, doc)
 			})},
 		},

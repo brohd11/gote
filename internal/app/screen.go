@@ -40,9 +40,6 @@ var (
 	// ctrl+d is also the editor's forward-delete, but docsKey only fires while the docs panel
 	// is focused and not filtering.
 	deleteKey = key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete"))
-	// Scoped to the Docs pane in every view, ahead of row dispatch so empty lists
-	// and directory rows work too. The editor keeps alt+f for word movement.
-	fileViewKey = key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "flat/folder/grouped view"))
 	// The folder view's density key (only while that panel is focused and not filtering);
 	// alt+r because alt+d/f move by words.
 	densityKey = key.NewBinding(key.WithKeys("alt+r"), key.WithHelp("alt+r", "row density"))
@@ -272,6 +269,11 @@ func (s *homeScreen) paneFiltering() bool {
 // completion popup first; a key disabled by the launch mode is still consumed.
 func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 	none := func() core.Action { return core.Action{} }
+	// The menu bar's alt+ chords come first: they open a menu even while the editor types,
+	// except alt+f, which a focused editor keeps for word-forward (headerMenus).
+	if act, ok := s.headerMenuKey(sh, k); ok {
+		return func() core.Action { return act }
+	}
 	switch {
 	case core.MatchKey(k, moveTabLeftKey):
 		return func() core.Action { return s.moveTab(sh, -1) }
@@ -358,11 +360,6 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 	}
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		k := km.String()
-		if !s.minimal && s.sidebar && s.focusedPane() == s.docsPane() &&
-			!s.modular.Filtering() && !s.modular.Resizing() && core.MatchKey(k, fileViewKey) {
-			s.setFileView((s.fileView + 1) % fileViewCount)
-			return s, core.Action{}
-		}
 		if s.sidebar && s.fileView == fileViewFolder && s.filePanel.Focused() &&
 			!s.modular.Filtering() && !s.modular.Resizing() {
 			switch {
