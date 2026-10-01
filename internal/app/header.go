@@ -87,6 +87,20 @@ func armCells(row string, width int, glyphs string) []bool {
 	return arms
 }
 
+// midGlyph is an end glyph of joinRule with the outward arm added: the cell where the rule
+// meets another line running on past it.
+func midGlyph(r rune) rune {
+	switch r {
+	case '├', '┤':
+		return '┼'
+	case '┌', '┐':
+		return '┬'
+	case '└', '┘':
+		return '┴'
+	}
+	return r
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
@@ -114,6 +128,58 @@ func (s *homeScreen) joinDockRule(sh *core.Shared, body string) string {
 		return body
 	}
 	lines[r] = joinRule(s.w, lines[r-1], lines[r+1])
+	return strings.Join(lines, "\n")
+}
+
+// joinTabRule redraws the rule under the tab bar against the rows on either side, so the
+// group dividers cross it and the frames beside it — the sidebar's right edge, a preview's
+// left — tee into it. The span is the bars' columns, widened by one cell at either end that
+// already holds a vertical edge. A no-op without tabs (minimal mode).
+func (s *homeScreen) joinTabRule(sh *core.Shared, body string) string {
+	if !s.tabsVisible() {
+		return body
+	}
+	groups := s.groups()
+	if len(groups) == 0 || groups[0].openTabs.h < 2 {
+		return body
+	}
+	x0, x1 := s.w, 0
+	for _, g := range groups {
+		x0, x1 = min(x0, g.openTabs.x), max(x1, g.openTabs.x+g.openTabs.w)
+	}
+	r := groups[0].openTabs.y + 1 - sh.BodyY()
+	lines := strings.Split(body, "\n")
+	if r < 1 || r+1 >= len(lines) || x0 >= x1 {
+		return body
+	}
+	// A neighbor's edge, or the rule under its legend (a TitledFrame's ├──┤ lands on this
+	// row), which the tab rule then continues as one line.
+	cells := []rune(ansi.Strip(lines[r]))
+	at := func(x int) rune {
+		if x < len(cells) {
+			return cells[x]
+		}
+		return ' '
+	}
+	left, right := ' ', ' '
+	if x0 > 0 && strings.ContainsRune("│┃├┤┼", at(x0-1)) {
+		x0--
+		left = at(x0)
+	}
+	if x1 < s.w && strings.ContainsRune("│┃├┤┼", at(x1)) {
+		right = at(x1)
+		x1++
+	}
+	rule := []rune(ansi.Strip(joinRule(x1-x0, ansi.Cut(lines[r-1], x0, x1), ansi.Cut(lines[r+1], x0, x1))))
+	// An end cell whose own rule ran on outward is mid-line: ├ → ┼ and so on.
+	if strings.ContainsRune("┤┼", left) {
+		rule[0] = midGlyph(rule[0])
+	}
+	if strings.ContainsRune("├┼", right) {
+		rule[len(rule)-1] = midGlyph(rule[len(rule)-1])
+	}
+	styled := lipgloss.NewStyle().Foreground(core.BorderColor).Render(string(rule))
+	lines[r] = ansi.Cut(lines[r], 0, x0) + styled + ansi.Cut(lines[r], x1, s.w)
 	return strings.Join(lines, "\n")
 }
 

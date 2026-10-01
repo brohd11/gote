@@ -500,7 +500,7 @@ func (s *homeScreen) finishHomeUpdate(sh *core.Shared, act core.Action) core.Act
 // minimal mode the body's last row takes the status.
 func (s *homeScreen) View(sh *core.Shared) string {
 	s.refreshOpenTabs(sh)
-	body := s.joinDockRule(sh, s.joinHeaderRule(s.modular.View(sh)))
+	body := s.joinTabRule(sh, s.joinDockRule(sh, s.joinHeaderRule(s.modular.View(sh))))
 	if s.minimal {
 		body = statusOver(sh, body, s.h)
 	}

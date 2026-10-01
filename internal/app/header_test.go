@@ -164,3 +164,73 @@ func TestHeaderLetsDragsThrough(t *testing.T) {
 		t.Fatal("a release over the header must pass to the pane holding the gesture")
 	}
 }
+
+// tabRuleRow is the body row the tab rule draws on, as a slice of cells.
+func tabRuleRow(t *testing.T, s *homeScreen, sh *core.Shared) (rule, below []rune) {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(s.View(sh)), "\n")
+	r := s.openTabs.y + 1 - sh.BodyY()
+	if r+1 >= len(lines) {
+		t.Fatalf("no tab rule row %d in %d lines", r, len(lines))
+	}
+	return []rune(lines[r]), []rune(lines[r+1])
+}
+
+// TestTabRuleJoinsFrames: the rule under the tab bar is one line with the legend rules of
+// the sidebar and the side preview beside it: ┼ where it crosses each frame edge.
+func TestTabRuleJoinsFrames(t *testing.T) {
+	s, sh := groupHome(t)
+	a, _ := seedDoc(t, s, sh, "a.md", "# A")
+	s.openDoc(sh, a)
+	s.toggleSidePreview(sh)
+	rule, below := tabRuleRow(t, s, sh)
+	edge := s.sidebarPaneWidth() - 1
+	if rule[edge] != '┼' {
+		t.Fatalf("the sidebar's legend rule should cross into the tab rule at %d: %q", edge, string(rule))
+	}
+	if !strings.ContainsRune(string(rule[edge+1:]), '┼') || rule[len(rule)-1] != '┤' {
+		t.Fatalf("the preview's legend rule should continue the tab rule: %q", string(rule))
+	}
+	if strings.ContainsRune(string(below), '─') {
+		t.Fatalf("a second rule under the tab rule: %q", string(below))
+	}
+	if !strings.Contains(string(rule[edge+1:]), "──") {
+		t.Fatalf("rule = %q", string(rule))
+	}
+}
+
+// TestTabRuleCrossesGroupDivider: split groups share one rule, and the divider crosses it.
+func TestTabRuleCrossesGroupDivider(t *testing.T) {
+	s, sh := groupHome(t)
+	seedDoc(t, s, sh, "a.md", "# A")
+	b, _ := seedDoc(t, s, sh, "b.md", "# B")
+	s.openDoc(sh, b)
+	s.moveTab(sh, 1)
+	rule, _ := tabRuleRow(t, s, sh)
+	if col := s.groups()[1].openTabs.x; rule[col] != '┼' {
+		t.Fatalf("no crossing at the divider %d: %q", col, string(rule))
+	}
+}
+
+// TestTabRuleCapturesMouse: a press on the rule row is the bar's — the editor below neither
+// moves its cursor nor loses focus.
+func TestTabRuleCapturesMouse(t *testing.T) {
+	model, s, sh := newHomeRouter(t, Options{})
+	id, _ := seedDoc(t, s, sh, "a.md", "one\ntwo\nthree\n")
+	s.openDoc(sh, id)
+	s.modular.FocusSlot(s.panelSlot(s.editorPanel))
+	model, _ = model.Update(keyMsg("down"))
+	model, _ = model.Update(keyMsg("down"))
+	_ = model.(core.Router).View()
+	pos := s.editor.CursorPosition()
+	y := s.openTabs.y + 1
+	for _, msg := range []tea.Msg{
+		tea.MouseClickMsg{X: s.openTabs.x + 5, Y: y, Button: tea.MouseLeft},
+		tea.MouseReleaseMsg{X: s.openTabs.x + 5, Y: y, Button: tea.MouseLeft},
+	} {
+		model, _ = model.Update(msg)
+		if s.focusedPane() != s.editorPanel || s.editor.CursorPosition() != pos {
+			t.Fatalf("%T on the tab rule reached the editor", msg)
+		}
+	}
+}

@@ -148,7 +148,7 @@ func TestOpenTabsGeometryAndFocus(t *testing.T) {
 	s.setSidePreview(true)
 	s.toggleBottom(sh)
 	s.View(sh)
-	if s.openTabs.h != 1 || s.openTabs.x != 34 || s.openTabs.y != sh.BodyY()+headerRows {
+	if s.openTabs.h != tabBarRows || s.openTabs.x != 34 || s.openTabs.y != sh.BodyY()+headerRows {
 		t.Fatalf("tab geometry = %+v", s.openTabs)
 	}
 	// Pane traversal skips the non-focusable bar.
@@ -159,7 +159,8 @@ func TestOpenTabsGeometryAndFocus(t *testing.T) {
 	}
 	s.setSidebar(false)
 	s.View(sh)
-	if s.openTabs.x != 0 || s.openTabs.w != 100 || s.openTabs.h != 1 || s.editorSlot() != s.firstSlot()+1 {
+	// The side preview stands beside the tabs, so they span the editor, not the screen.
+	if s.openTabs.x != 0 || s.openTabs.w != s.editorPanel.w || s.openTabs.w >= 100 || s.openTabs.h != tabBarRows || s.editorSlot() != s.firstSlot()+1 {
 		t.Fatal("hidden sidebar also hid or misplaced tabs")
 	}
 	if s.editor != ed || s.currentID != id || s.editor.CursorPosition() != position || s.editor.Text() != "A" {
@@ -250,10 +251,10 @@ func TestOpenTabsHideEditorTitlesAcrossBufferSwitches(t *testing.T) {
 		if strings.Contains(ansi.Strip(s.editor.View(sh)), s.currentName) {
 			t.Fatal("retained editor still displays filename in tab mode")
 		}
-		// The first content row sits directly beneath the tab strip.
-		model, _ = model.Update(tea.MouseClickMsg{X: s.openTabs.x + 2, Y: s.openTabs.y + 1, Button: tea.MouseLeft})
+		// The first content row sits directly beneath the tab strip and its rule.
+		model, _ = model.Update(tea.MouseClickMsg{X: s.openTabs.x + 2, Y: s.openTabs.y + tabBarRows, Button: tea.MouseLeft})
 		_, y, visible := s.editor.CursorAnchor()
-		if !visible || y != s.openTabs.y+1 {
+		if !visible || y != s.openTabs.y+tabBarRows {
 			t.Fatal("first-row click or popup anchor retained the old title offset")
 		}
 	}

@@ -190,7 +190,7 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		for i, g := range s.groups() {
 			g.openTabs.separator, g.editorPanel.separator = i > 0, i > 0
 			bar := leaf(g.openTabs)
-			bar.Size, bar.FixedSize = 1, true
+			bar.Size, bar.FixedSize = tabBarRows, true
 			groups.Children = append(groups.Children, components.LayoutNode{ID: fmt.Sprintf("group-%d", i), Axis: components.LayoutVertical, Weight: g.weight,
 				Children: []components.LayoutNode{bar, leaf(g.editorPanel)}})
 		}
@@ -200,19 +200,17 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 		}
 		main.Children = append(main.Children, editors)
 	} else if s.tabsVisible() {
+		// As with split groups: the preview runs up to the header, so its legend sits
+		// beside the tabs and its legend rule continues the tab rule (joinTabRule).
 		bar := leaf(s.openTabs)
-		bar.Size, bar.FixedSize = 1, true
+		bar.Size, bar.FixedSize = tabBarRows, true
 		editors := components.LayoutNode{ID: "editors", Axis: components.LayoutHorizontal,
-			Children: []components.LayoutNode{leaf(s.editorPanel)}}
+			Children: []components.LayoutNode{{ID: "documents", Axis: components.LayoutVertical,
+				Children: []components.LayoutNode{bar, leaf(s.editorPanel)}}}}
 		if panel := s.previewTarget(); panel != nil {
-			// Under the tab bar, not the header rule: the pane needs its own top edge.
-			frame := s.columnFrame()
-			frame.Top = components.TopBox
-			panel.SetFrame(frame)
 			editors.Children = append(editors.Children, leaf(panel))
 		}
-		main.Children = append(main.Children, components.LayoutNode{ID: "documents", Axis: components.LayoutVertical,
-			Children: []components.LayoutNode{bar, editors}})
+		main.Children = append(main.Children, editors)
 	} else {
 		main.Children = append(main.Children, leaf(s.editorPanel))
 		if panel := s.previewTarget(); panel != nil {
@@ -236,6 +234,9 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	opts.Resize = &components.ResizeOpts{State: s.resizeState(), OnChange: s.saveResize}
 	return components.NewModularLayout(root, opts)
 }
+
+// tabBarRows is the tab bar leaf's height: the tabs, and the rule under them.
+const tabBarRows = 2
 
 // frameSidebar stacks the side column's frames into one box: the header's rule (or a box
 // top without one) caps the first, each later pane tees off the one above, and only the

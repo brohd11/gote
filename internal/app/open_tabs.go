@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 )
@@ -31,7 +32,7 @@ type documentTabBar struct {
 func (p *documentTabBar) SetPaneOrigin(x, y int) { p.x, p.y = x, y }
 func (p *documentTabBar) SetSize(w, h int) {
 	p.w, p.h = w, h
-	p.TabBar.SetSize(max(0, w-p.sepW()), h)
+	p.TabBar.SetSize(max(0, w-p.sepW()), min(h, 1))
 }
 
 // sepW is the width the separator takes from the tabs.
@@ -44,10 +45,20 @@ func (p *documentTabBar) sepW() int {
 
 func (p *documentTabBar) View(bool) string {
 	focused := p.group != nil && p.group.editorPanel != nil && p.group.editorPanel.Focused()
-	if p.sepW() == 0 {
-		return p.TabBar.View(focused)
+	row := p.TabBar.View(focused)
+	if p.sepW() > 0 {
+		row = groupSeparator() + row
 	}
-	return groupSeparator() + p.TabBar.View(focused)
+	// The second row is the rule under the tabs, which joinTabRule redraws against the
+	// frames around it.
+	if p.h < 2 {
+		return row
+	}
+	rule := strings.Repeat("─", max(0, p.w-p.sepW()))
+	if p.sepW() > 0 {
+		rule = "│" + rule
+	}
+	return row + "\n" + lipgloss.NewStyle().Foreground(core.BorderColor).Render(rule)
 }
 
 func (s *homeScreen) tabsVisible() bool { return !s.minimal }
@@ -216,7 +227,8 @@ func (s *homeScreen) groupTabInput(sh *core.Shared, msg tea.Msg, mm tea.MouseMsg
 	case tea.MouseMotionMsg, tea.MouseReleaseMsg:
 		return core.Action{}, false
 	}
-	if m.X < p.x || m.X >= p.x+p.w || m.Y != p.y || p.h == 0 {
+	// The rule row, when shown, is the bar's too: claimed, but it holds no tabs.
+	if m.X < p.x || m.X >= p.x+p.w || m.Y < p.y || m.Y >= p.y+p.h {
 		return core.Action{}, false
 	}
 	// The separator sits on the group resize edge; leave it to ModularScreen.
@@ -225,7 +237,7 @@ func (s *homeScreen) groupTabInput(sh *core.Shared, msg tea.Msg, mm tea.MouseMsg
 	}
 	if click, ok := msg.(tea.MouseClickMsg); ok {
 		p.mouseDown = true
-		if click.Button == tea.MouseLeft && click.Mod == 0 {
+		if click.Button == tea.MouseLeft && click.Mod == 0 && m.Y == p.y {
 			s.refreshOpenTabs(sh)
 			if id, _ := p.Click(m.X-p.x-p.sepW(), m.Y-p.y); id != "" {
 				s.activateGroup(g)

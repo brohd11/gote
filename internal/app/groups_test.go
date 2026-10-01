@@ -506,10 +506,14 @@ func TestGroupTabSeparator(t *testing.T) {
 	s.rebuildGroups(sh)
 	s.View(sh)
 	left, right := s.groups()[0], s.groups()[1]
-	if row := ansi.Strip(left.openTabs.View(false)); strings.HasPrefix(row, "│") || ansi.StringWidth(row) != left.openTabs.w {
+	firstRow := func(p *documentTabBar) string {
+		row, _, _ := strings.Cut(ansi.Strip(p.View(false)), "\n")
+		return row
+	}
+	if row := firstRow(left.openTabs); strings.HasPrefix(row, "│") || ansi.StringWidth(row) != left.openTabs.w {
 		t.Fatalf("left bar %q", row)
 	}
-	row := ansi.Strip(right.openTabs.View(false))
+	row := firstRow(right.openTabs)
 	if !strings.HasPrefix(row, "│") || ansi.StringWidth(row) != right.openTabs.w {
 		t.Fatalf("right bar %q", row)
 	}

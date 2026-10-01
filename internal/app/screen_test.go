@@ -2502,7 +2502,8 @@ func TestHomeCtrlCCopiesThroughTheRouter(t *testing.T) {
 // openMarks reads the labels and markers emitted by the document bar.
 func openMarks(s *homeScreen) string {
 	s.refreshOpenTabs(s.sh)
-	row := stripANSI(s.openTabs.View(false))
+	// The tabs' row; the second is the rule under them.
+	row, _, _ := strings.Cut(stripANSI(s.openTabs.View(false)), "\n")
 	return strings.TrimSpace(row)
 }
 
