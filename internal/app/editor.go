@@ -21,7 +21,7 @@ func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
 		Wrap:             defaults.Wrap,
 		LineNumbers:      defaults.LineNumbers,
 		BaseDir:          docsRoot(c),
-		HideTitle:        s.tabsVisible(),
+		HideTitle:        true, // the tab bar, or minimal mode's header, names the doc
 		OnExit:           s.editorExit,
 		OnRelease:        s.editorRelease,
 		OnSaved:          s.editorSaved,

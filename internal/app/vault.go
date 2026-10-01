@@ -79,6 +79,7 @@ func (s *homeScreen) activateRoot(sh *core.Shared, switchRoot func(*Ctx) error, 
 	// A vault or the default root is the full editor, so re-ask every mode default rather
 	// than keeping ModeFile's (including the panel lock).
 	s.panelToggles = true
+	s.menuBar = true
 	s.setDiagnosticsGutter(c.lsp != nil && c.Config.Project.DiagnosticsGutter)
 	gutterCmd := s.setGitGutter(gutterDefault(c.Config, c.Mode))
 	if c.lsp != nil {

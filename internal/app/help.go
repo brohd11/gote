@@ -100,9 +100,12 @@ func (s *homeScreen) helpText() string {
 		general = append(general, previousDocumentKey, nextDocumentKey, moveTabLeftKey, moveTabRightKey)
 	}
 	writeSection("general", general)
-	if !s.minimal {
-		b.WriteString("Menus: alt+f/e/v/o opens File, Edit, View or Options (alt+f is word-forward while the editor types;\n" +
-			"reach File from another menu). In a menu, a row's underlined letter picks it, ←/→ move between menus.\n")
+	if s.minimal {
+		b.WriteString("Menus: alt+1–3 or alt+e/v/o opens Edit, View or Options, showing the menu bar for the session.\n" +
+			"In a menu, a row's underlined letter picks it, ←/→ move between menus.\n\n")
+	} else {
+		b.WriteString("Menus: alt+1–4 or alt+f/e/v/o opens File, Edit, View or Options (alt+f is word-forward while the\n" +
+			"editor types; alt+1 still reaches File). In a menu, a row's underlined letter picks it, ←/→ move between menus.\n")
 		b.WriteString("[ / ]: previous/next document in this group outside text entry.\nSplit requires two tabs; up to four groups. View → Tab Groups can move tabs or close a group.\n\n")
 	}
 	// Language-server keys fire from the editor only. The outline key opens a panel, so the

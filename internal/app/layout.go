@@ -149,12 +149,6 @@ func (s *homeScreen) rebuildLayout(sh *core.Shared) {
 func (s *homeScreen) buildModular() *components.ModularScreen {
 	s.buildingGroups = true
 	defer func() { s.buildingGroups = false }()
-	for _, g := range s.groups() {
-		g.editor.SetTitleVisible(!s.tabsVisible())
-		if g.fullPreview != nil {
-			s.withGroup(g, func() tea.Cmd { g.fullPreview.Title = s.readerTitle(); return nil })
-		}
-	}
 	opts := components.ModularOpts{}
 	leaf := func(panel components.Panel) components.LayoutNode {
 		s.panelSlots[panel] = len(s.panelSlots)
@@ -162,13 +156,9 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 	}
 	s.panelSlots = make(map[components.Panel]int)
 	// The header is the first leaf, so every pane's slot counts it (see firstSlot).
-	s.header = nil
-	var header components.LayoutNode
-	if !s.minimal {
-		s.header = &headerPanel{host: s}
-		header = leaf(s.header)
-		header.Size, header.FixedSize = headerRows, true
-	}
+	s.header = &headerPanel{host: s}
+	header := leaf(s.header)
+	header.Size, header.FixedSize = headerRows, true
 	main := components.LayoutNode{ID: "main", Axis: components.LayoutHorizontal}
 	s.previewPanel.SetFrame(s.columnFrame())
 	if panels := s.sideColumnPanels(); len(panels) > 0 {
@@ -227,10 +217,8 @@ func (s *homeScreen) buildModular() *components.ModularScreen {
 			}},
 		}
 	}
-	if s.header != nil {
-		root = components.LayoutNode{ID: "frame", Axis: components.LayoutVertical,
-			Children: []components.LayoutNode{header, root}}
-	}
+	root = components.LayoutNode{ID: "frame", Axis: components.LayoutVertical,
+		Children: []components.LayoutNode{header, root}}
 	opts.Resize = &components.ResizeOpts{State: s.resizeState(), OnChange: s.saveResize}
 	return components.NewModularLayout(root, opts)
 }
@@ -262,7 +250,7 @@ func (s *homeScreen) frameSidebar(panels []components.Panel) {
 // bottom of the screen.
 func (s *homeScreen) columnFrame() components.TitledFrame {
 	frame := components.TitledFrame{Top: components.TopNone, Bottom: !s.bottomVisible, Focus: components.FocusLegend}
-	if s.header == nil {
+	if !s.headerRule() {
 		frame.Top = components.TopBox
 	}
 	return frame

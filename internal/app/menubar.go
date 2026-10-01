@@ -28,21 +28,34 @@ var headerMenus = []struct {
 	{"options", "Options", key.NewBinding(key.WithKeys("alt+o"), key.WithHelp("alt+o", "Options menu")), false},
 }
 
-// headerMenusWidth is the cells the labels take: " File  Edit  View  Options ".
-var headerMenusWidth = func() int {
-	w := 0
-	for _, m := range headerMenus {
-		w += len([]rune(m.label)) + 2
+// headerMenuRows are the indexes into headerMenus with rows right now: minimal mode drops
+// what a single file cannot use (headerMenuItems), and a menu left empty is not drawn.
+func (s *homeScreen) headerMenuRows(sh *core.Shared) []int {
+	var rows []int
+	for i, m := range headerMenus {
+		if len(s.headerMenuItems(sh, m.id)) > 0 {
+			rows = append(rows, i)
+		}
 	}
-	return w
-}()
+	return rows
+}
 
-// headerMenuSpans are the labels' columns on the header row. They depend only on the
-// labels, so a menu opens from the keyboard before anything has been drawn.
-func headerMenuSpans() []statusSpan {
-	spans := make([]statusSpan, 0, len(headerMenus))
+// headerMenuSpans are the drawn labels' columns on the header row, none while minimal
+// mode's bar is hidden. They depend only on the labels, so a menu opens from the keyboard
+// before anything has been drawn.
+func (s *homeScreen) headerMenuSpans(sh *core.Shared) []statusSpan {
+	if !s.menuBar {
+		return nil
+	}
+	return menuSpans(s.headerMenuRows(sh))
+}
+
+// menuSpans lays out the labels of menus (indexes into headerMenus): " Edit  View ".
+func menuSpans(menus []int) []statusSpan {
+	spans := make([]statusSpan, 0, len(menus))
 	x := 0
-	for _, m := range headerMenus {
+	for _, i := range menus {
+		m := headerMenus[i]
 		w := len([]rune(m.label))
 		spans = append(spans, statusSpan{m.id, x + 1, x + 1 + w})
 		x += w + 2
@@ -50,27 +63,54 @@ func headerMenuSpans() []statusSpan {
 	return spans
 }
 
-// headerMenuDigit is the positional chord of the menu at index i: alt+1 for the first.
-func headerMenuDigit(i int) key.Binding {
-	k := "alt+" + strconv.Itoa(i+1)
-	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, headerMenus[i].label+" menu"))
+// headerMenuLabel is the label of the menu id.
+func headerMenuLabel(id string) string {
+	for _, m := range headerMenus {
+		if m.id == id {
+			return m.label
+		}
+	}
+	return id
 }
 
-// headerMenuKey opens the menu whose chord is k, if one is.
+// menusWidth is the cells spans take, padding included; 0 without any.
+func menusWidth(spans []statusSpan) int {
+	if len(spans) == 0 {
+		return 0
+	}
+	return spans[len(spans)-1].x1 + 1
+}
+
+// headerMenuDigit is the positional chord of the drawn menu at pos: alt+1 for the first.
+func headerMenuDigit(pos int) key.Binding {
+	k := "alt+" + strconv.Itoa(pos+1)
+	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, "menu "+strconv.Itoa(pos+1)))
+}
+
+// headerMenuKey opens the menu whose chord is k, if one is. In minimal mode a chord also
+// reveals the hidden bar, for the rest of the run, counting positions as it will draw them.
 func (s *homeScreen) headerMenuKey(sh *core.Shared, k string) (core.Action, bool) {
 	if s.header == nil {
 		return core.Action{}, false
 	}
-	for i, m := range headerMenus {
-		if core.MatchKey(k, headerMenuDigit(i)) {
-			return s.openHeaderMenu(sh, headerMenuSpans()[i]), true
+	menus := s.headerMenuRows(sh)
+	for pos, i := range menus {
+		m := headerMenus[i]
+		digit := core.MatchKey(k, headerMenuDigit(pos))
+		if !digit && !core.MatchKey(k, m.key) {
+			continue
 		}
-		if core.MatchKey(k, m.key) {
-			if m.yieldsToEditor && s.editorHasKeys() {
-				return core.Action{}, false
-			}
-			return s.openHeaderMenu(sh, headerMenuSpans()[i]), true
+		if !digit && m.yieldsToEditor && s.editorHasKeys() {
+			return core.Action{}, false
 		}
+		var reveal tea.Cmd
+		if !s.menuBar {
+			s.menuBar = true
+			reveal = s.rebuildModular(sh, noFocus) // the side column's frames now meet the rule
+		}
+		act := s.openHeaderMenu(sh, menuSpans(menus)[pos])
+		act.Cmd = tea.Batch(reveal, act.Cmd)
+		return act, true
 	}
 	return core.Action{}, false
 }
@@ -88,12 +128,16 @@ func (s *homeScreen) editorHasKeys() bool {
 // menuBarKey is an open header menu's OnKeyOutside: another menu's chord opens it, and
 // ←/→ walk to the neighboring menu, wrapping. The menu has already closed its cascade.
 func (s *homeScreen) menuBarKey(sh *core.Shared, current, k string) (core.Action, bool) {
-	spans := headerMenuSpans()
-	at := 0
+	menus := s.headerMenuRows(sh)
+	spans := menuSpans(menus)
+	at := -1
 	for i, span := range spans {
 		if span.id == current {
 			at = i
 		}
+	}
+	if at < 0 {
+		return core.Action{}, false
 	}
 	switch {
 	case core.MatchKey(k, core.Keys.Left):
@@ -101,9 +145,10 @@ func (s *homeScreen) menuBarKey(sh *core.Shared, current, k string) (core.Action
 	case core.MatchKey(k, core.Keys.Right):
 		return s.openHeaderMenu(sh, spans[(at+1)%len(spans)]), true
 	}
-	for i, m := range headerMenus {
-		if (core.MatchKey(k, m.key) || core.MatchKey(k, headerMenuDigit(i))) && m.id != current {
-			return s.openHeaderMenu(sh, spans[i]), true
+	for pos, i := range menus {
+		m := headerMenus[i]
+		if (core.MatchKey(k, m.key) || core.MatchKey(k, headerMenuDigit(pos))) && pos != at {
+			return s.openHeaderMenu(sh, spans[pos]), true
 		}
 	}
 	return core.Action{}, false
@@ -145,23 +190,44 @@ func selected(on bool, label string) string { return marked(menuRadioMark, on, l
 func hint(b key.Binding) string { return b.Help().Key }
 
 // headerMenuItems is the dropdown for menu id, built as it opens so disabled rows and
-// checks reflect that moment.
+// checks reflect that moment. Minimal mode leaves out the rows that reach past its one
+// file (other docs, the sidebar, groups, project-wide LSP requests).
 func (s *homeScreen) headerMenuItems(sh *core.Shared, id string) []components.MenuItem {
 	switch id {
 	case "file":
-		return s.fileMenuItems()
+		return tidySeparators(s.fileMenuItems())
 	case "edit":
-		return s.editMenuItems()
+		return tidySeparators(s.editMenuItems())
 	case "view":
-		return s.viewMenuItems(sh)
+		return tidySeparators(s.viewMenuItems(sh))
 	case "options":
-		return s.optionsMenuItems(sh)
+		return tidySeparators(s.optionsMenuItems(sh))
 	}
 	return nil
 }
 
-// fileMenuItems are the session's document roots and the app itself.
+// tidySeparators drops the separators that rows left out of a menu strand: leading,
+// trailing and doubled.
+func tidySeparators(items []components.MenuItem) []components.MenuItem {
+	var out []components.MenuItem
+	for _, item := range items {
+		if item.Separator && (len(out) == 0 || out[len(out)-1].Separator) {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) > 0 && out[len(out)-1].Separator {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+// fileMenuItems are the session's document roots and the app itself. Minimal mode has
+// none of them, so it draws no File menu.
 func (s *homeScreen) fileMenuItems() []components.MenuItem {
+	if s.minimal {
+		return nil
+	}
 	return []components.MenuItem{
 		keyed(submenu("Vaults", false, s.vaultMenuItems), 'v'),
 		{Label: "Refresh", Key: 'r', Pick: menuPick(1, refreshAction)},
@@ -259,8 +325,9 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 			items[i].Hint = chord
 		}
 	}
-	// Search results open the bottom panel, so this respects the panel lock.
-	if s.panelToggles {
+	// Search results open the bottom panel, so this respects the panel lock; it searches
+	// other files, so minimal mode leaves it out.
+	if s.panelToggles && !s.minimal {
 		items = append(items, components.MenuItem{Separator: true},
 			components.MenuItem{Label: "Find in Files", Key: 'f', Hint: hint(findFilesKey), Pick: menuPick(1, func(sh *core.Shared) core.Action {
 				return core.Push(s.findFilesForm(sh))
@@ -272,13 +339,18 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 	items := []components.MenuItem{
 		keyed(submenu(checked(false, "Preview"), false, func() []components.MenuItem { return s.previewMenuItems(sh) }), 'p'),
-		keyed(submenu(checked(false, "Tab Groups"), false, s.tabGroupMenuItems), 't'),
-		keyed(submenu(checked(false, "File view"), !s.sidebar, s.fileViewMenuItems), 'f'),
-		{Separator: true},
-		{Label: checked(s.sidebar, "Sidebar"), Key: 's', Hint: hint(sidebarKey), Pick: menuPick(1, func(*core.Shared) core.Action {
+	}
+	if !s.minimal {
+		items = append(items,
+			keyed(submenu(checked(false, "Tab Groups"), false, s.tabGroupMenuItems), 't'),
+			keyed(submenu(checked(false, "File view"), !s.sidebar, s.fileViewMenuItems), 'f'))
+	}
+	items = append(items, components.MenuItem{Separator: true})
+	if !s.minimal {
+		items = append(items, components.MenuItem{Label: checked(s.sidebar, "Sidebar"), Key: 's', Hint: hint(sidebarKey), Pick: menuPick(1, func(*core.Shared) core.Action {
 			s.setSidebar(!s.sidebar)
 			return core.Action{}
-		})},
+		})})
 	}
 	if s.panelToggles {
 		items = append(items,
@@ -385,23 +457,28 @@ func (s *homeScreen) optionsMenuItems(sh *core.Shared) []components.MenuItem {
 }
 
 // lspMenuItems are Options → LSP: the language-server commands that act on the session
-// rather than the symbol under the cursor (those stay on the right-click menu).
+// rather than the symbol under the cursor (those stay on the right-click menu). Minimal
+// mode keeps the gutter and the restart.
 func (s *homeScreen) lspMenuItems(sh *core.Shared) []components.MenuItem {
 	var items []components.MenuItem
 	if s.panelToggles {
 		items = append(items, components.MenuItem{Label: checked(false, "Show diagnostics"), Key: 'd', Pick: menuPick(2, s.showDiagnostics)})
 	}
-	return append(items,
+	items = append(items,
 		components.MenuItem{Label: checked(s.diagnosticsGutter, "Diagnostics gutter"), Key: 'g', Pick: menuPick(2, func(*core.Shared) core.Action {
 			s.setDiagnosticsGutter(!s.diagnosticsGutter)
 			return core.Action{}
-		})},
-		components.MenuItem{Label: checked(false, "Find references"), Key: 'r', Hint: hint(referencesKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
-			return s.requestAt(sh, lspReqReferences)
-		})},
-		components.MenuItem{Label: checked(false, "Format document"), Key: 'f', Hint: hint(formatKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
-			return s.requestAt(sh, lspReqFormat)
-		})},
+		})})
+	if !s.minimal {
+		items = append(items,
+			components.MenuItem{Label: checked(false, "Find references"), Key: 'r', Hint: hint(referencesKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
+				return s.requestAt(sh, lspReqReferences)
+			})},
+			components.MenuItem{Label: checked(false, "Format document"), Key: 'f', Hint: hint(formatKey), Pick: menuPick(2, func(sh *core.Shared) core.Action {
+				return s.requestAt(sh, lspReqFormat)
+			})})
+	}
+	return append(items,
 		components.MenuItem{Label: checked(false, "Restart language servers"), Key: 's', Pick: menuPick(2, s.restartLanguageServers)},
 	)
 }

@@ -14,6 +14,9 @@ const headerRows = 2
 
 // headerPanel is the layout's top leaf, drawn in place of the router's breadcrumb so its
 // rule can join the pane dividers (see joinRule): ` File  Edit  View  Options │ crumb`.
+// In minimal mode the doc's title bar takes the crumb's place (the editor hides its own),
+// and until the bar is revealed (homeScreen.menuBar) the title bar is all there is: the
+// same two rows, so revealing never moves the body.
 // Not Focusable, so pane traversal skips it; the home screen takes its mouse input
 // (headerInput) before the panes can.
 type headerPanel struct {
@@ -25,23 +28,53 @@ type headerPanel struct {
 func (p *headerPanel) SetSize(w, _ int) { p.w = w }
 
 func (p *headerPanel) View(bool) string {
-	p.menuSpans = headerMenuSpans()
+	s := p.host
+	p.menuSpans = s.headerMenuSpans(s.sh)
+	if !s.menuBar {
+		return s.titleBar(false)
+	}
 	var b strings.Builder
-	for _, m := range headerMenus {
-		// The first letter is the alt+ chord that opens the menu (menuKeys).
-		b.WriteString(" " + components.AccelLabel(m.label, []rune(m.label)[0], lipgloss.NewStyle()) + " ")
+	for _, span := range p.menuSpans {
+		label := headerMenuLabel(span.id)
+		// The first letter is the alt+ chord that opens the menu (headerMenus).
+		b.WriteString(" " + components.AccelLabel(label, []rune(label)[0], lipgloss.NewStyle()) + " ")
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(core.BorderColor).Render("│"))
-	x := headerMenusWidth + 1
-	// The breadcrumb gets what the menus leave; it truncates, the menus never do.
-	crumbs := []core.Crumb{{Full: p.host.CrumbLabel(false), Short: p.host.CrumbLabel(true)}}
-	b.WriteString(core.RenderBreadcrumb(crumbs, max(p.w-x, 0)))
+	if s.minimal {
+		b.WriteString(s.titleBar(true))
+	} else {
+		x := menusWidth(p.menuSpans) + 1
+		// The breadcrumb gets what the menus leave; it truncates, the menus never do.
+		crumbs := []core.Crumb{{Full: s.CrumbLabel(false), Short: s.CrumbLabel(true)}}
+		b.WriteString(core.RenderBreadcrumb(crumbs, max(p.w-x, 0)))
+	}
 	row := ansi.Truncate(b.String(), p.w, "")
 	for i := range p.menuSpans {
 		p.menuSpans[i].x1 = min(p.menuSpans[i].x1, p.w)
 	}
 	return row + "\n" + joinRule(p.w, "", "")
 }
+
+// titleBar is minimal mode's doc title as the editor drew it over itself, muted while the
+// pane is unfocused: both rows, or only the title row (firstRow) beside the menus.
+func (s *homeScreen) titleBar(firstRow bool) string {
+	title := s.previewName() + s.editor.ChangeMark()
+	if s.readerOn() {
+		title = s.previewName() + " · preview"
+	}
+	bar := core.RenderTitleBarMuted(title)
+	if s.editorPanel.Focused() {
+		bar = core.RenderTitleBar(title)
+	}
+	if firstRow {
+		bar, _, _ = strings.Cut(bar, "\n")
+	}
+	return bar
+}
+
+// headerRule reports whether the header's second row is the rule the panes join, rather
+// than minimal mode's bare title bar.
+func (s *homeScreen) headerRule() bool { return s.header != nil && s.menuBar }
 
 // joinRule renders a width-cell rule in the border color that the lines around it meet:
 // a cell gets an arm up where the row above (rendered) carries a line down into it, and an
@@ -186,7 +219,7 @@ func (s *homeScreen) joinTabRule(sh *core.Shared, body string) string {
 // joinHeaderRule redraws the header's rule row in body against the row below it. A
 // no-op when the layout has no header.
 func (s *homeScreen) joinHeaderRule(body string) string {
-	if s.header == nil {
+	if !s.headerRule() {
 		return body
 	}
 	lines := strings.SplitN(body, "\n", headerRows+2)

@@ -69,7 +69,7 @@ type homeScreen struct {
 	buildingGroups       bool
 	gitDocs              docsGit
 	bottomVisible        bool
-	header               *headerPanel // the layout's breadcrumb leaf; nil in minimal mode
+	header               *headerPanel // the layout's menu and breadcrumb leaf (minimal: the title)
 	statusSpans          []statusSpan // the status bar's clickable items, as last rendered
 	rightClickX          int          // where the last right press landed (docsmenu.go)
 	rightClickY          int
@@ -97,6 +97,7 @@ type homeScreen struct {
 	showHidden           bool                 // session-only dot-file visibility in the folder view
 	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
 	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
+	menuBar              bool                 // the header shows its menus; minimal starts without (single_file_mode.menu_bar)
 	indentGuides         bool                 // config-selected leading-indent visualization for every buffer
 	gitDiff              *gitDiffUI           // anchored, scrollable diff; nil also cancels pending opens
 	gutterDebounce       time.Duration        // internal test seam; production uses gitGutterDebounce
@@ -158,6 +159,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	s.gitGutter = gutterDefault(c.Config, c.Mode)
 	s.diagnosticsGutter = c.lsp != nil && c.Config.modeDefaults(c.Mode).DiagnosticsGutter
 	s.panelToggles = !minimal || c.Config.SingleFile.AllowPanelToggle
+	s.menuBar = !minimal || c.Config.SingleFile.MenuBar
 	s.gutterDebounce = gitGutterDebounce
 	c.groups, c.activeGroup = []*editorGroup{s.editorGroup}, s.editorGroup
 

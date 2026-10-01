@@ -5,9 +5,10 @@
 ## Menus and focus
 
 Project mode provides **File**, **Edit**, **View**, and **Options** menus. Click a
-label or use Alt+F, Alt+E, Alt+V, or Alt+O. While editing, Alt+F keeps its word-forward
-behavior; use Alt+E, then Left to reach File. In an open menu, Left/Right switches
-menus and an underlined letter selects its row.
+label or use Alt+F, Alt+E, Alt+V, or Alt+O. Alt+1 through Alt+4 open the menus by
+position, left to right. While editing, Alt+F keeps its word-forward behavior; use
+Alt+1 to reach File. In an open menu, Left/Right switches menus and an underlined
+letter selects its row.
 
 Click a pane or use Shift+Tab to cycle focus. Esc switches between the editor and
 the last focused pane. If that pane is gone, it falls back to Docs, revealing the
@@ -142,15 +143,24 @@ see [Diagnostics](language-servers.md#diagnostics-and-outline).
 
 ## Single-file mode
 
-`gote path/to/file` starts with just the editor: no menu bar, sidebar, tab bar, or
-help bar. Alt+? still opens shortcut help, and Alt+W closes the file and exits.
+`gote path/to/file` starts with just the editor under its title: no menu bar,
+sidebar, tab bar, or help bar. Alt+? still opens shortcut help, and Alt+W closes the
+file and exits.
+
+A menu chord (Alt+1 and up, Alt+E, Alt+V, or Alt+O) shows the menu bar beside the
+title for the rest of the session; set `single_file_mode.menu_bar: true` to show it
+from launch. Its menus hold only what acts on the one file: **Edit** has the
+clipboard, **View** has Preview, Wrap, Line numbers, Git gutter, and Theme, and
+**Options → LSP** has the diagnostics gutter and Restart language servers. A menu with
+nothing to offer is not drawn, so the chords count from Edit.
 Ctrl+N and editor groups are unavailable.
 Launch a directory or vault from the shell to use project mode.
 
 By default, `single_file_mode.allow_panel_toggle: false` disables Alt+pipe,
 Alt+Shift+O, and Ctrl+Alt+F. The help page lists locked shortcuts with the setting
 responsible. Set it to true to allow the bottom panel, outline, and Find in Files;
-this does not restore the menu or help bar.
+the outline, bottom panel, and Show diagnostics rows then appear in the menus too.
+It does not restore the help bar.
 
 Language tools are enabled by default. Set `single_file_mode.default_allow_lsp:
 false` to disable them for file launches, or `auto-lsp: false` for every mode.

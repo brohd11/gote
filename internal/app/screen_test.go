@@ -62,9 +62,14 @@ func minimalCfg() Config {
 // navigation Action but cannot apply it to a stack.
 func newHomeRouter(t *testing.T, opts Options) (tea.Model, *homeScreen, *core.Shared) {
 	t.Helper()
+	return newHomeRouterCfg(t, DefaultConfig(), opts)
+}
+
+// newHomeRouterCfg is newHomeRouter with a config of the test's own.
+func newHomeRouterCfg(t *testing.T, cfg Config, opts Options) (tea.Model, *homeScreen, *core.Shared) {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
-	cfg := DefaultConfig()
 	sh := core.NewShared(New("test", cfg, opts))
 	r := core.NewRouter(sh, []core.TabEntry{
 		{Title: "Editor", New: func(sh *core.Shared) core.Screen { return NewHomeScreen(sh) }},

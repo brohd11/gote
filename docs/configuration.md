@@ -48,6 +48,7 @@ single_file_mode:
   default_diagnostics_gutter: false
   default_allow_lsp: true
   allow_panel_toggle: false
+  menu_bar: false
 ```
 
 Project defaults apply to bare, directory, and vault launches; single-file defaults
@@ -59,7 +60,8 @@ buffers. Alt+Z and Alt+L toggle them per document for the current session.
 
 `auto-lsp: true` is the default master switch for language servers. Both it and the
 mode's `default_allow_lsp` must be true to allow a server. Single-file
-`allow_panel_toggle` controls the outline, bottom panel, and Find in Files; see
+`allow_panel_toggle` controls the outline, bottom panel, and Find in Files, and
+`menu_bar: true` shows the menu bar from launch; see
 [single-file mode](editing.md#single-file-mode).
 
 `default_doc_mode: off` selects syntax highlighting for new Markdown documents;

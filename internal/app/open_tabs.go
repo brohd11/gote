@@ -63,13 +63,6 @@ func (p *documentTabBar) View(bool) string {
 
 func (s *homeScreen) tabsVisible() bool { return !s.minimal }
 
-func (s *homeScreen) readerTitle() string {
-	if s.tabsVisible() {
-		return ""
-	}
-	return s.previewName() + " · preview"
-}
-
 func (s *homeScreen) panelSlot(panel components.Panel) int {
 	if slot, ok := s.panelSlots[panel]; ok {
 		return slot

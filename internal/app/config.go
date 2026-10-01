@@ -116,14 +116,17 @@ type ModeDefaults struct {
 	AllowLSP bool `yaml:"default_allow_lsp"`
 }
 
-// SingleFileConfig is ModeDefaults plus AllowPanelToggle, which only the minimal launch
-// needs.
+// SingleFileConfig is ModeDefaults plus AllowPanelToggle and MenuBar, which only the
+// minimal launch needs.
 type SingleFileConfig struct {
 	ModeDefaults `yaml:",inline"`
 	// AllowPanelToggle keeps the bottom panel and outline reachable. False drops their menu
 	// rows and disables alt+|, alt+shift+o and ctrl+alt+f (find in files opens the panel). The ?
 	// overlay still lists them, marked off with this key's name.
 	AllowPanelToggle bool `yaml:"allow_panel_toggle"`
+	// MenuBar shows the menus beside the title from launch. False keeps the bare title bar
+	// until a menu chord (alt+digit, or a menu's alt+letter) reveals it for the run.
+	MenuBar bool `yaml:"menu_bar"`
 }
 
 // modeDefaults picks the section a launch reads; the one place mode maps to section.
@@ -155,6 +158,7 @@ func DefaultConfig() Config {
 		SingleFile: SingleFileConfig{
 			ModeDefaults:     ModeDefaults{GitGutter: true, DiagnosticsGutter: false, AllowLSP: true},
 			AllowPanelToggle: false,
+			MenuBar:          false,
 		},
 		LanguageServers: defaultLanguageServers(),
 		ClickDefinition: clickAlt,

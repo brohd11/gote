@@ -24,8 +24,9 @@ precedence over vault names. An unknown explicit vault name prints the vault lis
 and an error. A configured vault whose directory is missing is a launch error.
 
 Directory and vault launches provide the multi-document interface. A file launch
-starts with only the editor, without the menu bar, sidebar, tabs, or help bar.
-See [single-file mode](editing.md#single-file-mode) for its panel restrictions.
+starts with only the editor, without the sidebar, tabs, or help bar; its menu bar
+stays hidden until a menu chord or `single_file_mode.menu_bar`. See
+[single-file mode](editing.md#single-file-mode) for its panel restrictions.
 
 ## Flags and file discovery
 

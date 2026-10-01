@@ -55,8 +55,9 @@ func TestOutlinePanelLayoutModesAndMinimal(t *testing.T) {
 	Of(msh).close()
 	Of(msh).lsp = nil
 	minimal.Update(msh, keyMsg("alt+shift+o"))
-	if minimal.sidebar || !minimal.sideColumnVisible() || minimal.panelSlot(minimal.outlinePanel) != 0 ||
-		minimal.panelSlot(minimal.editorPanel) != 1 {
+	// Slot 0 is the header leaf here too: minimal mode's title bar.
+	if minimal.sidebar || !minimal.sideColumnVisible() || minimal.panelSlot(minimal.outlinePanel) != 1 ||
+		minimal.panelSlot(minimal.editorPanel) != 2 {
 		t.Fatalf("minimal outline layout = sidebar %v outline %d editor %d",
 			minimal.sidebar, minimal.panelSlot(minimal.outlinePanel), minimal.panelSlot(minimal.editorPanel))
 	}
