@@ -51,8 +51,8 @@ func TestMenuBarChords(t *testing.T) {
 		return labels[0]
 	}
 	for chord, want := range map[string]string{
-		"alt+f": "Save", "alt+e": "Copy", "alt+v": "Preview", "alt+o": "LSP",
-		"alt+1": "Save", "alt+2": "Copy", "alt+3": "Preview", "alt+4": "LSP",
+		"alt+f": "Save", "alt+e": "Undo", "alt+v": "Preview", "alt+o": "LSP",
+		"alt+1": "Save", "alt+2": "Undo", "alt+3": "Preview", "alt+4": "LSP",
 	} {
 		model, _ = model.Update(keyMsg(chord))
 		if got := first(); got != want {
@@ -68,7 +68,7 @@ func TestMenuBarChords(t *testing.T) {
 		{"right", "Preview"}, // Edit → View
 		{"alt+o", "LSP"},     // View → Options by its chord
 		{"left", "Preview"},  // Options → View
-		{"left", "Copy"},     // View → Edit
+		{"left", "Undo"},     // View → Edit
 		{"left", "Save"},     // Edit → File
 		{"left", "LSP"},      // File → Options, wrapping
 		{"alt+f", "Save"},    // → File by its chord
@@ -100,7 +100,7 @@ func TestMenuBarLeavesAltFToTheEditor(t *testing.T) {
 		t.Fatalf("alt+f in the editor should move a word, not open File (top %T)", model.(core.Router).Top())
 	}
 	model, _ = model.Update(keyMsg("alt+e"))
-	if labels := topMenuLabels(model.(core.Router)); len(labels) == 0 || labels[0] != "Copy" {
+	if labels := topMenuLabels(model.(core.Router)); len(labels) == 0 || labels[0] != "Undo" {
 		t.Fatalf("alt+e should open Edit from the editor, got %v", labels)
 	}
 	model, _ = model.Update(keyMsg("esc"))

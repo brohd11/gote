@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -228,6 +229,7 @@ func (s *homeScreen) fileMenuItems() []components.MenuItem {
 	items := []components.MenuItem{
 		{Label: "Save", Key: 's', Hint: "ctrl+s", Pick: menuPick(1, func(sh *core.Shared) core.Action { return s.editor.Save(sh) })},
 		{Label: "Save As", Key: 'a', Hint: "ctrl+shift+s", Pick: menuPick(1, func(sh *core.Shared) core.Action { return s.editor.SaveAs(sh) })},
+		{Label: "Close", Key: 'c', Hint: "alt+w", Pick: menuPick(1, func(sh *core.Shared) core.Action { return s.editor.Close(sh) })},
 		{Separator: true},
 	}
 	if !s.minimal {
@@ -324,21 +326,45 @@ func keyed(item components.MenuItem, k rune) components.MenuItem {
 
 // editMenuItems are the editor's own clipboard rows, labeled with gote's chords.
 func (s *homeScreen) editMenuItems() []components.MenuItem {
-	items := s.editor.ClipboardItems()
+	clipboard := s.editor.ClipboardItems()
 	for i, chord := range []string{"ctrl+c", "ctrl+x", "ctrl+v"} {
-		if i < len(items) {
-			items[i].Hint = chord
+		if i < len(clipboard) {
+			clipboard[i].Hint = chord
+		}
+	}
+	edits := map[string]components.MenuItem{}
+	for _, it := range s.editor.EditItems() {
+		edits[it.Label] = it
+	}
+	row := func(label string) []components.MenuItem {
+		if it, ok := edits[label]; ok {
+			return []components.MenuItem{it}
+		}
+		return nil
+	}
+	sep := []components.MenuItem{{Separator: true}}
+	items := slices.Concat(row("Undo"), row("Redo"), sep, clipboard, sep, row("Search"))
+	// The reader shows the doc, not the buffer these rows would change.
+	if s.readerOn() {
+		for i := range items {
+			items[i].Disabled = true
 		}
 	}
 	// Search results open the bottom panel, so this respects the panel lock; it searches
 	// other files, so minimal mode leaves it out.
 	if s.panelToggles && !s.minimal {
-		items = append(items, components.MenuItem{Separator: true},
+		items = append(items,
 			components.MenuItem{Label: "Find in Files", Key: 'f', Hint: hint(findFilesKey), Pick: menuPick(1, func(sh *core.Shared) core.Action {
 				return core.Push(s.findFilesForm(sh))
 			})})
 	}
-	return items
+	tail := slices.Concat(sep, row("Indent"), row("Dedent"), row("Toggle comment"))
+	if s.readerOn() {
+		for i := range tail {
+			tail[i].Disabled = true
+		}
+	}
+	return append(items, tail...)
 }
 
 func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
@@ -378,6 +404,9 @@ func (s *homeScreen) viewMenuItems(sh *core.Shared) []components.MenuItem {
 		components.MenuItem{Separator: true},
 		components.MenuItem{Label: checked(false, "Theme"), Key: 'h', Pick: menuPick(1, func(*core.Shared) core.Action {
 			return core.Push(components.ThemePicker())
+		})},
+		components.MenuItem{Label: checked(false, "Help"), Key: 'e', Hint: "alt+?", Pick: menuPick(1, func(*core.Shared) core.Action {
+			return core.Push(s.helpScreen())
 		})},
 	)
 }

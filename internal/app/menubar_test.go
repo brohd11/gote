@@ -71,9 +71,9 @@ func TestHeaderMenuContents(t *testing.T) {
 	_, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
 	for id, want := range map[string]string{
-		"file":    "Save | Save As | Vaults | Refresh | Update gote | Quit",
-		"edit":    "Copy | Cut | Paste | Find in Files",
-		"view":    "Preview | Tab Groups | File view | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter | Theme",
+		"file":    "Save | Save As | Close | Vaults | Refresh | Update gote | Quit",
+		"edit":    "Undo | Redo | Copy | Cut | Paste | Search | Find in Files | Indent | Dedent | Toggle comment",
+		"view":    "Preview | Tab Groups | File view | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter | Theme | Help",
 		"options": "LSP",
 	} {
 		if got := strings.Join(menuLabels(s.headerMenuItems(sh, id)), " | "); got != want {
@@ -84,9 +84,17 @@ func TestHeaderMenuContents(t *testing.T) {
 		"Show diagnostics | Diagnostics gutter | Find references | Format document | Restart language servers" {
 		t.Errorf("Options → LSP = %q", got)
 	}
-	edit := s.headerMenuItems(sh, "edit")
-	if !edit[0].Disabled || edit[0].Hint != "ctrl+c" {
-		t.Errorf("Copy should be disabled without a selection and hint ctrl+c: %+v", edit[0])
+	for _, it := range s.headerMenuItems(sh, "edit") {
+		switch it.Label {
+		case "Copy":
+			if !it.Disabled || it.Hint != "ctrl+c" {
+				t.Errorf("Copy should be disabled without a selection and hint ctrl+c: %+v", it)
+			}
+		case "Undo":
+			if !it.Disabled || it.Hint != "ctrl+z" {
+				t.Errorf("Undo should be disabled without history and hint ctrl+z: %+v", it)
+			}
+		}
 	}
 }
 
@@ -244,7 +252,7 @@ func TestMenuBarSwitches(t *testing.T) {
 
 	model = openHeaderMenu(t, model, s, sh, "file")
 	model, _ = model.Update(tea.MouseMotionMsg{X: headerLabelX(t, model, s, "edit"), Y: sh.BodyY()})
-	if got := topLabels(); got != "Copy | Cut | Paste | Find in Files" {
+	if got := topLabels(); got != "Undo | Redo | Copy | Cut | Paste | Search | Find in Files | Indent | Dedent | Toggle comment" {
 		t.Fatalf("pointing at Edit should switch to it, top menu = %q", got)
 	}
 	if underTop() != s {

@@ -1,10 +1,14 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 )
 
@@ -33,7 +37,7 @@ func TestMinimalMenuBarHiddenByDefault(t *testing.T) {
 	}
 
 	model, _ = model.Update(keyMsg("alt+e"))
-	if labels := topMenuLabels(model.(core.Router)); len(labels) == 0 || labels[0] != "Copy" {
+	if labels := topMenuLabels(model.(core.Router)); len(labels) == 0 || labels[0] != "Undo" {
 		t.Fatalf("alt+e should reveal the bar and open Edit, got %v", labels)
 	}
 	model, _ = model.Update(keyMsg("esc"))
@@ -64,11 +68,11 @@ func TestMinimalMenuBarChords(t *testing.T) {
 	}
 	for _, step := range []struct{ key, want string }{
 		{"alt+1", "Save"},
-		{"alt+2", "Copy"},
+		{"alt+2", "Undo"},
 		{"alt+3", "Preview"},
 		{"alt+4", "LSP"},
 		{"left", "Preview"},
-		{"left", "Copy"},
+		{"left", "Undo"},
 		{"left", "Save"},
 		{"left", "LSP"}, // File → Options, wrapping
 	} {
@@ -93,19 +97,19 @@ func TestMinimalMenuItems(t *testing.T) {
 		view, lsp []string
 	}{
 		{"locked", DefaultConfig(),
-			[]string{"Preview", "Wrap", "Line numbers", "Git gutter", "Theme"},
+			[]string{"Preview", "Wrap", "Line numbers", "Git gutter", "Theme", "Help"},
 			[]string{"Diagnostics gutter", "Restart language servers"}},
 		{"panels", minimalCfg(),
-			[]string{"Preview", "Outline", "Bottom panel", "Wrap", "Line numbers", "Git gutter", "Theme"},
+			[]string{"Preview", "Outline", "Bottom panel", "Wrap", "Line numbers", "Git gutter", "Theme", "Help"},
 			[]string{"Show diagnostics", "Diagnostics gutter", "Restart language servers"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, sh := newHomeCfg(t, tc.cfg, Options{Mode: ModeFile, File: soloFile(t)})
 			defer Of(sh).close()
-			if got := menuLabels(s.headerMenuItems(sh, "file")); !slices.Equal(got, []string{"Save", "Save As", "Quit"}) {
+			if got := menuLabels(s.headerMenuItems(sh, "file")); !slices.Equal(got, []string{"Save", "Save As", "Close", "Quit"}) {
 				t.Fatalf("File = %v", got)
 			}
-			if got := menuLabels(s.headerMenuItems(sh, "edit")); !slices.Equal(got, []string{"Copy", "Cut", "Paste"}) {
+			if got := menuLabels(s.headerMenuItems(sh, "edit")); !slices.Equal(got, []string{"Undo", "Redo", "Copy", "Cut", "Paste", "Search", "Indent", "Dedent", "Toggle comment"}) {
 				t.Fatalf("Edit = %v", got)
 			}
 			view := s.headerMenuItems(sh, "view")
@@ -121,5 +125,55 @@ func TestMinimalMenuItems(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMenuHelpCloseAndReader: View → Help is the ? page, File → Close is alt+w (a clean
+// single file quits), and the editor rows grey out while the reader holds the pane.
+func TestMenuHelpCloseAndReader(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SingleFile.MenuBar = true
+	model, s, sh := newHomeRouterCfg(t, cfg, Options{Mode: ModeFile, File: soloFile(t)})
+	defer Of(sh).close()
+	_ = s.editor.LoadFile()
+
+	model, _ = model.Update(keyMsg("alt+3"))
+	model = chooseMenuRow(t, model, "Help")
+	if d, ok := model.(core.Router).Top().(*components.DocScreen); !ok || d.Title != "gote · shortcuts" {
+		t.Fatalf("View → Help should open the shortcuts page, top %T", model.(core.Router).Top())
+	}
+	model, _ = model.Update(keyMsg("esc"))
+
+	model, _ = model.Update(keyMsg("alt+1"))
+	var quit tea.Cmd
+	menu := model.(core.Router).Top().(*components.MenuScreen)
+	for i, it := range menu.Items() {
+		if it.Label == "Close" {
+			menu.Select(i)
+			_, quit = model.Update(keyMsg("enter"))
+		}
+	}
+	if quit == nil {
+		t.Fatal("File → Close on a clean single file should quit")
+	}
+	if _, ok := quit().(tea.QuitMsg); !ok {
+		t.Fatal("File → Close on a clean single file should quit")
+	}
+
+	md := filepath.Join(t.TempDir(), "notes.md")
+	if err := os.WriteFile(md, []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reader, rsh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: md})
+	defer Of(rsh).close()
+	reader.Update(rsh, keyMsg("ctrl+p"))
+	reader.Update(rsh, keyMsg("ctrl+p"))
+	if !reader.readerOn() {
+		t.Fatal("two ctrl+p should reach the reader")
+	}
+	for _, it := range reader.headerMenuItems(rsh, "edit") {
+		if !it.Separator && !it.Disabled {
+			t.Fatalf("%q should be disabled under the reader", it.Label)
+		}
 	}
 }

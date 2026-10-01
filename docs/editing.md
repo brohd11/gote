@@ -8,7 +8,10 @@ Project mode provides **File**, **Edit**, **View**, and **Options** menus. Click
 label or use Alt+F, Alt+E, Alt+V, or Alt+O. Alt+1 through Alt+4 open the menus by
 position, left to right. While editing, Alt+F keeps its word-forward behavior; use
 Alt+1 to reach File. In an open menu, Left/Right switches menus and an underlined
-letter selects its row.
+letter selects its row. The menus mirror the editor's keys: **File** has Save, Save As,
+Close, and Quit; **Edit** has Undo, Redo, the clipboard, Search, Indent, Dedent, and
+Toggle comment; **View → Help** opens the shortcut page. Edit's rows are disabled
+while the reader shows the document.
 
 Click a pane or use Shift+Tab to cycle focus. Esc switches between the editor and
 the last focused pane. If that pane is gone, it falls back to Docs, revealing the
@@ -157,9 +160,9 @@ file and exits.
 A menu chord (Alt+1 through Alt+4, Alt+E, Alt+V, or Alt+O) shows the menu bar beside
 the title for the rest of the session; set `single_file_mode.menu_bar: true` to show
 it from launch. Its menus hold only what acts on the one file: **File** has Save,
-Save As, and Quit, **Edit** has the clipboard, **View** has Preview, Wrap, Line
-numbers, Git gutter, and Theme, and **Options → LSP** has the diagnostics gutter and
-Restart language servers.
+Save As, Close, and Quit, **Edit** has the editing rows (no Find in Files), **View**
+has Preview, Wrap, Line numbers, Git gutter, Theme, and Help, and **Options → LSP**
+has the diagnostics gutter and Restart language servers.
 Ctrl+N and editor groups are unavailable.
 Launch a directory or vault from the shell to use project mode.
 
