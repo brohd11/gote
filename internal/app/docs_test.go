@@ -144,20 +144,23 @@ func TestScanDocsPaths(t *testing.T) {
 	}
 }
 
-// TestHomeDocs: the home store lists only its direct children, and a missing store
-// is created rather than an error.
+// TestHomeDocs: the home store is scanned like a vault — nested files to depth, dot-dirs
+// pruned — and a missing store is created rather than an error.
 func TestHomeDocs(t *testing.T) {
 	root := writeTree(t)
-	if got := docNames(HomeDocs(root, mdOnly)); !equalNames(got, "F.MD", "a.md") {
-		t.Fatalf("home docs = %v, want the flat md files only", got)
+	if got := docNames(HomeDocs(root, 5, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
+		t.Fatalf("home docs = %v, want every md file outside dot-dirs", got)
+	}
+	if got := docNames(HomeDocs(root, 1, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md") {
+		t.Fatalf("depth-1 home docs = %v, want the scan to stop at depth", got)
 	}
 	write(t, root, "logo.png", []byte("\x89PNG\x00\x00"))
-	if got := docNames(HomeDocs(root, anyText)); !equalNames(got, "F.MD", "a.md", "b.txt") {
-		t.Fatalf("default home docs = %v, want every flat text file and no binary", got)
+	if got := docNames(HomeDocs(root, 0, anyText)); !equalNames(got, "F.MD", "a.md", "b.txt") {
+		t.Fatalf("default home docs = %v, want every top-level text file and no binary", got)
 	}
 
 	missing := filepath.Join(t.TempDir(), "fresh-store")
-	docs := HomeDocs(missing, mdOnly)
+	docs := HomeDocs(missing, 5, mdOnly)
 	if len(docs) != 0 {
 		t.Fatalf("a fresh store should be empty, got %v", docNames(docs))
 	}

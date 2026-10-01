@@ -559,6 +559,8 @@ func (s *homeScreen) CrumbLabel(short bool) string {
 			return "scan: " + c.ScanDir
 		case ModeVault:
 			return "vault: " + c.VaultName
+		case ModeHome:
+			return "vault: " + defaultVaultName
 		}
 	}
 	return "docs"

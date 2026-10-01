@@ -281,7 +281,7 @@ func TestDirLayout(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "docs.md"), []byte("not a doc either"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := docNames(HomeDocs(docs, DocFilter{})); len(got) != 0 {
+	if got := docNames(HomeDocs(docs, 5, DocFilter{})); len(got) != 0 {
 		t.Fatalf("the store = %v, want it empty — nothing in the config home is a document", got)
 	}
 	if st, err := os.Stat(docs); err != nil || !st.IsDir() {

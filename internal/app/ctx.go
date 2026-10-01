@@ -12,16 +12,20 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-// Mode is the active document source: the flat ~/.gote/docs store, an ad-hoc recursive
+// Mode is the active document source: the ~/.gote/docs store, an ad-hoc recursive
 // scan, a single file opened alone, or a configured named vault.
 type Mode int
 
 const (
-	ModeHome  Mode = iota // the flat ~/.gote/docs store — the default
+	ModeHome  Mode = iota // the ~/.gote/docs store, scanned like a vault — the default
 	ModeScan              // recursive scan of ScanDir to Depth
 	ModeFile              // FilePath alone, in the chrome-less minimal editor
 	ModeVault             // a named, configured recursive document root
 )
+
+// defaultVaultName is how the header names the ~/.gote/docs store. It is a label only:
+// the store is not a configured vault, so the name cannot clash with one.
+const defaultVaultName = "gote-default"
 
 // Ctx is gote's app context (core.Shared.App, read with Of): the seed state and every
 // open buffer. Open maps a path to its editor, which owns the buffer, so unsaved edits
@@ -182,7 +186,7 @@ func (c *Ctx) Seed() {
 			c.Files = nil
 			return
 		}
-		c.Files = HomeDocs(dir, c.Filter)
+		c.Files = HomeDocs(dir, c.Depth, c.Filter)
 	}
 }
 

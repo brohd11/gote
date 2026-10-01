@@ -77,26 +77,13 @@ func (f DocFilter) hasExt(name string) bool {
 	return false
 }
 
-// HomeDocs lists the docs stored flat in dir, creating dir if missing. A listing failure
-// yields an empty list.
-func HomeDocs(dir string, f DocFilter) []DocFile {
+// HomeDocs lists the docs in the home store dir, scanned like a vault to depth levels,
+// creating dir if missing. A listing failure yields an empty list.
+func HomeDocs(dir string, depth int, f DocFilter) []DocFile {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var docs []DocFile
-	for _, e := range entries {
-		path := filepath.Join(dir, e.Name())
-		if e.IsDir() || !f.Match(path, e.Name()) {
-			continue
-		}
-		docs = append(docs, DocFile{Name: e.Name(), Path: path, Root: filepath.Clean(dir)})
-	}
-	sortDocs(docs)
-	return docs
+	return ScanDocs(dir, depth, f)
 }
 
 // skipDirs are trees a scan never enters (vendored code, build output); dot-directories

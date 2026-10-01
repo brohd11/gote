@@ -1511,6 +1511,9 @@ func TestNonMinimalKeepsChrome(t *testing.T) {
 	if mask := s.ChromeMask(); mask != (core.ChromeMask{Status: true, Breadcrumb: true}) {
 		t.Fatalf("the doc-list launch should mask only status and breadcrumb, got %+v", mask)
 	}
+	if got := s.CrumbLabel(false); got != "vault: gote-default" {
+		t.Fatalf("home crumb = %q, want the default store named as a vault", got)
+	}
 	if !strings.Contains(s.View(sh), s.CrumbLabel(false)) {
 		t.Fatal("the header leaf should draw the breadcrumb")
 	}
@@ -1570,7 +1573,7 @@ func TestMinimalFrame(t *testing.T) {
 	if !strings.Contains(ordinary, "Docs") {
 		t.Fatalf("the ordinary launch should still draw its sidebar, frame:\n%s", ordinary)
 	}
-	if !strings.Contains(ordLines[0], "docs") {
+	if !strings.Contains(ordLines[0], "vault: gote-default") {
 		t.Fatalf("the ordinary launch's top row should be the breadcrumb, got %q", ordLines[0])
 	}
 	if last := ordLines[len(ordLines)-1]; !strings.HasPrefix(last, " ≡ ▁") {
