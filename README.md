@@ -1,416 +1,59 @@
-# gote - text editor
-
-simple TUI text editor built with Go and Bubbletea.
-
-## Features
- - simple text editing
- - minimal markdown previewer
- - syntax highlighting for select extensions
- - language servers for nine languages: diagnostics, completion, go to definition,
-   hover, outline, find references, format + organize imports, signature help
- - brace-aware indent on Enter for the C family, Go, Rust, JS/TS and friends
- - ctrl+/ toggles comments, over a selection or a single line
- - mouse support for scrolling, selection, right click, alt+click to go to definition
- - asynchronous find in files with optional search roots and live-buffer results
- - vaults store a collection of files for a focused view
-
-**Note:** `ctrl+/` is bound as `ctrl+_`, because that is the key code the chord actually
-produces — terminals put byte `0x1f` on the wire for it. Should your terminal swallow it
-entirely, `alt+/` does the same thing.
-
-**Note:** gote breaks the terminal convention on purpose, so the clipboard chords match
-every desktop OS: `ctrl+c` / `ctrl+x` / `ctrl+v` copy, cut and paste, `ctrl+q` quits
-(confirming unsaved changes), and `alt+w` closes the current buffer.
-
-**Note:** on MacOS, option is treated as alt, but the key does not reach the terminal input by default.
-`Terminal -> Settings -> Profiles -> Keyboard -> Use Option as Meta Key`
-
-Gote checks terminal color capability at startup. A 16-color terminal uses the basic
-syntax palette directly; 256-color and true-color terminals use your configured
-`syntax_colors`. This does not rewrite your configuration. Set
-`syntax_colors.basic_colors: true` to force the basic syntax palette on any terminal.
-Run `gote colors` to see the detected profile and effective palette (`--basic` previews
-the basic palette explicitly).
-
-**a** opens the Actions menu, and **ctrl+alt+a** does the same from inside the editor —
-where a bare letter is text, not a shortcut. In single-file mode the editor is usually the
-only pane, so the modified form is the way in. Like every other alt chord it needs the
-terminal's option-as-meta setting.
-
-## gote works in 2 modes:
-
-### Multi Document
-
-Open documents appear in a tab bar above each editor group. The former Open sidebar
-list and `open_docs_view` setting have been removed; existing `open_docs_view` entries
-are ignored.
-
-**Alt+9 / Alt+0** switch to the previous/next open document while editing
-within the active editor group. Bare **[ / ]** also work outside text entry. Tabs retain opening order and
-show `(*)` for unsaved changes, `(!)` for changes on disk, `(!*)` for both, and
-`[P]` on documents in Reader mode. The same change markers appear in
-the editor title in single-file mode.
-
-**Alt+T** moves the current tab right. At the rightmost group it creates a
-new side-by-side group, provided the source has at least two tabs. **Ctrl+T** moves
-the tab left when a group exists there. Up to four groups can be open, each with
-its own tab bar. Moving a tab preserves its edits, undo history, cursor, and scroll.
-A document appears in one group; opening it again focuses that group.
-
-Click an editor or use **Shift+Tab** to change focus. New documents open in the last
-active group, and shortcuts and interactive LSP features follow its selected document.
-An emptied group closes automatically. **Actions → Editor groups → Close editor group** moves its
-remaining tabs to a neighbor. Group tabs, selections, widths, and the active group
-restore with the project or vault; unsaved buffers are not restored.
-
-Each Markdown document has a **doc mode**, kept for as long as its buffer is open:
-**Off** (syntax highlighting), **Live** or **Reader**. `ctrl+p` cycles them
-(off → live → reader → off), and View → Preview → Doc sets any of them (grayed out on non-Markdown files). Reader replaces only that document's
-editor; `esc` leaves it for the mode it had before. New
-documents start in the **default mode**, `default_doc_mode: off` or `live` in
-`config.yml` (also View → Preview → Default, which writes the file and applies to
-documents opened afterwards). A document opened from a link in rendered Markdown opens
-in Reader.
-
-The **side preview** (`alt+p`, or View → Preview → Side by side) is a column beside the editors that
-renders the active document whatever its mode, Reader included. On a file it cannot
-render it shows "Could not preview", so switching documents never moves the layout.
-
-**Live preview** renders
-Markdown inside the editor itself: headings lose their `#`, bullets and task boxes become
-glyphs, emphasis, code and link markup is hidden, and tables line up. Lines never re-flow.
-The caret's line, any selected lines and lines with search hits show their source, so
-editing always happens on the raw text; a list bullet stays drawn there unless the caret
-or selection touches its marker. Rendered lines use the full preview's theme palette
-(headings, links, code chips, quote bars and rules match the reader), while source lines keep
-the `md_*` syntax colors, and rules span the pane. Fenced blocks that name a language are
-highlighted like the preview's while live preview is on; plain editing keeps one code color. It is one of the per-document modes above. Tab bars remain visible when the split closes. Splits are
-unavailable in minimal single-file mode. **Actions → Editor groups** also provides both move actions and group closing.
-
-When the terminal regains focus, gote checks loaded open documents for changes on
-disk. Clean buffers reload automatically, preserving the cursor and scroll position
-where possible and clearing undo history. Dirty buffers keep your edits. Saving
-checks the file again and asks for acknowledgement before overwriting external
-changes (or recreating a deleted file). Cancelling keeps your buffer and its marker.
-Click a tab to open it; overflow arrows scroll the bar without changing documents.
-Tabs replace the filename header in the editor and the reader.
-The bar remains visible with the sidebar hidden. Single-file mode starts minimal.
-
-Unfocused editors keep their syntax colors and hide the caret. Their scrollbars and
-selected tab backgrounds use the muted theme color; the focused group keeps the accent.
-
-`esc` toggles between the editor and the pane you were last in. Leaving the editor hands
-the keys back to the docs list, the outline, the side preview or the
-bottom panel — whichever held them last — and `esc` there returns to the editor. With
-nothing yet to remember, and when the remembered pane has since been closed, it falls back
-to the docs list; with the sidebar hidden and nowhere else to go, it brings the sidebar
-back first. `shift+tab` still cycles through every pane in turn.
-
-Default mode shows a sidebar with docs in a location folder and open documents in tabs.
-`gote` opens the editor in the default location configured in `~/.gote/config.yml` and scans the folder recursively for docs.
-The `default:` key takes either a directory path (`~/notes`) or the name of a configured vault; Non valid setting falls back to default: `~/.gote/docs`.
-
-Press `ctrl+n` to create a pathless buffer in a new tab. New buffers use the first
-available `unsaved_N` name, so closing or saving one releases its number; typing or
-pasting into the empty startup buffer adds its tab the same way. `ctrl+s` gives an
-unsaved buffer a filename, after which it is listed and managed like any other document.
-This shortcut is intentionally unavailable in the chrome-less single-document mode.
-
-The sidebar lists the scan flat by default; `alt+f` cycles the focused Docs pane through
-the flat list, folder browser, and grouped folders. View switching is inactive during
-filter entry; in the editor, `alt+f` keeps its word-movement behavior.
-Set `file_view: flat`, `folder`, or `grouped` in the config to choose the starting view.
-An empty, omitted, or unrecognized `file_view` honors the legacy `folder_view` setting
-(`true` starts in the folder browser; otherwise flat). Switching views does not save a preference.
-
-Grouped view uses the same scan results as the flat list. Each heading shows a complete
-root-relative folder path, with its direct files underneath; `docs` and `docs/something`
-are separate groups, and `.` holds root files. Filenames keep their extensions and lose
-the directory suffix. Groups start expanded: Left/Right collapse or expand, Space toggles
-a fold, and `/` searches even collapsed files. Enter or clicking a folder also toggles
-its fold outside filtering. Enter or clicking a file opens it;
-Ctrl+R renames and Ctrl+D deletes it. Folder headings have no file actions. Each view
-retains its cursor and filter, and group folds survive view switches and refreshes.
-
-In the folder browser, `alt+r` switches row density.
-In folder view, `d` enters the selected folder (including `..`) and `x` goes up, bounded by
-the scan or vault root. Enter still opens folders and documents; `d` does nothing on a
-document. Backspace uses the normal Back/filter behavior.
-While the folder panel is focused, `.` shows or hides dot files and directories, except
-while typing a filter. Hidden entries start off; the toggle lasts for the session and
-keeps the existing file-type and dependency-folder filters.
-
-All three Docs views color names by Git status: staged green, untracked bright green,
-modified yellow, conflicts/deletions red, and ignored gray. Clean files use the normal
-foreground; folders keep their directory color unless changes beneath them take priority.
-Mixed staged/unstaged files show the unstaged state. Nested repos, submodules, and
-worktrees are supported. Colors refresh in the background every two seconds while the
-sidebar is visible, and after saves, folder navigation, or Actions → Refresh. Git is
-optional; unavailable status leaves the normal file/directory colors. File listings
-retain their existing refresh behavior; deleted files affect parent colors without
-adding deleted-file rows. The `?` page includes a color legend. The selected row keeps its
-Git color rather than taking the highlight color; the panel's left rule marks the cursor.
-
-
-`gote here [depth:int]` Opens gote in the current directory and scans `depth` folders deep for docs.
-Without a depth it uses `scan_depth` from the config (5 by default).
-
-Set `GOTE_DEPTH` to scan a different depth without typing one every run — `export GOTE_DEPTH=2`
-and every scan starts two folders deep, config included. Anything typed still wins: the depth
-argument beats `--depth`, which beats the variable. A malformed or negative value is refused
-rather than quietly ignored, and a blank one (`GOTE_DEPTH= gote here`) drops it for a single run.
-
-#### Vaults
-
-Create a vault, and you can open by name `gote <my-vault>`. This scans recursively for docs as well.
-
-**Note:** If the passed argument is a valid relative path and clashes with a vault, the relative path will be selected.
-Pass `--vault` to read the argument as a vault name.
-
-`gote --vault` lists the configured vaults, as does a vault that doesn't exist.
-
-Run `gote config` to edit `~/.gote/config.yml`.
-Set `indent_guides: true` there to draw faint leading-indent guides in the editor; the
-default is `false`.
-
-#### Language servers
-
-Language-server support starts lazily when a supported file is opened. Every server is
-optional: gote spawns one only when you open a file for it, and a server that isn't installed
-costs one status line, not a broken editor.
-
-| Files | Server | Install |
-| --- | --- | --- |
-| `.c .h .cc .cpp .hpp .hh` | [`clangd`](https://clangd.llvm.org) | ships with Xcode CLT, or `brew install llvm` |
-| `.go` | [`gopls`](https://pkg.go.dev/golang.org/x/tools/gopls) | `go install golang.org/x/tools/gopls@latest` |
-| `.py` | [`pylsp`](https://github.com/python-lsp/python-lsp-server) | `pip install python-lsp-server` |
-| `.sh .bash` + `#!` shells | [`bash-language-server`](https://github.com/bash-lsp/bash-language-server) | `npm i -g bash-language-server` |
-| `.rs` | [`rust-analyzer`](https://rust-analyzer.github.io) | `rustup component add rust-analyzer` |
-| `.js .jsx .ts .tsx` | [`typescript-language-server`](https://github.com/typescript-language-server/typescript-language-server) | `npm i -g typescript-language-server typescript` |
-| `.cs` | [`csharp-ls`](https://github.com/razzmatazz/csharp-language-server) | `dotnet tool install -g csharp-ls` |
-| `.lua` | [`lua-language-server`](https://luals.github.io) | `brew install lua-language-server` |
-| `.gd` | the Godot editor's own server | run the Godot project |
-
-GDScript is the one that is not a subprocess: it connects to `127.0.0.1:6005`, so the matching
-Godot project has to already be open in Godot. Anything installed with `go install` or
-`dotnet tool install` lands in a directory (`$(go env GOPATH)/bin`, `~/.dotnet/tools`) that has
-to be on your PATH for the bare command to start — otherwise put the full path in `command`.
-
-C# is the weak spot, and deliberately so. The good server — Microsoft's Roslyn language server
-— ships as a payload inside the VS Code C# extension and loads nothing from a standard LSP
-handshake, waiting instead on a non-standard notification naming a solution, so a general
-client cannot drive it. `csharp-ls` is the standalone one that speaks plain LSP; it is less
-capable, but it works. Its root is found by pattern (`*.sln`, then `*.csproj`), since those
-files are named after the project rather than by convention.
-
-A Go file inside a `go.work` workspace starts one server for the whole workspace rather than
-one per module, so cross-module definitions resolve and a monorepo costs a single gopls. A
-module with no workspace above it roots at its own `go.mod`.
-
-`.zsh` and `.fish` files get the shell editing behavior — quote and bracket pairing, and
-indent on Enter — but no language server: `bash-language-server` reports zsh-only and fish
-syntax as errors. It also analyzes the whole workspace in the background, which for a file
-with no project root above it means the directory it sits in; narrow that with a
-`globPattern` under its `initialization_options` if you open shell files from a large tree.
-
-Diagnostics and Find in Files share a full-width bottom panel beneath the sidebar,
-editor, and preview. Its top edge keeps the active view's full title and count, while
-the bottom edge carries compact `Diag` and `Search` tabs. Click those tabs or use
-Left/Right while the panel is focused. `alt+|` toggles the whole panel without taking
-focus from the editor; Actions → LSP → Diagnostics reveals the diagnostic tab. Drag the top
-divider to resize it; the split is remembered during the session.
-
-Use `ctrl+alt+f` or Actions → Find in Files to open a modal with Search and optional
-Path fields. A blank path searches the active document root; relative paths start there,
-and absolute directories are also accepted. Search is literal and smart-case: lowercase
-queries ignore case, while a query containing uppercase is case-sensitive. It searches
-text files recursively, including unsaved content from open path-backed buffers, while
-skipping hidden, dependency, and build directories. Results appear asynchronously in
-the Search tab. Use `ctrl+f` to search the current editor buffer instead.
-
-In either bottom view, Up/Down selects entries and Enter or a click jumps to the
-location; `alt+shift+b` returns. Messages wrap in full, Page Up/Down and the mouse wheel
-scroll, and Escape returns focus to the editor while leaving the panel open. Diagnostics
-cover all open files, current file first. The panel toggles sit on punctuation (`alt+|`
-and `alt+\`) precisely so they stay clear of the editor's word motions: `alt+b` and
-`alt+f` are what a terminal sends for `alt+left` and `alt+right`, and both keep moving
-the cursor by a word.
-
-Click a git gutter marker or press **Alt+Shift+D** in the editor to inspect a unified
-diff against HEAD, including unsaved edits. The shortcut opens the changed section
-at the cursor or within its three context lines, and works with the gutter hidden.
-Removed lines are red and additions are green; deletion ticks reveal removed text.
-The popup wraps long lines and scrolls with Up/Down, Page Up/Down, or the mouse wheel
-over the popup. Esc (or Alt+Shift+D again) closes it. Scrolling outside, typing,
-outside clicks, and pane/document or layout changes dismiss it and continue the
-original action. Alt+D and the editor's word-motion shortcuts keep their existing uses.
-
-In Actions, **LSP** contains diagnostics, the outline, the diagnostics gutter, references,
-formatting, and language-server restart. **Editor Settings** contains the open-document
-list/tab switch and the git gutter. The editor's right-click menu holds only the clipboard
-and Hover info, Go to definition and Find references at the click (single-file mode keeps
-just Hover info, since the others can leave the file). Which of the two columns a launch *starts* with is
-`default_git_gutter` and `default_diagnostics_gutter` in the config section for its mode:
-
-```yaml
-project_mode:            # gote, gote here, gote --vault <name>
-  default_wrap: false
-  default_line_numbers: false
-  default_git_gutter: true
-  default_diagnostics_gutter: true
-  default_allow_lsp: true
-single_file_mode:        # gote <file> — see Single Document
-  default_wrap: false
-  default_line_numbers: false
-  default_git_gutter: true
-  default_diagnostics_gutter: false
-  default_allow_lsp: true
-  allow_panel_toggle: false
-```
-
-`alt+z` toggles soft wrapping and `alt+l` toggles line numbers independently;
-`ctrl+l` is no longer bound to line numbers. With wrapping enabled, Up/Down moves
-between visible rows at the same text column, and Shift+Up/Down extends selection.
-Wrapping prefers spaces and tabs, keeping punctuation attached to words (`end.` stays
-together). A word or URL wider than the pane starts on a fresh row and splits only
-when necessary. Wrapping preserves the document's text and whitespace.
-`default_wrap` and `default_line_numbers` apply to each newly opened or restored
-document and new scratch buffer. Both default to false in each launch mode. Switching
-between open documents retains their runtime choices; toggles do not change config
-or persist across launches. Run `gote config` to add the new keys to an existing config.
-
-The gutter defaults replace the old `git_gutter: on|off|auto` key, whose `auto` encoded exactly this
-per-mode split in code. A config still carrying `git_gutter` loads fine and ignores it;
-`gote config` drops it on the next rewrite.
-
-Language tools use Alt+Shift shortcuts, while completion keeps Ctrl+Space. The old
-Alt+G/H/O/N/M and Ctrl+O bindings are freed; Alt+B still moves by words and Alt+R
-still changes folder density. These shortcuts work while typing in the editor:
-
-| Key | |
-| --- | --- |
-| `alt+shift+g` | go to definition — jumps, or lists them when there is more than one |
-| `alt+shift+b` | jump back, through as many jumps as you made |
-| `alt+shift+h` | hover info for the symbol at the cursor |
-| `alt+shift+o` | show or hide the document outline |
-| `alt+shift+r` | find references |
-| `alt+shift+m` | format the document, organizing imports first |
-| `ctrl+space` | completion |
-
-Signature help needs no key: it appears above the cursor when you open an argument list
-and follows the parameter you are on. Gote sends each request only where the server said
-it can answer; unsupported outline panels show an unavailable message.
-
-The outline is a filterable tree below Docs in the sidebar and starts hidden.
-Nested server symbols keep their hierarchy. Enter or a click jumps to a symbol, left/right and space fold branches,
-and the selection follows the enclosing symbol while you edit. The panel refreshes after
-document switches and settled edits. A server without document-symbol support leaves an
-unavailable message in the panel instead of failing the session.
-
-Two mouse gestures cover the same ground for the pointer: **alt+click** goes to a
-definition, and **ctrl+click** opens the editor menu — a stand-in for right-click in
-terminals that keep the right button for their own context menu. Both live on
-`click_definition` and `click_context` in the config (`alt`, `ctrl`, `shift` or `none`),
-because terminals disagree about which modified clicks they hand over at all: macOS
-Terminal claims ctrl+click for its own menu, iTerm2 turns it into a right click before
-gote sees it, and shift is reserved almost everywhere for the terminal's own selection.
-The editor menu carries the same features as rows, which is the fallback when a terminal
-swallows both.
-
-There is no pointer-hover tooltip. Reporting mouse motion with no button held would put
-an event through the update loop for every cell the pointer crosses; `alt+shift+h` and the
-menu's Hover info row — which acts on the cell you right-clicked — cover it without that.
-
-Set `format_on_save: true` to format on every `ctrl+s`. The reformat lands just after the
-write rather than blocking it, so the buffer is left dirty and the next save settles it.
-
-Diagnostics cover whatever the language server reports on, which is the server's decision
-and not a setting. There are three answers and gote takes all of them:
-
-- A server that supports **`workspace/diagnostic`** (LSP 3.17 pull diagnostics) is asked
-  directly, once per session and again whenever it says the answer changed.
-- A server that **volunteers** more than it was given — Godot's `gdscript-lsp` diagnoses
-  its whole project on startup and pushes the result unasked; rust-analyzer does the same
-  across a crate — simply has that kept. On a 422-file Godot project this is 197
-  diagnostics across 36 files, with one file open and nothing else read.
-- gopls does neither, and reports on the packages holding a file you have opened. In
-  practice that still includes compile errors elsewhere in the workspace once it has
-  loaded one.
-
-Nothing walks the project and nothing is opened on your behalf. A file's diagnostics
-survive closing its tab when the server speaks for the whole project, and are retired with
-the tab when it does not.
-
-Set `auto-lsp: false`, disable an individual entry,
-or override its `address`/`command` in `~/.gote/config.yml` to change those defaults.
-`auto-lsp` is the master switch — never start a server — while each launch mode's
-`default_allow_lsp` narrows it to one kind of launch; the two are ANDed.
-Server-specific `initialization_options` can also be overridden; Python's built-in
-options enable pylsp's parameter snippets for callable completions, while Go's have gopls
-complete a function to its name alone. That is deliberate: the parameter hint fires on the
-`(` you type, so a completion that supplies the parentheses for you is a call you never
-get a hint for.
-
-### Single Document
-
-`gote <my/file.md>`
-
-Open the editor with a single document. Useful if you have your terminal default editor set to gote.
-This launch starts with only the editor, no breadcrumb and no help bar.
-
-What it starts with, and how far it can be opened up, is the `single_file_mode` section of
-`~/.gote/config.yml`:
-
-```yaml
-single_file_mode:
-  default_wrap: false
-  default_line_numbers: false
-  default_git_gutter: true
-  default_diagnostics_gutter: false
-  default_allow_lsp: true
-  allow_panel_toggle: false
-```
-
-With `allow_panel_toggle: false` (the default) the launch is taken at its word: `alt+|`,
-`alt+shift+o` and `ctrl+alt+f` do nothing. Find in files is locked with them because a result opens the bottom panel whether
-or not it was asked for. The `?` overlay still lists every locked key, marked off and
-naming the setting — a binding that silently vanished would read as a bug rather than a
-choice. Set it to `true` and `alt+shift+o` adds the outline and `alt+|` the diagnostics panel,
-still without restoring the breadcrumb or help bar.
-
-`default_allow_lsp: false` denies this launch a language server, which takes every
-LSP-derived row and key with it. `Actions ▸ Vaults` is the way out of the minimal launch,
-and going through it re-asks all four questions against `project_mode` below.
-
-`gote -P <my/file.md>`
-
-Open a markdown file straight into Reader mode, with the rest of the interface out of the way.
-`esc` drops into the editor. Preview only works for `md` files, otherwise just launches gote.
-
+# gote
+
+A terminal text editor built with Go and Bubble Tea. Edit a single file with a
+minimal interface, or work across a folder or named vault with tabs and editor groups.
+
+- Syntax highlighting, language-aware indentation, and mouse support
+- Markdown live preview, Reader mode, and side-by-side preview
+- Find in files, Git status colors, and inline diff inspection
+- Optional language servers for completion, diagnostics, navigation, and formatting
 
 ## Install
 
-Unix:
-```bash
+macOS and Linux:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/brohd11/gote/main/install.sh | sh
 ```
 
-Windows:
+Windows (PowerShell):
+
 ```powershell
 irm https://raw.githubusercontent.com/brohd11/gote/main/install.ps1 | iex
 ```
 
-To update:
-```
-gote update
-```
-More install details (location, flags, etc): [shared install reference](https://github.com/brohd11/goutil/blob/main/docs/install.md).
+Update with `gote update`. See [Installation](docs/installation.md) for install
+locations, terminal setup, and platform notes.
 
-On Windows, `gote config` uses `$env:EDITOR`, then `$env:VISUAL`, and falls back to
-Notepad when neither is set. Editors and language servers installed as `.cmd` wrappers
-(for example `code` or npm-installed servers) are supported. Existing CRLF files keep
-their CRLF line endings when saved; new and mixed-line-ending files use LF.
+## Quick start
 
-**macOS note:** a binary downloaded **in a browser** gets quarantined by Gatekeeper. Clear it
-with `xattr -dr com.apple.quarantine path/to/binary`. This doesn't apply to the installer
-above; the attribute is set by browsers, not by `curl`.
+```sh
+gote here             # Browse text files in the current directory
+gote notes.md         # Edit one file; create it on save if it does not exist
+gote ~/notes          # Browse a folder
+gote -P notes.md      # Open Markdown in Reader mode
+gote                  # Open the configured default folder or vault
+gote config           # Edit ~/.gote/config.yml using $EDITOR or $VISUAL
+```
+
+Save with **Ctrl+S**, close the current buffer with **Alt+W**, and quit with
+**Ctrl+Q** (confirms unsaved changes). **Ctrl+C / Ctrl+X / Ctrl+V** copy, cut, and
+paste. **Alt+?** opens shortcut help while editing; **?** also works outside text entry.
+
+Project mode has File, Edit, View, and Options menus. Click their labels or use
+**Alt+F / Alt+E / Alt+V / Alt+O**. While editing, Alt+F moves forward a word;
+open Edit with Alt+E and press Left to reach File.
+
+On macOS Terminal, enable **Use Option as Meta Key** to send Alt shortcuts.
+See [terminal setup](docs/installation.md#terminal-setup).
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Installation](docs/installation.md) — install, update, and terminal setup
+- [CLI reference](docs/cli.md) — launch modes, vault selection, flags, and scan depth
+- [Configuration](docs/configuration.md) — defaults, colors, and saved preferences
+- [Editing](docs/editing.md) — files, vaults, tabs, groups, shortcuts, and search
+- [Markdown](docs/markdown.md) — live preview, Reader mode, and side preview
+- [Git](docs/git.md) — status colors, gutters, and diff inspection
+- [Language servers](docs/language-servers.md) — setup, language tools, and diagnostics
