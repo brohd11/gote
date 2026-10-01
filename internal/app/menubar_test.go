@@ -71,7 +71,7 @@ func TestHeaderMenuContents(t *testing.T) {
 	_, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
 	for id, want := range map[string]string{
-		"file":    "Vaults | Refresh | Update gote",
+		"file":    "Save | Save As | Vaults | Refresh | Update gote | Quit",
 		"edit":    "Copy | Cut | Paste | Find in Files",
 		"view":    "Preview | Tab Groups | File view | Sidebar | Outline | Bottom panel | Wrap | Line numbers | Git gutter | Theme",
 		"options": "LSP",

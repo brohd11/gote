@@ -20,7 +20,8 @@ Alt+? opens shortcut help while editing; ? also works outside text entry.
 
 | Key | Action |
 | --- | --- |
-| Ctrl+S | Save; ask for a filename for a pathless buffer |
+| Ctrl+S | Save to the document's file; ask for a filename for a pathless buffer |
+| Ctrl+Shift+S | Save As: always ask for a filename, seeded with the current path |
 | Ctrl+N | New unsaved tab (project mode) |
 | Alt+W | Close the current buffer; exit in single-file mode |
 | Ctrl+Q | Quit, confirming unsaved changes |
@@ -108,6 +109,12 @@ Saving or closing it releases that number. Typing or pasting into the empty star
 buffer also adds its tab. Ctrl+S asks for a filename, then manages the saved file like
 other documents.
 
+Ctrl+S on a document that already has a file writes it without asking. Ctrl+Shift+S
+(**File → Save As**) always asks, seeded with the current path: enter re-saves, and a
+new name moves the buffer there after a confirm. Terminals without the kitty keyboard
+protocol send Ctrl+Shift+S as Ctrl+S; use **File → Save As** there. Answering y to the
+close prompt saves the same way as Ctrl+S, then closes. **File → Quit** is Ctrl+Q.
+
 When the terminal regains focus, or on **File → Refresh**, gote checks loaded open
 files for disk changes. Clean buffers reload, preserving cursor/scroll where possible
 and clearing undo history. Dirty buffers retain your edits.
@@ -147,12 +154,12 @@ see [Diagnostics](language-servers.md#diagnostics-and-outline).
 sidebar, tab bar, or help bar. Alt+? still opens shortcut help, and Alt+W closes the
 file and exits.
 
-A menu chord (Alt+1 and up, Alt+E, Alt+V, or Alt+O) shows the menu bar beside the
-title for the rest of the session; set `single_file_mode.menu_bar: true` to show it
-from launch. Its menus hold only what acts on the one file: **Edit** has the
-clipboard, **View** has Preview, Wrap, Line numbers, Git gutter, and Theme, and
-**Options → LSP** has the diagnostics gutter and Restart language servers. A menu with
-nothing to offer is not drawn, so the chords count from Edit.
+A menu chord (Alt+1 through Alt+4, Alt+E, Alt+V, or Alt+O) shows the menu bar beside
+the title for the rest of the session; set `single_file_mode.menu_bar: true` to show
+it from launch. Its menus hold only what acts on the one file: **File** has Save,
+Save As, and Quit, **Edit** has the clipboard, **View** has Preview, Wrap, Line
+numbers, Git gutter, and Theme, and **Options → LSP** has the diagnostics gutter and
+Restart language servers.
 Ctrl+N and editor groups are unavailable.
 Launch a directory or vault from the shell to use project mode.
 

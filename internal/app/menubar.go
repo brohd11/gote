@@ -222,20 +222,25 @@ func tidySeparators(items []components.MenuItem) []components.MenuItem {
 	return out
 }
 
-// fileMenuItems are the session's document roots and the app itself. Minimal mode has
-// none of them, so it draws no File menu.
+// fileMenuItems are the current doc's saves, the session's document roots, and the app
+// itself. Minimal mode keeps the saves and Quit.
 func (s *homeScreen) fileMenuItems() []components.MenuItem {
-	if s.minimal {
-		return nil
-	}
-	return []components.MenuItem{
-		keyed(submenu("Vaults", false, s.vaultMenuItems), 'v'),
-		{Label: "Refresh", Key: 'r', Pick: menuPick(1, refreshAction)},
+	items := []components.MenuItem{
+		{Label: "Save", Key: 's', Hint: "ctrl+s", Pick: menuPick(1, func(sh *core.Shared) core.Action { return s.editor.Save(sh) })},
+		{Label: "Save As", Key: 'a', Hint: "ctrl+shift+s", Pick: menuPick(1, func(sh *core.Shared) core.Action { return s.editor.SaveAs(sh) })},
 		{Separator: true},
-		{Label: "Update gote", Key: 'u', Pick: menuPick(1, func(sh *core.Shared) core.Action {
-			return core.Push(components.NewSelfUpdateLoading(selfUpdateHooks(Of(sh).Version)))
-		})},
 	}
+	if !s.minimal {
+		items = append(items,
+			keyed(submenu("Vaults", false, s.vaultMenuItems), 'v'),
+			components.MenuItem{Label: "Refresh", Key: 'r', Pick: menuPick(1, refreshAction)},
+			components.MenuItem{Separator: true},
+			components.MenuItem{Label: "Update gote", Key: 'u', Pick: menuPick(1, func(sh *core.Shared) core.Action {
+				return core.Push(components.NewSelfUpdateLoading(selfUpdateHooks(Of(sh).Version)))
+			})},
+			components.MenuItem{Separator: true})
+	}
+	return append(items, components.MenuItem{Label: "Quit", Key: 'q', Hint: hint(core.Keys.ForceQuit), Pick: menuPick(1, s.quit)})
 }
 
 // vaultMenuItems are File → Vaults: gote (Config.Default, what a bare launch opens), then

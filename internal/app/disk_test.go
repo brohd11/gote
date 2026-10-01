@@ -180,8 +180,7 @@ func TestFocusMarksDirtyDocsAndTabs(t *testing.T) {
 	if view := stripANSI(s.View(sh)); !strings.Contains(view, "(!*)") {
 		t.Fatalf("tabs missing conflict marker: %s", view)
 	}
-	model, _ = model.Update(keyMsg("ctrl+s"))
-	model, cmd = model.Update(keyMsg("enter"))
+	model, cmd = model.Update(keyMsg("ctrl+s"))
 	model = pumpModel(model, cmd)
 	if _, ok := model.(core.Router).Top().(*components.DialogScreen); !ok {
 		t.Fatal("save missing acknowledgement")
@@ -262,9 +261,8 @@ func TestSaveCompletesAfterSwitchWithoutRekeyingActiveDoc(t *testing.T) {
 	model, s, sh, dir := openDiskFixture(t)
 	first, firstPath := s.editor, s.currentPath
 	model, _ = model.Update(keyMsg("!"))
-	model, _ = model.Update(keyMsg("ctrl+s"))
-	model, check := model.Update(keyMsg("enter"))
-	// The pre-save check pops the filename prompt and returns the delayed write.
+	model, check := model.Update(keyMsg("ctrl+s"))
+	// ctrl+s on a doc with a file asks nothing; the pre-save check returns the delayed write.
 	model, write := model.Update(check())
 	secondPath := filepath.Join(dir, "second.md")
 	writeDiskDoc(t, secondPath, "second")
@@ -309,5 +307,44 @@ func TestReloadReconcilesLSPWithoutAnotherKey(t *testing.T) {
 				t.Fatalf("LSP snapshot stale: %+v", got)
 			}
 		})
+	}
+}
+
+// TestFileMenuSaveAndQuit: File → Save writes a doc that has a file without asking, as
+// ctrl+s does; File → Quit takes ctrl+q's gate — the unsaved-changes confirm while
+// something is dirty, a plain quit otherwise.
+func TestFileMenuSaveAndQuit(t *testing.T) {
+	model, s, sh, _ := openDiskFixture(t)
+	pick := func(label string) tea.Model {
+		t.Helper()
+		model = openHeaderMenu(t, model, s, sh, "file")
+		menu := model.(core.Router).Top().(*components.MenuScreen)
+		for i, it := range menu.Items() {
+			if it.Label == label {
+				menu.Select(i)
+				next, cmd := model.Update(keyMsg("enter"))
+				return pumpModel(next, cmd)
+			}
+		}
+		t.Fatalf("File has no %q: %v", label, menuLabels(menu.Items()))
+		return model
+	}
+
+	model, _ = model.Update(keyMsg("!"))
+	model = pick("Quit")
+	if d, ok := model.(core.Router).Top().(*components.DialogScreen); !ok || d.Title != "unsaved changes" {
+		t.Fatalf("Quit with a dirty doc should confirm, top %T", model.(core.Router).Top())
+	}
+	model, _ = model.Update(keyMsg("esc"))
+
+	model = pick("Save")
+	if model.(core.Router).Top() != s {
+		t.Fatalf("Save on a doc with a file should not ask, top %T", model.(core.Router).Top())
+	}
+	if b, _ := os.ReadFile(s.currentPath); string(b) != "!first" || s.editor.Dirty() {
+		t.Fatalf("Save should write in place, got %q", b)
+	}
+	if _, ok := s.quit(sh).Cmd().(tea.QuitMsg); !ok {
+		t.Fatal("Quit with nothing dirty should quit")
 	}
 }

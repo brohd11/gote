@@ -286,8 +286,7 @@ func TestGroupDelayedSaveRetainsOwner(t *testing.T) {
 	s.moveTab(sh, 1)
 	ed := s.editor
 	model, _ = model.Update(keyMsg("!"))
-	model, _ = model.Update(keyMsg("ctrl+s"))
-	model, cmd := model.Update(keyMsg("enter"))
+	model, cmd := model.Update(keyMsg("ctrl+s"))
 	// Complete the actual save only after focus leaves its document.
 	s.openDoc(sh, a)
 	model = pumpModel(model, cmd)

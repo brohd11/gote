@@ -1972,13 +1972,13 @@ func TestRenameMovesFile(t *testing.T) {
 func TestSaveAsConfirmFlow(t *testing.T) {
 	model, _, _, dir := renameFixture(t, "old.md", "body")
 
-	// Open the doc into the editor pane, then ctrl+s.
+	// Open the doc into the editor pane, then ctrl+shift+s.
 	model, cmd := model.Update(keyMsg("enter"))
 	model = pumpModel(model, cmd)
-	model, _ = model.Update(keyMsg("ctrl+s"))
+	model, _ = model.Update(keyMsg("ctrl+shift+s"))
 	edit, _ := model.(core.Router).Top().(*components.LineEditScreen)
 	if edit == nil {
-		t.Fatal("ctrl+s should raise the save-as box")
+		t.Fatal("ctrl+shift+s should raise the save-as box")
 	}
 
 	moved := filepath.Join(dir, "moved.md")

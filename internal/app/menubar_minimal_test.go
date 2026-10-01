@@ -38,8 +38,7 @@ func TestMinimalMenuBarHiddenByDefault(t *testing.T) {
 	}
 	model, _ = model.Update(keyMsg("esc"))
 	rows = bodyRows(s, sh)
-	if !strings.Contains(rows[0], "Edit  View  Options") || !strings.Contains(rows[0], "solo.go") ||
-		strings.Contains(rows[0], "File") {
+	if !strings.Contains(rows[0], "File  Edit  View  Options") || !strings.Contains(rows[0], "solo.go") {
 		t.Fatalf("revealed bar should show the minimal menus beside the title, got %q", rows[0])
 	}
 	if !strings.Contains(rows[1], "─") || !strings.Contains(rows[2], "package main") {
@@ -48,13 +47,13 @@ func TestMinimalMenuBarHiddenByDefault(t *testing.T) {
 }
 
 // TestMinimalMenuBarChords: with menu_bar on, the bar shows from launch and the digit
-// chords count the menus it draws (no File), wrapping across them.
+// chords count the menus it draws, wrapping across them.
 func TestMinimalMenuBarChords(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.SingleFile.MenuBar = true
 	model, s, sh := newHomeRouterCfg(t, cfg, Options{Mode: ModeFile, File: soloFile(t)})
 	defer Of(sh).close()
-	if row := bodyRows(s, sh)[0]; !strings.HasPrefix(row, " Edit  View  Options │") {
+	if row := bodyRows(s, sh)[0]; !strings.HasPrefix(row, " File  Edit  View  Options │") {
 		t.Fatalf("menu_bar should show the menus from launch, got %q", row)
 	}
 	first := func() string {
@@ -64,12 +63,14 @@ func TestMinimalMenuBarChords(t *testing.T) {
 		return ""
 	}
 	for _, step := range []struct{ key, want string }{
-		{"alt+1", "Copy"},
-		{"alt+2", "Preview"},
-		{"alt+3", "LSP"},
+		{"alt+1", "Save"},
+		{"alt+2", "Copy"},
+		{"alt+3", "Preview"},
+		{"alt+4", "LSP"},
 		{"left", "Preview"},
 		{"left", "Copy"},
-		{"left", "LSP"}, // Edit → Options, wrapping past the hidden File
+		{"left", "Save"},
+		{"left", "LSP"}, // File → Options, wrapping
 	} {
 		model, _ = model.Update(keyMsg(step.key))
 		if got := first(); got != step.want {
@@ -77,9 +78,9 @@ func TestMinimalMenuBarChords(t *testing.T) {
 		}
 	}
 	model, _ = model.Update(keyMsg("esc"))
-	model, _ = model.Update(keyMsg("alt+4"))
+	model, _ = model.Update(keyMsg("alt+5"))
 	if model.(core.Router).Top() != s {
-		t.Fatal("alt+4 names no menu in minimal mode")
+		t.Fatal("alt+5 names no menu")
 	}
 }
 
@@ -101,8 +102,8 @@ func TestMinimalMenuItems(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, sh := newHomeCfg(t, tc.cfg, Options{Mode: ModeFile, File: soloFile(t)})
 			defer Of(sh).close()
-			if items := s.headerMenuItems(sh, "file"); len(items) != 0 {
-				t.Fatalf("File should be empty in minimal mode, got %v", menuLabels(items))
+			if got := menuLabels(s.headerMenuItems(sh, "file")); !slices.Equal(got, []string{"Save", "Save As", "Quit"}) {
+				t.Fatalf("File = %v", got)
 			}
 			if got := menuLabels(s.headerMenuItems(sh, "edit")); !slices.Equal(got, []string{"Copy", "Cut", "Paste"}) {
 				t.Fatalf("Edit = %v", got)

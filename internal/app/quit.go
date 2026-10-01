@@ -21,6 +21,14 @@ func (s *homeScreen) QuitGate(sh *core.Shared) (core.Action, bool) {
 	return core.Push(quitPopup(dirty)), true
 }
 
+// quit is File → Quit: the router's ctrl+q path, whose gate is this screen.
+func (s *homeScreen) quit(sh *core.Shared) core.Action {
+	if act, gated := s.QuitGate(sh); gated {
+		return act
+	}
+	return core.Async(tea.Quit)
+}
+
 // quitPopup builds the dirty-quit confirm; OnQuit keeps Quit/ForceQuit as a force-quit while it
 // is up (rather than stacking another popup).
 func quitPopup(dirty []string) *components.DialogScreen {

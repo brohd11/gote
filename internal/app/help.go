@@ -101,7 +101,8 @@ func (s *homeScreen) helpText() string {
 	}
 	writeSection("general", general)
 	if s.minimal {
-		b.WriteString("Menus: alt+1–3 or alt+e/v/o opens Edit, View or Options, showing the menu bar for the session.\n" +
+		b.WriteString("Menus: alt+1–4 or alt+f/e/v/o opens File, Edit, View or Options, showing the menu bar for the session\n" +
+			"(alt+f is word-forward while the editor types; alt+1 still reaches File).\n" +
 			"In a menu, a row's underlined letter picks it, ←/→ move between menus.\n\n")
 	} else {
 		b.WriteString("Menus: alt+1–4 or alt+f/e/v/o opens File, Edit, View or Options (alt+f is word-forward while the\n" +
