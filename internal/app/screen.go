@@ -262,7 +262,8 @@ func (s *homeScreen) paneFiltering() bool {
 func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 	none := func() core.Action { return core.Action{} }
 	// The menu bar's alt+ chords come first: they open a menu even while the editor types,
-	// except alt+f, which a focused editor keeps for word-forward (headerMenus).
+	// except alt+f, which a focused editor keeps for word-forward; alt+1 reaches File
+	// regardless (headerMenus).
 	if act, ok := s.headerMenuKey(sh, k); ok {
 		return func() core.Action { return act }
 	}

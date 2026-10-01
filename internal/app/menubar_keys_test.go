@@ -50,7 +50,10 @@ func TestMenuBarChords(t *testing.T) {
 		}
 		return labels[0]
 	}
-	for chord, want := range map[string]string{"alt+f": "Vaults", "alt+e": "Copy", "alt+v": "Preview", "alt+o": "LSP"} {
+	for chord, want := range map[string]string{
+		"alt+f": "Vaults", "alt+e": "Copy", "alt+v": "Preview", "alt+o": "LSP",
+		"alt+1": "Vaults", "alt+2": "Copy", "alt+3": "Preview", "alt+4": "LSP",
+	} {
 		model, _ = model.Update(keyMsg(chord))
 		if got := first(); got != want {
 			t.Fatalf("%s should open the menu starting %q, got %q", chord, want, got)
@@ -69,6 +72,7 @@ func TestMenuBarChords(t *testing.T) {
 		{"left", "Vaults"},   // Edit → File
 		{"left", "LSP"},      // File → Options, wrapping
 		{"alt+f", "Vaults"},  // → File by its chord
+		{"alt+3", "Preview"}, // File → View by its position
 	} {
 		model, _ = model.Update(keyMsg(step.key))
 		if got := first(); got != step.want {
@@ -82,7 +86,8 @@ func TestMenuBarChords(t *testing.T) {
 }
 
 // TestMenuBarLeavesAltFToTheEditor: alt+f is the terminal's Option+→, so a focused editor
-// keeps it for word-forward; the other chords still open their menus from the editor.
+// keeps it for word-forward; the other chords, and File's alt+1, still open their menus from
+// the editor.
 func TestMenuBarLeavesAltFToTheEditor(t *testing.T) {
 	model, s, sh := newHomeRouter(t, Options{})
 	defer Of(sh).close()
@@ -97,6 +102,11 @@ func TestMenuBarLeavesAltFToTheEditor(t *testing.T) {
 	model, _ = model.Update(keyMsg("alt+e"))
 	if labels := topMenuLabels(model.(core.Router)); len(labels) == 0 || labels[0] != "Copy" {
 		t.Fatalf("alt+e should open Edit from the editor, got %v", labels)
+	}
+	model, _ = model.Update(keyMsg("esc"))
+	model, _ = model.Update(keyMsg("alt+1"))
+	if labels := topMenuLabels(model.(core.Router)); len(labels) == 0 || labels[0] != "Vaults" {
+		t.Fatalf("alt+1 should open File from the editor, got %v", labels)
 	}
 }
 

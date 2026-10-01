@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -14,7 +15,8 @@ import (
 // the home screen (alt + its first letter, underlined on the label) — except that a menu
 // that yieldsToEditor leaves its chord to a focused editor: alt+f is the byte pair many
 // terminals send for Option+→, the editor's word-forward (see
-// TestHomeLeavesWordMotionsToTheEditor). From the editor, File is one ← away from Edit.
+// TestHomeLeavesWordMotionsToTheEditor). alt + a menu's position (headerMenuDigit) opens it
+// too and never yields, so File stays a chord away from the editor as alt+1.
 var headerMenus = []struct {
 	id, label      string
 	key            key.Binding
@@ -48,12 +50,21 @@ func headerMenuSpans() []statusSpan {
 	return spans
 }
 
+// headerMenuDigit is the positional chord of the menu at index i: alt+1 for the first.
+func headerMenuDigit(i int) key.Binding {
+	k := "alt+" + strconv.Itoa(i+1)
+	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, headerMenus[i].label+" menu"))
+}
+
 // headerMenuKey opens the menu whose chord is k, if one is.
 func (s *homeScreen) headerMenuKey(sh *core.Shared, k string) (core.Action, bool) {
 	if s.header == nil {
 		return core.Action{}, false
 	}
 	for i, m := range headerMenus {
+		if core.MatchKey(k, headerMenuDigit(i)) {
+			return s.openHeaderMenu(sh, headerMenuSpans()[i]), true
+		}
 		if core.MatchKey(k, m.key) {
 			if m.yieldsToEditor && s.editorHasKeys() {
 				return core.Action{}, false
@@ -91,7 +102,7 @@ func (s *homeScreen) menuBarKey(sh *core.Shared, current, k string) (core.Action
 		return s.openHeaderMenu(sh, spans[(at+1)%len(spans)]), true
 	}
 	for i, m := range headerMenus {
-		if core.MatchKey(k, m.key) && m.id != current {
+		if (core.MatchKey(k, m.key) || core.MatchKey(k, headerMenuDigit(i))) && m.id != current {
 			return s.openHeaderMenu(sh, spans[i]), true
 		}
 	}
