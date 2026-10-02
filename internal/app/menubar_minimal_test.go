@@ -109,7 +109,7 @@ func TestMinimalMenuItems(t *testing.T) {
 			if got := menuLabels(s.headerMenuItems(sh, "file")); !slices.Equal(got, []string{"Save", "Save As", "Close", "Quit"}) {
 				t.Fatalf("File = %v", got)
 			}
-			if got := menuLabels(s.headerMenuItems(sh, "edit")); !slices.Equal(got, []string{"Undo", "Redo", "Copy", "Cut", "Paste", "Search", "Indent", "Dedent", "Toggle comment"}) {
+			if got := menuLabels(s.headerMenuItems(sh, "edit")); !slices.Equal(got, []string{"Undo", "Redo", "Copy", "Cut", "Paste", "Select All", "Search", "Indent", "Dedent", "Toggle comment"}) {
 				t.Fatalf("Edit = %v", got)
 			}
 			view := s.headerMenuItems(sh, "view")

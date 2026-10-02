@@ -2417,7 +2417,7 @@ func TestHomeEditorRightClickMenu(t *testing.T) {
 		t.Fatalf("a right click in the editor should raise the menu, top is %T", model.(core.Router).Top())
 	}
 	view := stripANSI(view(model))
-	for _, want := range []string{"Copy", "Cut", "Paste"} {
+	for _, want := range []string{"Copy", "Cut", "Paste", "Select All"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the menu should offer %q:\n%s", want, view)
 		}

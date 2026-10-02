@@ -327,7 +327,7 @@ func keyed(item components.MenuItem, k rune) components.MenuItem {
 // editMenuItems are the editor's own clipboard rows, labeled with gote's chords.
 func (s *homeScreen) editMenuItems() []components.MenuItem {
 	clipboard := s.editor.ClipboardItems()
-	for i, chord := range []string{"ctrl+c", "ctrl+x", "ctrl+v"} {
+	for i, chord := range []string{"ctrl+c", "ctrl+x", "ctrl+v", "ctrl+a"} {
 		if i < len(clipboard) {
 			clipboard[i].Hint = chord
 		}
