@@ -129,7 +129,9 @@ Closing or quitting confirms unsaved changes. If formatting on save is enabled,
 
 ## Search and the bottom panel
 
-Ctrl+F searches the current buffer. Ctrl+Alt+F or **Edit → Find in Files** opens a
+Ctrl+F searches the current buffer. The search bar shows the hit count (`k/N` while
+a match is selected) and ↑/↓ buttons that select the previous/next match, wrapping at
+either end; with the bar focused, the Up and Down arrows do the same. Ctrl+Alt+F or **Edit → Find in Files** opens a
 form with Search and optional Path fields. Tab/Shift+Tab moves between fields,
 Enter starts the search, and Esc cancels.
 
