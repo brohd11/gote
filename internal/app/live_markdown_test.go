@@ -43,8 +43,10 @@ func TestLiveMarkdownRendersEachConstruct(t *testing.T) {
 		{"quoted fence closer keeps the bar", "> ```\n> a\n> ```", 2, "│ ```"},
 		{"a quote does not swallow the next paragraph", "> ```\n> a\ntext", 2, "<source>"},
 		{"ordered stays", "1. first", 0, "<source>"},
-		{"open task", "- [ ] todo", 0, "• ☐ todo"},
-		{"done task", "* [x] done", 0, "• ☑ done"},
+		{"open task", "- [ ] todo", 0, "☐ todo"},
+		{"done task", "* [x] done", 0, "☑ done"},
+		{"nested task", "- a\n  - [ ] b", 1, "  ☐ b"},
+		{"ordered task", "1. [ ] x", 0, "1. ☐ x"},
 		{"quote", "> said", 0, "│ said"},
 		{"nested quote", "> > deep", 0, "│ │ deep"},
 		{"emphasis", "a *b* **c** d", 0, "a b c d"},
@@ -141,7 +143,6 @@ func TestLiveMarkdownBulletGlyphs(t *testing.T) {
 	want := map[int]editor.Glyph{
 		0: {Col: 0, From: '-', Text: '•'},
 		1: {Col: 2, From: '*', Text: '◦'},
-		3: {Col: 0, From: '+', Text: '•'},
 	}
 	for row := 0; row < 5; row++ {
 		gs := hl.ActiveGlyphs(row)

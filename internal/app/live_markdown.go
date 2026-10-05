@@ -263,12 +263,34 @@ func (m *markdownHighlighter) liveQuote(first, last int) {
 var liveBullets = []string{components.MarkdownBullet, "◦", "▪"}
 
 // liveListItem swaps a bullet marker for a depth glyph, and a task box for a check glyph.
+// A bulleted task drops its bullet for the check alone; that is no one-cell swap, so it
+// keeps no active glyph and the caret's row shows the whole source.
 func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
 	pos := v.Pos()
 	if pos < 0 || pos >= len(m.src) {
 		return
 	}
 	end := m.listMarkerEnd(pos)
+	at := end
+	for at < len(m.src) && m.src[at] == ' ' {
+		at++
+	}
+	check := ""
+	if at+3 <= len(m.src) && (at+3 == len(m.src) || m.src[at+3] == ' ' || m.src[at+3] == '\n') {
+		switch string(m.src[at : at+3]) {
+		case "[ ]":
+			check = "☐"
+		case "[x]", "[X]":
+			check = "☑"
+		}
+	}
+	if check != "" {
+		if end == pos+1 {
+			m.addOp(pos, at, "", mdStyleNone)
+		}
+		m.addOp(at, at+3, check, mdStyleNone)
+		return
+	}
 	if end == pos+1 { // a bullet, not an ordered marker
 		depth := -1
 		for p := ast.Node(v); p != nil; p = p.Parent() {
@@ -281,18 +303,6 @@ func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
 		r := m.rowOf(pos)
 		m.glyphs[r] = append(m.glyphs[r], editor.Glyph{Col: m.runeCol(r, pos), From: rune(m.src[pos]),
 			Text: []rune(bullet)[0]})
-	}
-	at := end
-	for at < len(m.src) && m.src[at] == ' ' {
-		at++
-	}
-	if at+3 <= len(m.src) && (at+3 == len(m.src) || m.src[at+3] == ' ' || m.src[at+3] == '\n') {
-		switch string(m.src[at : at+3]) {
-		case "[ ]":
-			m.addOp(at, at+3, "☐", mdStyleNone)
-		case "[x]", "[X]":
-			m.addOp(at, at+3, "☑", mdStyleNone)
-		}
 	}
 }
 
