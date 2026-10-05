@@ -181,8 +181,7 @@ func (m *lspManager) Reconcile(c *Ctx) bool {
 		if profile == nil || profile.lsp == nil || ed == nil {
 			return
 		}
-		serverCfg, ok := m.cfg.LanguageServers[profile.lsp.server]
-		if !ok || serverCfg.Disabled {
+		if _, ok := m.cfg.Lang.Servers[profile.lsp.server]; !ok || !m.cfg.lspFor(profile.lsp.server) {
 			return
 		}
 		root := lspRootForPath(path, profile)
@@ -644,8 +643,8 @@ func (m *lspManager) goRequest(limit time.Duration, fn func(ctx context.Context)
 }
 
 func (m *lspManager) startSession(session *lspSession) error {
-	cfg, ok := m.cfg.LanguageServers[session.serverID]
-	if !ok || cfg.Disabled {
+	cfg, ok := m.cfg.Lang.Servers[session.serverID]
+	if !ok || !m.cfg.lspFor(session.serverID) {
 		return fmt.Errorf("%s language server is disabled", session.serverID)
 	}
 	if cfg.InitializationOptions == nil {

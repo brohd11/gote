@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,9 +30,6 @@ type Config struct {
 	// next `gote config`.
 	Project    ModeDefaults     `yaml:"project_mode"`     // ModeHome, ModeScan, ModeVault
 	SingleFile SingleFileConfig `yaml:"single_file_mode"` // ModeFile
-	// LanguageServers configures transports (language.go maps files to servers). A missing
-	// entry gets its built-in transport; Disabled turns one off.
-	LanguageServers map[string]LanguageServerConfig `yaml:"language_servers"`
 	// ClickDefinition and ClickContext name each gesture's modifier, since terminals differ
 	// in which modifiers they pass through (Terminal.app and iTerm2 take ctrl+click, shift is
 	// usually selection). "none" disables a gesture.
@@ -48,6 +46,9 @@ type Config struct {
 	SyntaxColors SyntaxColors           `yaml:"syntax_colors"`
 	Default      string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault
 	Vaults       map[string]VaultConfig `yaml:"vaults"`
+	// Lang is ~/.gote/lang.yml (langconfig.go), loaded beside this file and never written
+	// into it.
+	Lang LangConfig `yaml:"-"`
 }
 
 // The values ClickDefinition and ClickContext take. Anything else reads as clickNone
@@ -89,19 +90,6 @@ type SyntaxColors struct {
 	MdQuote    string `yaml:"md_quote"`
 	MdLink     string `yaml:"md_link"`
 	MdList     string `yaml:"md_list"`
-}
-
-// LanguageServerConfig selects one transport: Address (TCP, managed elsewhere) or Command
-// (a stdio server gote runs). InitializationOptions is sent in the LSP handshake.
-type LanguageServerConfig struct {
-	Disabled              bool           `yaml:"disabled"`
-	Address               string         `yaml:"address"`
-	Command               []string       `yaml:"command"`
-	InitializationOptions map[string]any `yaml:"initialization_options,omitempty"`
-	// SemanticTokens maps this server's non-standard semantic token types to syntax_colors
-	// slots (standard LSP names are already mapped, see semantic_map.go). An empty slot turns
-	// a type off.
-	SemanticTokens map[string]string `yaml:"semantic_tokens,omitempty"`
 }
 
 // ModeDefaults are a launch's startup toggles, each still toggleable at runtime. The file
@@ -160,44 +148,13 @@ func DefaultConfig() Config {
 			AllowPanelToggle: false,
 			MenuBar:          false,
 		},
-		LanguageServers: defaultLanguageServers(),
+		Lang:            LangConfig{Servers: defaultLanguageServers()},
 		ClickDefinition: clickAlt,
 		ClickContext:    clickCtrl,
 		DefaultDocMode:  docModeLiveName,
 		SyntaxColors:    defaultSyntaxColors(),
 		Default:         defaultDocsRef,
 		Vaults:          map[string]VaultConfig{},
-	}
-}
-
-func defaultLanguageServers() map[string]LanguageServerConfig {
-	return map[string]LanguageServerConfig{
-		"bash":       {Command: []string{"bash-language-server", "start"}},
-		"clangd":     {Command: []string{"clangd"}},
-		"csharp":     {Command: []string{"csharp-ls"}},
-		"gdscript":   {Address: "127.0.0.1:6005", Command: []string{}},
-		"lua":        {Command: []string{"lua-language-server"}},
-		"rust":       {Command: []string{"rust-analyzer"}},
-		"typescript": {Command: []string{"typescript-language-server", "--stdio"}},
-		"go": {
-			Command: []string{"gopls"},
-			// completeFunctionCalls off inserts just the name: typing the "(" yourself raises the
-			// signature hint, which a server-supplied "()" never would. usePlaceholders stays off so
-			// re-enabling calls does not insert literal signatures. semanticTokens is gopls's own
-			// switch (it returns no provider without it). These defaults only apply when the user's
-			// config sets no initialization_options for go.
-			InitializationOptions: map[string]any{
-				"completeFunctionCalls": false,
-				"usePlaceholders":       false,
-				"semanticTokens":        true,
-			},
-		},
-		"python": {
-			Command: []string{"pylsp"},
-			InitializationOptions: map[string]any{"pylsp": map[string]any{
-				"plugins": map[string]any{"jedi_completion": map[string]any{"include_params": true}},
-			}},
-		},
 	}
 }
 
@@ -263,16 +220,25 @@ func SyncConfig() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cfg, err := LoadConfig()
+	cfg, err := loadMainConfig()
 	if err != nil {
 		return path, nil
 	}
 	return path, SaveConfig(cfg)
 }
 
-// LoadConfig reads ~/.gote/config.yml. A missing file is not an error — it returns
-// the defaults; an unreadable or malformed file falls back to them per-key.
+// LoadConfig reads ~/.gote/config.yml and ~/.gote/lang.yml. A missing file is not an
+// error — it returns the defaults; an unreadable or malformed file falls back to them.
 func LoadConfig() (Config, error) {
+	cfg, err := loadMainConfig()
+	lang, langErr := loadLangConfig()
+	cfg.Lang = lang
+	return cfg, errors.Join(err, langErr)
+}
+
+// loadMainConfig is LoadConfig without lang.yml, for SyncConfig: a broken lang.yml is no
+// reason to skip topping up config.yml.
+func loadMainConfig() (Config, error) {
 	cfg := DefaultConfig()
 	path, err := ConfigPath()
 	if err != nil {
@@ -289,20 +255,6 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.Vaults == nil {
 		cfg.Vaults = map[string]VaultConfig{}
-	}
-	if cfg.LanguageServers == nil {
-		cfg.LanguageServers = map[string]LanguageServerConfig{}
-	}
-	for id, fallback := range defaultLanguageServers() {
-		server, ok := cfg.LanguageServers[id]
-		if !ok || (!server.Disabled && server.Address == "" && len(server.Command) == 0) {
-			cfg.LanguageServers[id] = fallback
-			continue
-		}
-		if server.InitializationOptions == nil {
-			server.InitializationOptions = fallback.InitializationOptions
-			cfg.LanguageServers[id] = server
-		}
 	}
 	normalizeSyntaxColors(&cfg.SyntaxColors)
 	return cfg, nil

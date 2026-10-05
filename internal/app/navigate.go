@@ -47,7 +47,7 @@ func lspDisabledReason(c *Ctx) string {
 	switch {
 	case c == nil:
 		return "auto-lsp: false"
-	case !c.Config.AutoLSP:
+	case !c.Config.anyLSP():
 		return "auto-lsp: false"
 	case c.Mode == ModeFile:
 		return "single_file_mode.default_allow_lsp: false"

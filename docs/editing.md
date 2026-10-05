@@ -45,7 +45,8 @@ sidebar chord is `alt+\`. Markdown and language-tool shortcuts are covered in
 [Markdown](markdown.md) and [Language servers](language-servers.md).
 
 Supported languages provide syntax highlighting, bracket/quote pairing, comment
-toggling, and language-aware indentation. Soft wrapping changes only the display:
+toggling, and language-aware indentation (configurable per language in
+[lang.yml](configuration.md#languages-langyml)). Soft wrapping changes only the display:
 Up/Down follows visible rows, Shift+Up/Down extends selection, and text/whitespace
 are preserved. Wrap prefers whitespace boundaries and splits overlong words or URLs
 when necessary.
@@ -174,7 +175,8 @@ responsible. Set it to true to allow the bottom panel, outline, and Find in File
 the outline, bottom panel, and Show diagnostics rows then appear in the menus too.
 It does not restore the help bar.
 
-Language tools are off by default; `auto-lsp: true` enables them. Set
+Language tools are off by default; `auto-lsp: true` enables them, or `enabled: true`
+per server in [lang.yml](configuration.md#languages-langyml). Set
 `single_file_mode.default_allow_lsp: false` to keep them off for file launches.
 Single-file right-click menus include clipboard actions and Hover info; they omit
 definition/reference actions that could leave the file.

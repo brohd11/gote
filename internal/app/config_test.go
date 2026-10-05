@@ -144,10 +144,13 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "file_view:", "indent_guides:", "git_gutter:", "language_servers:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "file_view:", "indent_guides:", "git_gutter:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}
+	}
+	if strings.Contains(string(raw), "language_servers:") {
+		t.Fatalf("language servers live in lang.yml, not config.yml:\n%s", raw)
 	}
 
 	if err := os.WriteFile(path, []byte("scan_depth: 9\n"), 0o644); err != nil {
@@ -181,52 +184,6 @@ func TestLoadConfigRainbowBracketsDefaultAndOptOut(t *testing.T) {
 	want := []string{"1", defaultSyntaxColors().Brackets[1], "2", defaultSyntaxColors().Brackets[0]}
 	if !reflect.DeepEqual(custom.SyntaxColors.Brackets, want) {
 		t.Fatalf("normalized custom brackets = %v, want %v", custom.SyntaxColors.Brackets, want)
-	}
-}
-
-func TestLanguageServerConfig(t *testing.T) {
-	cfg := writeConfig(t, `auto-lsp: false
-language_servers:
-  gdscript:
-    disabled: true
-  python:
-    command: [pylsp, --verbose]
-`)
-	if cfg.AutoLSP {
-		t.Fatal("auto-lsp: false should disable automatic activation")
-	}
-	if !cfg.LanguageServers["gdscript"].Disabled {
-		t.Fatal("disabled should remain the explicit per-language opt-out")
-	}
-	if got := cfg.LanguageServers["python"].Command; !reflect.DeepEqual(got, []string{"pylsp", "--verbose"}) {
-		t.Fatalf("python command = %v", got)
-	}
-	if got := cfg.LanguageServers["python"].InitializationOptions; got == nil {
-		t.Fatal("custom Python transport should inherit built-in initialization options")
-	}
-
-	cfg = writeConfig(t, "language_servers: {}\n")
-	if cfg.LanguageServers["gdscript"].Address != "127.0.0.1:6005" ||
-		!reflect.DeepEqual(cfg.LanguageServers["python"].Command, []string{"pylsp"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["bash"].Command, []string{"bash-language-server", "start"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["go"].Command, []string{"gopls"}) ||
-		cfg.LanguageServers["go"].InitializationOptions["completeFunctionCalls"] != false ||
-		!reflect.DeepEqual(cfg.LanguageServers["clangd"].Command, []string{"clangd"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["csharp"].Command, []string{"csharp-ls"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["rust"].Command, []string{"rust-analyzer"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["lua"].Command, []string{"lua-language-server"}) ||
-		!reflect.DeepEqual(cfg.LanguageServers["typescript"].Command,
-			[]string{"typescript-language-server", "--stdio"}) {
-		t.Fatalf("missing entries should inherit built-ins: %#v", cfg.LanguageServers)
-	}
-
-	cfg = writeConfig(t, `language_servers:
-  python:
-    command: [pylsp]
-    initialization_options: {}
-`)
-	if cfg.LanguageServers["python"].InitializationOptions == nil || len(cfg.LanguageServers["python"].InitializationOptions) != 0 {
-		t.Fatalf("explicit empty initialization options should disable built-ins: %#v", cfg.LanguageServers["python"])
 	}
 }
 

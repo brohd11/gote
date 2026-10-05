@@ -135,9 +135,9 @@ func newWithColorProfile(version string, cfg Config, opts Options, profile color
 		Config:  cfg,
 		open:    newOpenSet(),
 	}
-	// auto-lsp and the mode's default_allow_lsp are ANDed; a nil manager is handled
-	// everywhere.
-	if cfg.AutoLSP && cfg.modeDefaults(opts.Mode).AllowLSP {
+	// A manager needs some language allowed a server (auto-lsp, or lang.yml's per-language
+	// lsp) AND the mode's default_allow_lsp; a nil manager is handled everywhere.
+	if cfg.anyLSP() && cfg.modeDefaults(opts.Mode).AllowLSP {
 		c.lsp = newLSPManager(cfg, version)
 	}
 	if opts.DepthSet {
@@ -335,7 +335,7 @@ func (c *Ctx) switchRoot(mode Mode, name, path string) {
 	c.FilePath = ""
 	// A single-file launch whose settings denied a manager may be allowed one as a vault;
 	// create it now, since nothing else reconsiders.
-	if c.lsp == nil && c.Config.AutoLSP && c.Config.Project.AllowLSP {
+	if c.lsp == nil && c.Config.anyLSP() && c.Config.Project.AllowLSP {
 		c.lsp = newLSPManager(c.Config, c.Version)
 	}
 	c.Seed()

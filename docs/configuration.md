@@ -7,6 +7,9 @@ open the file using `$EDITOR`, then `$VISUAL`. On Windows, Notepad is the fallba
 on macOS/Linux, set one of those variables. `gote config --dir` opens the containing
 directory in the system file manager.
 
+Per-language settings and language servers live separately in `~/.gote/lang.yml`;
+see [Languages](#languages-langyml).
+
 ## Documents and vaults
 
 ```yaml
@@ -58,8 +61,9 @@ Wrap and line-number defaults apply to newly opened/restored documents and scrat
 buffers. Alt+Z and Alt+L toggle them per document for the current session.
 `indent_guides: true` (the default) draws faint leading-indent guides; set it to false to hide them.
 
-`auto-lsp` is the master switch for language servers and defaults to false. Both it and
-the mode's `default_allow_lsp` must be true to allow a server. Single-file
+`auto-lsp: false` (the default) leaves every language server off unless
+[lang.yml](#languages-langyml) sets `enabled: true` on it. A server also needs the mode's
+`default_allow_lsp`. Single-file
 `allow_panel_toggle` controls the outline, bottom panel, and Find in Files, and
 `menu_bar: true` shows the menu bar from launch; see
 [single-file mode](editing.md#single-file-mode).
@@ -93,6 +97,51 @@ syntax_colors:
 Use `gote colors` to inspect the detected profile and effective palette, or
 `gote colors path/to/file.go` to preview a file. `gote colors --basic` previews the
 basic palette without changing the config.
+
+## Languages (lang.yml)
+
+`~/.gote/lang.yml` overrides language behavior and configures
+[language servers](language-servers.md#configuration). `gote config lang` opens it.
+gote writes it on first launch (or `gote config`) with the built-in servers and a
+commented `languages` example. Everything is optional: a missing file, language,
+or key keeps the built-in behavior.
+
+```yaml
+languages:
+  go:
+    indent: spaces     # tab | spaces
+    indent_size: 2     # on its own, implies spaces; ignored with tab
+servers:
+  go:
+    enabled: true      # overrides auto-lsp for this server
+    command: [~/go/bin/gopls]
+  python:
+    enabled: false
+```
+
+`indent` and `indent_size` set the unit that Indent/Dedent (Alt+. and Alt+,) and the
+indent guides use. Alt+I still switches it per buffer. Tab without a selection always inserts a
+tab, and a tab displays 4 columns wide whatever these say.
+
+A server's `enabled: true` runs it even with `auto-lsp: false`; `enabled: false` keeps
+it off under `auto-lsp: true`; without the key it follows `auto-lsp`. A launch mode's
+`default_allow_lsp: false` still wins. See
+[Language servers](language-servers.md#configuration) for the server keys.
+
+Languages are keyed by id; unknown ids are ignored. The ids and their built-in indents:
+
+| Id | Files | Built-in indent |
+| --- | --- | --- |
+| `go` | `.go` | tab |
+| `c`, `cpp` | `.c`; `.h .cc .cpp .hpp .hh` | tab |
+| `python` | `.py` | 4 spaces |
+| `rust`, `csharp`, `java`, `kotlin`, `swift`, `php`, `fish` | `.rs .cs .java .kt .swift .php .fish` | 4 spaces |
+| `javascript`, `javascriptreact`, `typescript`, `typescriptreact` | `.js .jsx .ts .tsx` | 2 spaces |
+| `json`, `yaml`, `css`, `scss`, `dart`, `protobuf`, `terraform`, `groovy`, `glsl` | `.json .yaml .yml .css .scss .dart .proto .tf .gradle .glsl` | 2 spaces |
+| `shellscript`, `zsh` | `.sh .bash`; `.zsh` | 2 spaces |
+| `markdown` | `.md .markdown` | 2 spaces |
+| `gdscript`, `lua` | `.gd`; `.lua` | tab |
+| `rb`, `perl`, `splus`, `mysql`, `html`, `xml`, `toml`, `ini`, `vim`, `make` | `.rb .pl .r .sql .html .xml .toml .ini .vim .mk` | tab |
 
 ## Mouse gestures
 

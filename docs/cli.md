@@ -76,6 +76,7 @@ Malformed or negative depths are rejected. A blank `GOTE_DEPTH` is ignored.
 | --- | --- |
 | `gote config` | Edit the config with `$EDITOR`, then `$VISUAL`; Windows falls back to Notepad |
 | `gote config --dir` | Open the config directory in the system file manager |
+| `gote config lang` | Edit per-language settings and language servers (`~/.gote/lang.yml`) |
 | `gote colors [file]` | Show the detected color profile, effective palette, and a highlighted sample |
 | `gote colors --basic` | Preview the basic terminal palette |
 | `gote update [--check]` | Install an update, or check without installing |

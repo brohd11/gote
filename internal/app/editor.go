@@ -31,7 +31,7 @@ func (s *homeScreen) editorOpts(c *Ctx) editor.Opts {
 		ContextItems:     s.editorContextItems,
 		OnSignClick:      s.gitSignClick,
 		IndentGuides:     s.indentGuides,
-		ResolveLanguage:  editorLanguageForPath,
+		ResolveLanguage:  languageResolver(c.Config.Lang),
 	}
 }
 

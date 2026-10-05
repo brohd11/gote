@@ -397,7 +397,7 @@ func shebangExt(path string) string {
 	return extByInterpreter[strings.ToLower(filepath.Base(fields[0]))]
 }
 
-// editorLanguageForPath is the editor's LanguageResolver. Semantic tokens go to the
+// editorLanguageForPath is the built-in LanguageResolver. Semantic tokens go to the
 // editor's overlay, so highlighter factories stay path-independent.
 func editorLanguageForPath(path string) *editor.LanguageConfig {
 	profile := languageForPath(path)
@@ -405,4 +405,21 @@ func editorLanguageForPath(path string) *editor.LanguageConfig {
 		return nil
 	}
 	return &profile.editor
+}
+
+// languageResolver is editorLanguageForPath with lang.yml's overrides applied to a copy,
+// so the shared profiles stay as built.
+func languageResolver(lang LangConfig) editor.LanguageResolver {
+	if len(lang.Languages) == 0 {
+		return editorLanguageForPath
+	}
+	return func(path string) *editor.LanguageConfig {
+		profile := languageForPath(path)
+		if profile == nil {
+			return nil
+		}
+		cfg := profile.editor
+		cfg.IndentSpaces = lang.indentSpaces(profile.id, cfg.IndentSpaces)
+		return &cfg
+	}
 }

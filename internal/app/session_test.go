@@ -539,7 +539,7 @@ func TestReconcileOmitsUnreadRestoredBuffer(t *testing.T) {
 	cfg := lspConfig()
 	// An address nothing answers on: Reconcile does no IO, and the actor's failure to
 	// dial is beside the point of the assertion.
-	cfg.LanguageServers["python"] = LanguageServerConfig{Address: "127.0.0.1:1"}
+	cfg.Lang.Servers["python"] = LanguageServerConfig{Address: "127.0.0.1:1"}
 	c := New("test", cfg, Options{Mode: ModeScan, Dir: dir})
 	t.Cleanup(c.close)
 

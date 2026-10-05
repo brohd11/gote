@@ -82,7 +82,7 @@ func TestLSPDeclaresSemanticTokensCapability(t *testing.T) {
 // semanticTokens option is set, which is separate from — and just as necessary as — the
 // LSP capability above.
 func TestGoplsDefaultAsksForSemanticTokens(t *testing.T) {
-	options := DefaultConfig().LanguageServers["go"].InitializationOptions
+	options := DefaultConfig().Lang.Servers["go"].InitializationOptions
 	if enabled, ok := options["semanticTokens"].(bool); !ok || !enabled {
 		t.Errorf("gopls initialization_options semanticTokens = %#v, want true",
 			options["semanticTokens"])

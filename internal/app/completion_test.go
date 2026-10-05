@@ -309,7 +309,7 @@ func TestCompletionFiresInsideComments(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			Of(sh).lsp = &lspManager{cfg: DefaultConfig()}
+			Of(sh).lsp = &lspManager{cfg: lspConfig()}
 
 			comment := "# @export_tag Player"
 			if name == "main.go" {

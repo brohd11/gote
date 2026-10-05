@@ -170,7 +170,7 @@ func (m *lspManager) startSemantic(sessions map[string]*lspSession,
 // semanticSlotsLocked is the mapping this document's server paints through: the built-in
 // standard-name map with the server's own config overrides merged over it. Held under mu.
 func (m *lspManager) semanticSlotsLocked(doc lspDocument) map[string]string {
-	return semanticSlots(m.cfg.LanguageServers[doc.server].SemanticTokens)
+	return semanticSlots(m.cfg.Lang.Servers[doc.server].SemanticTokens)
 }
 
 // emitSemantic publishes a result, dropping it when a newer fetch has already replaced

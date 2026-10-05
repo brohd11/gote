@@ -288,7 +288,7 @@ func TestReloadReconcilesLSPWithoutAnotherKey(t *testing.T) {
 			path := filepath.Join(dir, "main.py")
 			writeDiskDoc(t, path, "old_name = 1\n")
 			model = pumpModel(model, s.openDoc(sh, path).Cmd)
-			manager := newLSPManager(DefaultConfig(), "test")
+			manager := newLSPManager(lspConfig(), "test")
 			// Exercise UI reconciliation without launching a server or waiting for its events.
 			manager.once.Do(func() {})
 			Of(sh).lsp = manager

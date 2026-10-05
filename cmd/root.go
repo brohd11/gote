@@ -117,9 +117,10 @@ func Execute() {
 // runRoot resolves the launch options and starts the TUI. The config is loaded here
 // because a bare argument may name a configured vault.
 func runRoot(cmd *cobra.Command, args []string) error {
-	// Best effort, before the load: the file documents the schema. A failed write (read-only
+	// Best effort, before the load: the files document the schema. A failed write (read-only
 	// home) is no reason to refuse to start.
 	_, _ = app.EnsureConfig()
+	_ = app.EnsureLangConfig()
 	cfg, err := app.LoadConfig()
 	if err != nil {
 		return err

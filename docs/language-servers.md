@@ -40,23 +40,31 @@ its background analysis.
 
 ## Configuration
 
-Both `auto-lsp` (false by default) and the launch mode's `default_allow_lsp` must be true. Disable a
-single server or override its transport under `language_servers`:
+Servers are configured under `servers` in `~/.gote/lang.yml` (`gote config lang`
+opens it). They are off unless enabled: `auto-lsp: true` in `config.yml` enables
+every server, and a server's own `enabled` overrides that either way. The launch
+mode's `default_allow_lsp` must also be true.
 
 ```yaml
-auto-lsp: true
-language_servers:
+servers:
   go:
+    enabled: true          # runs even with auto-lsp: false
     command: [gopls]
   gdscript:
     address: 127.0.0.1:6005
   python:
-    disabled: true
+    enabled: false         # stays off even with auto-lsp: true
 ```
 
 The server keys are `clangd`, `go`, `python`, `bash`, `rust`, `typescript`, `csharp`,
-`lua`, and `gdscript`. `command` is an argument list; `address` connects to an
-externally managed server. Use `gote config` to see the built-in commands and options.
+`lua`, and `gdscript`. A server serves every language mapped to it (`clangd` takes
+`c` and `cpp`; `typescript` takes `.js .jsx .ts .tsx`; `bash` takes `.sh .bash`), so
+`enabled` switches it for all of them. `command` is an argument list; `address`
+connects to an externally managed server. A server you do not list, or list without
+`command`/`address` (e.g. only `enabled`), keeps its built-in transport and options.
+
+`language_servers` in `config.yml` is no longer read; move any entries to `servers`
+in `lang.yml`.
 
 Each server can supply an `initialization_options` mapping. Built-in Python options
 enable parameter snippets for callable completions. Go completes the function name
