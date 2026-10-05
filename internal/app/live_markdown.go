@@ -259,9 +259,6 @@ func (m *markdownHighlighter) liveQuote(first, last int) {
 	}
 }
 
-// liveBullets are the bullet glyphs by list depth.
-var liveBullets = []string{components.MarkdownBullet, "◦", "▪"}
-
 // liveListItem swaps a bullet marker for a depth glyph, and a task box for a check glyph.
 // A bulleted task drops its bullet for the check alone; that is no one-cell swap, so it
 // keeps no active glyph and the caret's row shows the whole source.
@@ -279,9 +276,9 @@ func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
 	if at+3 <= len(m.src) && (at+3 == len(m.src) || m.src[at+3] == ' ' || m.src[at+3] == '\n') {
 		switch string(m.src[at : at+3]) {
 		case "[ ]":
-			check = "☐"
+			check = components.MarkdownTaskOpen
 		case "[x]", "[X]":
-			check = "☑"
+			check = components.MarkdownTaskDone
 		}
 	}
 	if check != "" {
@@ -298,7 +295,7 @@ func (m *markdownHighlighter) liveListItem(v *ast.ListItem) {
 				depth++
 			}
 		}
-		bullet := liveBullets[max(depth, 0)%len(liveBullets)]
+		bullet := components.MarkdownBullets[max(depth, 0)%len(components.MarkdownBullets)]
 		m.addOp(pos, end, bullet, mdStyleNone) // plain, as the previewer draws bullets
 		r := m.rowOf(pos)
 		m.glyphs[r] = append(m.glyphs[r], editor.Glyph{Col: m.runeCol(r, pos), From: rune(m.src[pos]),
