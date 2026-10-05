@@ -10,6 +10,21 @@ directory in the system file manager.
 Per-language settings and language servers live separately in `~/.gote/lang.yml`;
 see [Languages](#languages-langyml).
 
+Inside gote, **File ▸ Config ▸ General** and **Language** open the same two files as
+documents. Saving either one reloads the config in the running session, and so does
+**File ▸ Refresh** (for edits made outside gote). A file that fails to parse changes
+nothing; the status bar names the error. After a reload:
+
+- the doc list follows `extensions` and `scan_depth` at once (unless `--ext`/`--depth`
+  were given at launch), and vaults, `default`, `default_doc_mode`, `format_on_save` and
+  the click gestures apply straight away;
+- docs opened from then on follow the wrap, line-number and per-language indent settings
+  and the new `syntax_colors`;
+- startup states you toggle at runtime (`file_view`, `indent_guides`, the gutters, the
+  menu bar) keep their current state;
+- language-server changes while a server is running, and new colors in docs already open,
+  need a restart; the status bar says when.
+
 ## Documents and vaults
 
 ```yaml

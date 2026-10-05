@@ -235,6 +235,7 @@ func (s *homeScreen) fileMenuItems() []components.MenuItem {
 	if !s.minimal {
 		items = append(items,
 			keyed(submenu("Vaults", false, s.vaultMenuItems), 'v'),
+			keyed(submenu("Config", false, s.configMenuItems), 'g'),
 			components.MenuItem{Label: "Refresh", Key: 'r', Pick: menuPick(1, refreshAction)},
 			components.MenuItem{Separator: true},
 			components.MenuItem{Label: "Update gote", Key: 'u', Pick: menuPick(1, func(sh *core.Shared) core.Action {
@@ -298,10 +299,31 @@ func (s *homeScreen) vaultMenuItems() []components.MenuItem {
 	})})
 }
 
-// refreshAction reseeds the doc list and checks open buffers for external changes. The
-// home screen does the list reload on the broadcast.
+// configMenuItems are File ▸ Config: config.yml and lang.yml, opened as docs after the
+// same ensure `gote config` runs. Saving either one reloads the config (editorSaved).
+func (s *homeScreen) configMenuItems() []components.MenuItem {
+	row := func(label string, key rune, file string, path func() (string, error)) components.MenuItem {
+		return components.MenuItem{Label: label, Key: key, Hint: file, Pick: menuPick(2, func(sh *core.Shared) core.Action {
+			p, err := path()
+			if err == nil {
+				err = EnsureConfigFiles()
+			}
+			if err != nil {
+				return core.SetStatus("could not open config: " + err.Error())
+			}
+			return s.openDoc(sh, p)
+		})}
+	}
+	return []components.MenuItem{
+		row("General", 'g', "config.yml", ConfigPath),
+		row("Language", 'l', "lang.yml", LangPath),
+	}
+}
+
+// refreshAction re-reads the config, reseeds the doc list and checks open buffers for
+// external changes. The home screen does the list reload on the broadcast.
 func refreshAction(sh *core.Shared) core.Action {
-	return core.Seq(core.PropagateAll(ReseedMsg{}), core.Async(Of(sh).checkDiskChanges()))
+	return core.Seq(reloadConfigAction(sh), core.PropagateAll(ReseedMsg{}), core.Async(Of(sh).checkDiskChanges()))
 }
 
 // menuStyle is every gote menu's look, matching the sidebar: a background-filled

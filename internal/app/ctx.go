@@ -59,6 +59,11 @@ type Ctx struct {
 	// restore holds session positions not yet applied. A buffer never switched to reports a
 	// caret at the origin, so saveSession writes its pending entry back instead.
 	restore map[string]SessionFile
+
+	// What ReloadConfig must respect: launch flags that beat the file, and the color profile
+	// the palette was resolved for.
+	depthSet, extsSet bool
+	profile           colorprofile.Profile
 }
 
 // SetActive records which buffer holds the editor pane, for the session save.
@@ -134,6 +139,10 @@ func newWithColorProfile(version string, cfg Config, opts Options, profile color
 		Preview: opts.Preview,
 		Config:  cfg,
 		open:    newOpenSet(),
+
+		depthSet: opts.DepthSet,
+		extsSet:  opts.ExtsSet,
+		profile:  profile,
 	}
 	// A manager needs some language allowed a server (auto-lsp, or lang.yml's per-language
 	// lsp) AND the mode's default_allow_lsp; a nil manager is handled everywhere.

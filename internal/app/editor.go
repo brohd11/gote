@@ -125,7 +125,12 @@ func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	// Re-read the git baseline: a save-as is a different file to git, and HEAD may have moved.
 	s.gutter = gutter{}
 	// A save-as can rename markdown out of markdown under an open preview.
-	return core.Seq(core.Async(s.enforcePreview()), core.PropagateAll(ReseedMsg{}))
+	act := core.Seq(core.Async(s.enforcePreview()), core.PropagateAll(ReseedMsg{}))
+	if isConfigFile(path) {
+		// Before the reseed, which then lists by the reloaded filter and depth.
+		act = core.Seq(reloadConfigAction(sh), act)
+	}
+	return act
 }
 
 // editorExit is the alt+w hook (after the editor's own save prompt): the doc leaves the

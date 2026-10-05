@@ -247,7 +247,7 @@ func loadMainConfig() (Config, error) {
 	// Load over the defaults so omitted keys keep them; after a parse error, rebuild the
 	// defaults rather than return a half-parsed config.
 	if err := configdir.Load(path, &cfg); err != nil {
-		return DefaultConfig(), err
+		return DefaultConfig(), fmt.Errorf("%s: %w", path, err) // named, as lang.yml's are
 	}
 	normalizeExtensions(&cfg)
 	if cfg.ScanDepth <= 0 {

@@ -33,7 +33,7 @@ gote notes.md         # Edit one file; create it on save if it does not exist
 gote ~/notes          # Browse a folder
 gote -P notes.md      # Open Markdown in Reader mode
 gote                  # Open the configured default folder or vault
-gote config           # Edit ~/.gote/config.yml using $EDITOR or $VISUAL
+gote config           # Edit ~/.gote/config.yml using $EDITOR or $VISUAL (or File ▸ Config in gote)
 ```
 
 Save with **Ctrl+S**, close the current buffer with **Alt+W**, and quit with
