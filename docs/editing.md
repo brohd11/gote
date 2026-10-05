@@ -174,7 +174,7 @@ responsible. Set it to true to allow the bottom panel, outline, and Find in File
 the outline, bottom panel, and Show diagnostics rows then appear in the menus too.
 It does not restore the help bar.
 
-Language tools are enabled by default. Set `single_file_mode.default_allow_lsp:
-false` to disable them for file launches, or `auto-lsp: false` for every mode.
+Language tools are off by default; `auto-lsp: true` enables them. Set
+`single_file_mode.default_allow_lsp: false` to keep them off for file launches.
 Single-file right-click menus include clipboard actions and Hover info; they omit
 definition/reference actions that could leave the file.

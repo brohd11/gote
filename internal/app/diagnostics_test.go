@@ -24,7 +24,7 @@ func TestDiagnosticSignsChooseHighestSeverity(t *testing.T) {
 
 func TestDiagnosticsPanelCurrentFirst(t *testing.T) {
 	root := t.TempDir()
-	c := New("test", DefaultConfig(), Options{})
+	c := New("test", lspConfig(), Options{})
 	defer c.close()
 	paths := []string{
 		filepath.Join(root, "a.py"),
@@ -59,7 +59,7 @@ func TestDiagnosticsPanelCurrentFirst(t *testing.T) {
 }
 
 func TestDiagnosticsGutterIndependentFromGit(t *testing.T) {
-	s, sh := newHome(t)
+	s, sh := newHomeCfg(t, lspConfig(), Options{})
 	s.currentPath = filepath.Join(t.TempDir(), "main.py")
 	s.editor.SetText("one\ntwo")
 	setTestDiagnostics(Of(sh), s.currentPath, lspDiagnostic{Line: 1, Severity: protocol.DiagnosticSeverityError})

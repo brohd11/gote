@@ -56,16 +56,16 @@ apply to `gote <file>`. Omitted keys retain their defaults.
 
 Wrap and line-number defaults apply to newly opened/restored documents and scratch
 buffers. Alt+Z and Alt+L toggle them per document for the current session.
-`indent_guides: true` enables faint leading-indent guides; the default is false.
+`indent_guides: true` (the default) draws faint leading-indent guides; set it to false to hide them.
 
-`auto-lsp: true` is the default master switch for language servers. Both it and the
-mode's `default_allow_lsp` must be true to allow a server. Single-file
+`auto-lsp` is the master switch for language servers and defaults to false. Both it and
+the mode's `default_allow_lsp` must be true to allow a server. Single-file
 `allow_panel_toggle` controls the outline, bottom panel, and Find in Files, and
 `menu_bar: true` shows the menu bar from launch; see
 [single-file mode](editing.md#single-file-mode).
 
-`default_doc_mode: off` selects syntax highlighting for new Markdown documents;
-`live` selects live preview. See [Markdown](markdown.md).
+`default_doc_mode: live` (the default) selects live preview for new Markdown documents;
+`off` selects syntax highlighting. See [Markdown](markdown.md).
 
 `format_on_save: false` is the default. When enabled, formatting happens **after**
 the write: formatting changes leave the buffer dirty until the next save. See

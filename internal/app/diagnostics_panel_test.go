@@ -28,7 +28,7 @@ func setTestDiagnostics(c *Ctx, path string, entries ...lspDiagnostic) {
 // are not open at all, head them by their place in the project rather than by an absolute
 // path, and still float the file being edited to the top.
 func TestDiagnosticsPanelListsTheWholeProject(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	s, sh := newHomeCfg(t, cfg, Options{})
 	c := Of(sh)
 	defer c.close()
@@ -79,7 +79,7 @@ func TestDiagnosticsPanelListsTheWholeProject(t *testing.T) {
 }
 
 func TestBottomTogglePreservesEditorAndSplit(t *testing.T) {
-	s, sh := newHome(t)
+	s, sh := newHomeCfg(t, lspConfig(), Options{})
 	defer Of(sh).close()
 	path, ed := seedDoc(t, s, sh, "doc.md", "alpha beta\nsecond line")
 	s.openDoc(sh, path)
@@ -140,7 +140,7 @@ func TestBottomTogglePreservesEditorAndSplit(t *testing.T) {
 }
 
 func TestDiagnosticsRefreshCacheSelectionAndClear(t *testing.T) {
-	s, sh := newHome(t)
+	s, sh := newHomeCfg(t, lspConfig(), Options{})
 	c := Of(sh)
 	defer c.close()
 	path, _ := seedDoc(t, s, sh, "main.py", "first\nsecond")
@@ -185,7 +185,7 @@ func TestDiagnosticsRefreshCacheSelectionAndClear(t *testing.T) {
 }
 
 func TestDiagnosticsWrappedClicksAndEmptySpace(t *testing.T) {
-	c := New("test", DefaultConfig(), Options{})
+	c := New("test", lspConfig(), Options{})
 	defer c.close()
 	path := "/workspace/main.py"
 	c.OpenDoc(path, editor.Opts{})
@@ -272,7 +272,7 @@ func TestBottomLayoutModesAndMenus(t *testing.T) {
 }
 
 func TestDiagnosticsSortSeverityAtPosition(t *testing.T) {
-	c := New("test", DefaultConfig(), Options{})
+	c := New("test", lspConfig(), Options{})
 	defer c.close()
 	c.OpenDoc("/file.py", editor.Opts{})
 	setTestDiagnostics(c, "/file.py", lspDiagnostic{Severity: protocol.DiagnosticSeverityHint}, lspDiagnostic{Severity: protocol.DiagnosticSeverityError})
@@ -283,7 +283,7 @@ func TestDiagnosticsSortSeverityAtPosition(t *testing.T) {
 }
 
 func TestDiagnosticsRevisionTracksPublishedChanges(t *testing.T) {
-	c := New("test", DefaultConfig(), Options{})
+	c := New("test", lspConfig(), Options{})
 	defer c.close()
 	path := "/workspace/main.py"
 	m := c.lsp
@@ -315,7 +315,7 @@ func TestDiagnosticsRevisionTracksPublishedChanges(t *testing.T) {
 }
 
 func TestBottomActionsMenuReturnsToHome(t *testing.T) {
-	model, s, sh := newHomeRouter(t, Options{})
+	model, s, sh := newHomeRouterCfg(t, lspConfig(), Options{})
 	defer Of(sh).close()
 	// Exercise the real picker and router Pop, selecting by label so menu
 	// organization does not change which action this test exercises.

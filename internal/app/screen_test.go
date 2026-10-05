@@ -27,12 +27,26 @@ import (
 // and a live manager would have them spawn whatever real server the machine happens to
 // have installed — and hang them, because pumpModel drains the manager's WaitCmd
 // subscription synchronously and a server that fails to start goes quiet for its whole
-// retry delay between events. Tests meaning to exercise the manager build their own
-// config, in lsp_test.go; the rest keep DefaultConfig, which leaves Ctx.lsp non-nil for
-// the diagnostics injected straight into it.
+// retry delay between events. Tests meaning to exercise the manager use lspConfig.
 func testConfig() Config {
 	cfg := DefaultConfig()
 	cfg.AutoLSP = false
+	return cfg
+}
+
+// offDocConfig is DefaultConfig with markdown docs starting in Off (the shipped default
+// is Live), for tests that count ctrl+p presses through the Off → Live → Reader cycle.
+func offDocConfig() Config {
+	cfg := DefaultConfig()
+	cfg.DefaultDocMode = docModeOffName
+	return cfg
+}
+
+// lspConfig is DefaultConfig with automatic language servers on (the shipped default is
+// off), for tests that exercise the manager or inject diagnostics straight into Ctx.lsp.
+func lspConfig() Config {
+	cfg := DefaultConfig()
+	cfg.AutoLSP = true
 	return cfg
 }
 
@@ -1236,7 +1250,7 @@ func TestSidePreviewIsChrome(t *testing.T) {
 // at all over a file its renderer would mangle. Nothing is pushed: the reader is a pane
 // child, so the stack never moves. alt+p toggles the side preview on any doc.
 func TestDocModeKey(t *testing.T) {
-	s, sh := newHomeCfg(t, testConfig(), Options{})
+	s, sh := newHomeCfg(t, offDocConfig(), Options{})
 	dir := t.TempDir()
 
 	s.openDoc(sh, filepath.Join(dir, "a.md"))

@@ -99,7 +99,7 @@ func fullReport(path, message, resultID string) *protocol.WorkspaceFullDocumentD
 
 func newPullCtx(t *testing.T, server *recordingLSPServer, root string) *Ctx {
 	t.Helper()
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: startRecordingTCPServer(t, server)}
 	c := New("test", cfg, Options{})
 	t.Cleanup(c.close)

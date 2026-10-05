@@ -164,7 +164,7 @@ func TestMenuHelpCloseAndReader(t *testing.T) {
 	if err := os.WriteFile(md, []byte("# hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reader, rsh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: md})
+	reader, rsh := newHomeCfg(t, offDocConfig(), Options{Mode: ModeFile, File: md})
 	defer Of(rsh).close()
 	reader.Update(rsh, keyMsg("ctrl+p"))
 	reader.Update(rsh, keyMsg("ctrl+p"))

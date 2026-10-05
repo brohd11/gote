@@ -21,8 +21,7 @@ type Config struct {
 	FileView string `yaml:"file_view"`
 	// FolderView is the legacy startup preference, used when FileView is unspecified.
 	FolderView bool `yaml:"folder_view"`
-	// IndentGuides makes the editor visualize complete leading indent levels. It is
-	// off by default so existing configs retain the uncluttered rendering.
+	// IndentGuides makes the editor visualize complete leading indent levels. On by default.
 	IndentGuides bool `yaml:"indent_guides"`
 	// Project and SingleFile are per-launch startup toggles, separate because the two
 	// launches want opposite defaults: `gote <file>` leaves out the gutters and diagnostics
@@ -152,9 +151,10 @@ type VaultConfig struct {
 // directories. Default names the home store it already resolves to, to show the key.
 func DefaultConfig() Config {
 	return Config{
-		ScanDepth: 5,
-		AutoLSP:   true,
-		Project:   ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
+		ScanDepth:    5,
+		AutoLSP:      false,
+		IndentGuides: true,
+		Project:      ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
 		SingleFile: SingleFileConfig{
 			ModeDefaults:     ModeDefaults{GitGutter: true, DiagnosticsGutter: false, AllowLSP: true},
 			AllowPanelToggle: false,
@@ -163,7 +163,7 @@ func DefaultConfig() Config {
 		LanguageServers: defaultLanguageServers(),
 		ClickDefinition: clickAlt,
 		ClickContext:    clickCtrl,
-		DefaultDocMode:  docModeOffName,
+		DefaultDocMode:  docModeLiveName,
 		SyntaxColors:    defaultSyntaxColors(),
 		Default:         defaultDocsRef,
 		Vaults:          map[string]VaultConfig{},

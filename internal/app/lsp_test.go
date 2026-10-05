@@ -394,7 +394,7 @@ func newRequestLaneCtx(t *testing.T, server *recordingLSPServer, text string) (*
 	root := t.TempDir()
 	path := filepath.Join(root, "main.py")
 	address := startRecordingTCPServer(t, server)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	t.Cleanup(c.close)
@@ -620,7 +620,7 @@ func TestLSPTCPDocumentLifecycle(t *testing.T) {
 	path := filepath.Join(root, "main.py")
 	server := newRecordingLSPServer()
 	address := startRecordingTCPServer(t, server)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	defer c.close()
@@ -696,7 +696,7 @@ func TestLSPDebouncesDocumentChanges(t *testing.T) {
 	path := filepath.Join(root, "main.py")
 	server := newRecordingLSPServer()
 	address := startRecordingTCPServer(t, server)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	defer c.close()
@@ -751,7 +751,7 @@ func TestLSPCompletionFlushesLatestDocumentAndProjectsItems(t *testing.T) {
 		{Label: "unsupported", InsertTextFormat: protocol.InsertTextFormatSnippet, InsertText: protocol.NewOptional("${TM_FILENAME}")},
 	}
 	address := startRecordingTCPServer(t, server)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	defer c.close()
@@ -821,7 +821,7 @@ func TestLSPSaveFlushesPendingChange(t *testing.T) {
 	path := filepath.Join(root, "main.py")
 	server := newRecordingLSPServer()
 	address := startRecordingTCPServer(t, server)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	defer c.close()
@@ -862,7 +862,7 @@ func TestLSPRestartOpensLatestPendingText(t *testing.T) {
 	path := filepath.Join(root, "main.py")
 	server := newRecordingLSPServer()
 	address := startRecordingTCPServer(t, server)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: address}
 	c := New("test", cfg, Options{})
 	defer c.close()
@@ -924,7 +924,7 @@ func TestLSPStdioTransport(t *testing.T) {
 	path := filepath.Join(root, "script.py")
 	t.Setenv("GOTE_LSP_HELPER", "1")
 	t.Setenv("GOTE_LSP_PATH", path)
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Command: []string{
 		os.Args[0], "-test.run=^TestLSPHelperProcess$",
 	}}
@@ -1055,7 +1055,7 @@ func TestGlobRootMarkers(t *testing.T) {
 
 func TestLSPInvalidTransportBackoffAndRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "main.py")
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.LanguageServers["python"] = LanguageServerConfig{Address: "127.0.0.1:6005", Command: []string{"pylsp"}}
 	c := New("test", cfg, Options{})
 	defer c.close()

@@ -40,7 +40,7 @@ its background analysis.
 
 ## Configuration
 
-Both `auto-lsp` and the launch mode's `default_allow_lsp` must be true. Disable a
+Both `auto-lsp` (false by default) and the launch mode's `default_allow_lsp` must be true. Disable a
 single server or override its transport under `language_servers`:
 
 ```yaml

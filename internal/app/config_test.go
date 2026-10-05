@@ -73,11 +73,11 @@ func TestLoadConfigFile(t *testing.T) {
 	if want := DefaultConfig().ScanDepth; cfg.ScanDepth != want {
 		t.Fatalf("scan depth = %d, want the default %d", cfg.ScanDepth, want)
 	}
-	if cfg.IndentGuides {
-		t.Fatal("indent guides should default off when the key is omitted")
+	if !cfg.IndentGuides {
+		t.Fatal("indent guides should default on when the key is omitted")
 	}
-	if enabled := writeConfig(t, "indent_guides: true\n"); !enabled.IndentGuides {
-		t.Fatal("indent_guides: true was not loaded")
+	if disabled := writeConfig(t, "indent_guides: false\n"); disabled.IndentGuides {
+		t.Fatal("indent_guides: false was not loaded")
 	}
 }
 

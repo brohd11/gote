@@ -61,7 +61,7 @@ func TestSingleFilePanelLockKeys(t *testing.T) {
 	if err := os.WriteFile(md, []byte("# hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reader, rsh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: md})
+	reader, rsh := newHomeCfg(t, offDocConfig(), Options{Mode: ModeFile, File: md})
 	reader.Update(rsh, ctrlP)
 	reader.Update(rsh, ctrlP)
 	if reader.fullPreview == nil {
@@ -91,6 +91,7 @@ func TestSingleFilePanelUnlockKeys(t *testing.T) {
 // right-click menu with it.
 func TestSingleFileAllowLSP(t *testing.T) {
 	cfg := minimalCfg()
+	cfg.AutoLSP = true
 	cfg.SingleFile.AllowLSP = false
 	s, sh := newHomeCfg(t, cfg, Options{Mode: ModeFile, File: soloFile(t)})
 	if Of(sh).lsp != nil {
@@ -113,7 +114,7 @@ func TestSingleFileAllowLSP(t *testing.T) {
 // TestProjectAllowLSP: the project section carries the same switch, and auto-lsp remains
 // the master — either one alone denies the manager.
 func TestProjectAllowLSP(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.Project.AllowLSP = false
 	if _, sh := newHomeCfg(t, cfg, Options{}); Of(sh).lsp != nil {
 		t.Error("project_mode.default_allow_lsp: false should deny the manager")
@@ -123,7 +124,7 @@ func TestProjectAllowLSP(t *testing.T) {
 		t.Error("the project key should not reach a single-file launch")
 	}
 
-	master := DefaultConfig()
+	master := lspConfig()
 	master.AutoLSP = false
 	if _, sh := newHomeCfg(t, master, Options{}); Of(sh).lsp != nil {
 		t.Error("auto-lsp: false is the master switch and should still deny the manager")
@@ -133,7 +134,7 @@ func TestProjectAllowLSP(t *testing.T) {
 // TestLSPDisabledReason: the message names the key that actually turned the servers off.
 // It used to always say auto-lsp, which would send the user to edit a key already true.
 func TestLSPDisabledReason(t *testing.T) {
-	off := DefaultConfig()
+	off := lspConfig()
 	off.AutoLSP = false
 	cases := []struct {
 		name string
@@ -143,8 +144,8 @@ func TestLSPDisabledReason(t *testing.T) {
 	}{
 		{"master", off, ModeHome, "auto-lsp: false"},
 		{"master beats mode", off, ModeFile, "auto-lsp: false"},
-		{"single file", DefaultConfig(), ModeFile, "single_file_mode.default_allow_lsp: false"},
-		{"project", DefaultConfig(), ModeHome, "project_mode.default_allow_lsp: false"},
+		{"single file", lspConfig(), ModeFile, "single_file_mode.default_allow_lsp: false"},
+		{"project", lspConfig(), ModeHome, "project_mode.default_allow_lsp: false"},
 	}
 	for _, c := range cases {
 		if got := lspDisabledReason(&Ctx{Config: c.cfg, Mode: c.mode}); got != c.want {
@@ -161,7 +162,7 @@ func TestLSPDisabledReason(t *testing.T) {
 // gote bug. alt+shift+b is marked by neither gate: find-in-files pushes onto the same jump
 // stack, so it outlives the language server.
 func TestSingleFileHelpMarksLockedKeys(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.SingleFile.AllowLSP = false
 	s, _ := newHomeCfg(t, cfg, Options{Mode: ModeFile, File: soloFile(t)})
 	text := s.helpText()
@@ -184,7 +185,7 @@ func TestSingleFileHelpMarksLockedKeys(t *testing.T) {
 	}
 
 	// A full, LSP-enabled launch marks nothing.
-	if full, _ := newHome(t); strings.Contains(full.helpText(), "off (") {
+	if full, _ := newHomeCfg(t, lspConfig(), Options{}); strings.Contains(full.helpText(), "off (") {
 		t.Error("an unrestricted launch should mark no keys off")
 	}
 }
@@ -201,7 +202,7 @@ func TestSingleFileVaultPromotionLiftsRestrictions(t *testing.T) {
 	if err := os.Mkdir(vault, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := DefaultConfig()
+	cfg := lspConfig()
 	cfg.SingleFile.AllowLSP = false
 	c := New("test", cfg, Options{Mode: ModeFile, File: soloFile(t)})
 	defer c.close()

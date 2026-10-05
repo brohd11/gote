@@ -160,7 +160,7 @@ func TestViewMenuDocDisabledOffMarkdown(t *testing.T) {
 // TestDefaultDocMode: Preview → Default writes default_doc_mode to config.yml, and only
 // docs opened afterwards start in Live.
 func TestDefaultDocMode(t *testing.T) {
-	model, s, sh := newHomeRouter(t, Options{})
+	model, s, sh := newHomeRouterCfg(t, offDocConfig(), Options{})
 	defer Of(sh).close()
 	dir := t.TempDir()
 	s.openDoc(sh, filepath.Join(dir, "before.md"))

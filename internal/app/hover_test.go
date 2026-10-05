@@ -282,7 +282,7 @@ func TestHoverSurvivesATrailingRelease(t *testing.T) {
 // editor, pick Hover info, let the answer arrive, then deliver the release that belongs to
 // the click that picked the row.
 func TestContextMenuHoverRowKeepsItsTooltip(t *testing.T) {
-	model, s, sh := newHomeRouter(t, Options{})
+	model, s, sh := newHomeRouterCfg(t, lspConfig(), Options{})
 	path, ed := seedDoc(t, s, sh, "menu.go", strings.Repeat("value := 1\n", 30))
 	s.openDoc(sh, path)
 	s.modular.FocusSlot(s.editorSlot())

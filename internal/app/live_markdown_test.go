@@ -107,7 +107,7 @@ func TestLiveMarkdownSourceColumns(t *testing.T) {
 }
 
 func TestLivePreviewToggleIsMarkdownOnly(t *testing.T) {
-	s, sh := newHome(t)
+	s, sh := newHomeCfg(t, offDocConfig(), Options{})
 	if s.Update(sh, tuitest.KeyMsg("alt+m")); s.editor.LiveRender() {
 		t.Fatal("alt+m is retired; ctrl+p cycles the doc mode")
 	}
