@@ -173,6 +173,6 @@ func (s *homeScreen) helpText() string {
 	b.WriteString(clickHelp(s.sh) + "\n")
 	b.WriteString("Document marks: (*) unsaved · (!) changed on disk · (!*) both.\n")
 	b.WriteString("Focus or File → Refresh checks open files and reloads clean buffers; saving asks before overwriting external changes.\n")
-	b.WriteString("dirty-buffer exit prompt: y save as… & exit · n discard & exit · esc/c cancel\n")
+	b.WriteString("dirty-buffer close popup: y save & close · n discard & close · esc/c cancel\n")
 	return b.String()
 }

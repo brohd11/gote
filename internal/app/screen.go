@@ -299,6 +299,10 @@ func (s *homeScreen) chromeKey(sh *core.Shared, k string) func() core.Action {
 	// the root. A list's /-filter keeps its own esc.
 	case s.fullPreview != nil && core.MatchKey(k, core.Keys.Back) && !s.modular.Filtering():
 		return s.closeFullPreview
+	// The reader holds the editor pane's keys, so alt+w (the editor's own close) is routed
+	// to the buffer from here. Only from the editor pane: alt+w is Keys.Up in the lists.
+	case s.fullPreview != nil && s.editorPanel.Focused() && k == "alt+w":
+		return func() core.Action { return s.editor.Close(sh) }
 	case core.MatchKey(k, wrapKey):
 		return func() core.Action { s.editor.ToggleWrap(); return core.Action{} }
 	case core.MatchKey(k, lineNumsKey):

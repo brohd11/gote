@@ -543,28 +543,95 @@ func TestEditorEscUnhidesSidebar(t *testing.T) {
 	}
 }
 
-// TestEscOverExitPromptStillCancels: the editor's own save/discard/cancel prompt
-// claims esc first, so alt+w on a dirty buffer keeps its cancel instead of the
-// release hook firing over it.
-func TestEscOverExitPromptStillCancels(t *testing.T) {
-	s, sh := newHome(t)
-	s.openDoc(sh, filepath.Join(t.TempDir(), "a.txt"))
-	s.Update(sh, keyMsg("dirty"))
-	s.Update(sh, keyMsg("alt+w")) // dirty ⇒ the prompt, not an exit
-	if !strings.Contains(stripANSI(s.View(sh)), "Save modified buffer?") {
-		t.Fatal("a dirty alt+w should raise the exit prompt")
+// readerFixture opens a markdown doc through the router, optionally dirties it, and puts
+// it in Reader with the editor pane focused.
+func readerFixture(t *testing.T, dirty bool) (tea.Model, *homeScreen, *core.Shared, string) {
+	t.Helper()
+	model, s, sh := newHomeRouter(t, Options{})
+	path := filepath.Join(t.TempDir(), "a.md")
+	if err := os.WriteFile(path, []byte("# Title"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	model = pumpModel(model, s.openDoc(sh, path).Cmd)
+	model = pumpModel(model, s.modular.FocusSlot(s.editorSlot()))
+	if dirty {
+		model, _ = model.Update(keyMsg("!"))
+	}
+	model = pumpModel(model, s.toggleFullPreview().Cmd)
+	if s.fullPreview == nil || s.editor.Dirty() != dirty {
+		t.Fatalf("setup: reader %v, dirty %v", s.fullPreview != nil, s.editor.Dirty())
+	}
+	return model, s, sh, path
+}
 
-	s.Update(sh, keyMsg("esc"))
-	if v := stripANSI(s.View(sh)); strings.Contains(v, "Save modified buffer?") {
-		t.Fatal("esc should cancel the prompt")
+// TestReaderAltWCloses: the reader holds the editor pane's keys, but alt+w still closes
+// the doc — straight away when clean, through the editor's save/discard popup when dirty,
+// drawn over the reader rather than as a prompt row the reader cannot answer.
+func TestReaderAltWCloses(t *testing.T) {
+	t.Run("clean", func(t *testing.T) {
+		model, s, sh, path := readerFixture(t, false)
+		model, cmd := model.Update(keyMsg("alt+w"))
+		model = pumpModel(model, cmd)
+		if _, open := Of(sh).Doc(path); open || s.fullPreview != nil {
+			t.Fatalf("alt+w should close the doc and its reader (open %v)", open)
+		}
+		if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+			t.Fatalf("a clean close asks nothing, top %T", model.(core.Router).Top())
+		}
+	})
+
+	t.Run("dirty", func(t *testing.T) {
+		model, s, sh, path := readerFixture(t, true)
+		model, cmd := model.Update(keyMsg("alt+w"))
+		model = pumpModel(model, cmd)
+		popup, ok := model.(core.Router).Top().(*components.DialogScreen)
+		if !ok || popup.Title != "unsaved changes" || !popup.Overlay {
+			t.Fatalf("a dirty alt+w should raise the save/discard popup, top %T", model.(core.Router).Top())
+		}
+		if v := view(model); !strings.Contains(v, "a.md before closing?") {
+			t.Fatalf("the popup should be drawn over the reader, render:\n%s", v)
+		}
+
+		model, _ = model.Update(keyMsg("esc"))
+		if _, open := Of(sh).Doc(path); !open || s.fullPreview == nil {
+			t.Fatal("esc should cancel, leaving the doc open in the reader")
+		}
+
+		model, cmd = model.Update(keyMsg("alt+w"))
+		model = pumpModel(model, cmd)
+		model, cmd = model.Update(keyMsg("n"))
+		model = pumpModel(model, cmd)
+		if _, open := Of(sh).Doc(path); open {
+			t.Fatal("n should discard and close the doc")
+		}
+		if b, _ := os.ReadFile(path); string(b) != "# Title" {
+			t.Fatalf("n must not write, file = %q", b)
+		}
+		if _, ok := model.(core.Router).Top().(*homeScreen); !ok {
+			t.Fatalf("the popup should be gone, top %T", model.(core.Router).Top())
+		}
+	})
+}
+
+// TestReaderFileCloseUsesThePopup: File → Close on a dirty doc in Reader raises the same
+// popup, and y saves before closing.
+func TestReaderFileCloseUsesThePopup(t *testing.T) {
+	model, s, sh, path := readerFixture(t, true)
+	model = openHeaderMenu(t, model, s, sh, "file")
+	model = chooseMenuRow(t, model, "Close")
+	if d, ok := model.(core.Router).Top().(*components.DialogScreen); !ok || d.Title != "unsaved changes" {
+		t.Fatalf("File → Close on a dirty doc should raise the popup, top %T", model.(core.Router).Top())
 	}
-	if got := focusedPane(s, sh); got != "editor" {
-		t.Fatalf("cancelling the prompt must not also release the pane, got %s", got)
+	model, cmd := model.Update(keyMsg("y"))
+	pumpModel(model, cmd)
+	if b, _ := os.ReadFile(path); string(b) != "!# Title" {
+		t.Fatalf("y should save first, file = %q", b)
+	}
+	if _, open := Of(sh).Doc(path); open {
+		t.Fatal("y should close the doc after the save")
 	}
 }
 
-// TestSidePreviewToggle: the side preview is a chrome column, toggled like the outline.
 // Neither toggle navigates or moves focus, and ctrl+p no longer does anything.
 func TestSidePreviewToggle(t *testing.T) {
 	s, sh := newHome(t)

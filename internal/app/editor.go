@@ -133,7 +133,7 @@ func (s *homeScreen) editorSaved(sh *core.Shared, path string) core.Action {
 	return act
 }
 
-// editorExit is the alt+w hook (after the editor's own save prompt): the doc leaves the
+// editorExit is the alt+w hook (after the editor's save/discard popup): the doc leaves the
 // open set, the pane shows the next open doc (or a scratch buffer), and focus returns to
 // the docs list, unhiding the sidebar if needed. In minimal mode alt+w quits, as in
 // nano.
