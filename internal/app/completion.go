@@ -139,7 +139,7 @@ func (s *homeScreen) updateCompletionAfterParent(sh *core.Shared, msg tea.Msg, b
 	if runes := []rune(text); len(runes) == 1 && isCompletionIdentifierRune(runes[0]) {
 		identifierTyped = true
 	}
-	backspaced := keyPress && (km.String() == "backspace" || km.String() == "ctrl+h")
+	backspaced := keyPress && s.editor.KeyName(km) == "backspace"
 	if !identifierTyped && !(backspaced && s.completion.popup != nil) {
 		s.closeCompletion()
 		return nil

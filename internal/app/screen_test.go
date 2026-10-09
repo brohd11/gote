@@ -879,7 +879,7 @@ func TestHelpOverlayIsTheCompleteReference(t *testing.T) {
 		"ctrl+n", "new unsaved file", // moved off the bar
 		"ctrl+r", "rename", "ctrl+d", "delete", // the docs list's own keys, also off the bar
 		"alt+p", "alt+z", "alt+l", // gote's alt chords
-		"ctrl+c", "ctrl+v", "alt+w", "ctrl+q", "alt+backspace", "ctrl+alt+backspace", // the editor's, via HelpBindings
+		"ctrl+c", "ctrl+v", "alt+w", "ctrl+q", "alt+backspace", "alt+shift+backspace", // the editor's, via HelpBindings
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("the ? overlay is the only place these keys are written; missing %q:\n%s", want, help)

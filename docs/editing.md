@@ -30,6 +30,7 @@ Alt+? opens shortcut help while editing; ? also works outside text entry.
 | Ctrl+Q | Quit, confirming unsaved changes |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
 | Ctrl+/ or Alt+/ | Toggle comments for a selection or the current line |
+| Alt+Shift+Backspace / Ctrl+Backspace / Ctrl+U | Delete to line start. Alt+Shift+Backspace works in every terminal; Ctrl+Backspace depends on the terminal (see [`kitty_keyboard`](configuration.md#startup-display-and-language-tools)) |
 | Ctrl+F | Search the current buffer |
 | Ctrl+Alt+F | Find in Files |
 | Alt+Z | Toggle soft wrapping |

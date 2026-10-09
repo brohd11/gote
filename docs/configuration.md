@@ -18,8 +18,8 @@ nothing; the status bar names the error. After a reload:
 - the doc list follows `extensions` and `scan_depth` at once (unless `--ext`/`--depth`
   were given at launch), and vaults, `default`, `default_doc_mode`, `format_on_save` and
   the click gestures apply straight away;
-- docs opened from then on follow the wrap, line-number and per-language indent settings
-  and the new `syntax_colors`;
+- docs opened from then on follow the wrap, line-number and per-language indent settings,
+  `kitty_keyboard` and the new `syntax_colors`;
 - startup states you toggle at runtime (`file_view`, `indent_guides`, the gutters, the
   menu bar) keep their current state;
 - language-server changes while a server is running, and new colors in docs already open,
@@ -75,6 +75,15 @@ apply to `gote <file>`. Omitted keys retain their defaults.
 Wrap and line-number defaults apply to newly opened/restored documents and scratch
 buffers. Alt+Z and Alt+L toggle them per document for the current session.
 `indent_guides: true` (the default) draws faint leading-indent guides; set it to false to hide them.
+
+`kitty_keyboard: false` (the default) suits most terminals: stock GNOME Terminal, xterm,
+Konsole, Windows Terminal and macOS Terminal.app. They send Ctrl+Backspace as Ctrl+H, so
+the editor reads Ctrl+H as Ctrl+Backspace (delete to line start). Set it to `true` if
+the terminal speaks the Kitty keyboard protocol (kitty, Ghostty, WezTerm, foot, iTerm2
+with CSI u), where every key arrives under its own name and Ctrl+H is plain backspace.
+Also set it to `true` if your terminal's Backspace key itself sends Ctrl+H; otherwise
+every backspace would clear the line. Alt+Shift+Backspace and Ctrl+U delete to line
+start whatever this is set to.
 
 `auto-lsp: false` (the default) leaves every language server off unless
 [lang.yml](#languages-langyml) sets `enabled: true` on it. A server also needs the mode's

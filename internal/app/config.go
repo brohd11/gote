@@ -42,6 +42,11 @@ type Config struct {
 	// FormatOnSave formats (and organizes imports) after each ctrl+s. The reformat lands
 	// after the write, leaving the buffer dirty until the next save. Off by default.
 	FormatOnSave bool `yaml:"format_on_save"`
+	// KittyKeyboard says the terminal speaks the Kitty keyboard protocol, so key names are
+	// exact. Off (the default) suits legacy terminals (GNOME Terminal, xterm, Konsole,
+	// Terminal.app), where ctrl+backspace arrives as ctrl+h; the editor then reads ctrl+h
+	// that way. Other legacy-decoding workarounds belong behind this key too.
+	KittyKeyboard bool `yaml:"kitty_keyboard"`
 	// SyntaxColors is the syntax palette (defaults in palette.go).
 	SyntaxColors SyntaxColors           `yaml:"syntax_colors"`
 	Default      string                 `yaml:"default"` // what a bare launch opens: a directory path, or a named vault

@@ -54,7 +54,7 @@ func disabledKey(b key.Binding, why string) key.Binding {
 
 // helpText renders the complete reference (the bar shows only four entries). The editor
 // section comes from the editor's own HelpBindings. The key column fits
-// "ctrl+alt+backspace".
+// "alt+shift+backspace".
 func (s *homeScreen) helpText() string {
 	var b strings.Builder
 	writeSection := func(name string, binds []key.Binding) {
