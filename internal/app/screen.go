@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/brohd11/bubblestack/components"
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"

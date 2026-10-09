@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 	"github.com/brohd11/goutil/configdir"
 )
 

@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"unicode"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // parseLSPSnippet expands the snippet subset gote advertises: numbered stops,

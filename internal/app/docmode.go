@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // A markdown doc's mode, which belongs to its buffer until the buffer closes: syntax

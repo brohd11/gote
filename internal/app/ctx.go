@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 	"github.com/charmbracelet/colorprofile"
 )
 

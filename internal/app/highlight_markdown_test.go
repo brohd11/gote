@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 
 	"charm.land/lipgloss/v2"
 )

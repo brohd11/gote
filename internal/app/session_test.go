@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // sessionHome isolates ~/.gote for a test, the way every other test here does, so a run

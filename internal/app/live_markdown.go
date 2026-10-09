@@ -7,8 +7,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/brohd11/bubblestack/components"
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 
 	"charm.land/lipgloss/v2"
 

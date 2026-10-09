@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
+	editor "github.com/brohd11/go-text-edit"
 	"github.com/charmbracelet/x/ansi"
 )
 

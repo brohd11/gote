@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // writeLangConfig loads a home whose lang.yml is raw (and whose config.yml is absent).

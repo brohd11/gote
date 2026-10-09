@@ -15,8 +15,8 @@ import (
 
 	"github.com/brohd11/goutil/executil"
 
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 
 	tea "charm.land/bubbletea/v2"
 	"go.lsp.dev/jsonrpc2"

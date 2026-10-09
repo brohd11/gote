@@ -3,7 +3,7 @@ package app
 import (
 	"path/filepath"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // openEntry is one retained buffer. id is its stable identity; path stays empty until an

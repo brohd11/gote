@@ -3,8 +3,8 @@ package app
 import (
 	"image/color"
 
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 
 	"charm.land/lipgloss/v2"
 	"go.lsp.dev/protocol"

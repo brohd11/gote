@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 
 	"github.com/alecthomas/chroma/v2/lexers"
 )

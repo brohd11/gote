@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/bubblestack/sysopen"
+	editor "github.com/brohd11/go-text-edit"
 
 	tea "charm.land/bubbletea/v2"
 )

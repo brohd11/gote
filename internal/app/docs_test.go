@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // mdOnly is the filter that reproduces gote's pre-text-discovery behavior, and what

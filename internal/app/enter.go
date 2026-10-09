@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brohd11/bubblestack/components/editor"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // Enter handlers: the structured newline for each language profile (list continuation,

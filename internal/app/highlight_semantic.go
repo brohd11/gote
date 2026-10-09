@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 // The semantic overlay: Chroma paints the syntax snapshot and the editor's host layer

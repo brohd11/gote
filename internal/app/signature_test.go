@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 )
 
 func TestSignatureCallStartFindsEnclosingCall(t *testing.T) {
