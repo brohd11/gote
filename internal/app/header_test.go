@@ -1,11 +1,13 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/components/editor"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -196,6 +198,53 @@ func TestTabRuleJoinsFrames(t *testing.T) {
 	}
 	if !strings.Contains(string(rule[edge+1:]), "──") {
 		t.Fatalf("rule = %q", string(rule))
+	}
+}
+
+// TestTabRuleSkipsEditorChrome: the git gutter and the scrollbar under the tab rule draw
+// frame glyphs, but the editor has no frame, so the rule runs flat over them.
+func TestTabRuleSkipsEditorChrome(t *testing.T) {
+	s, sh := groupHome(t)
+	a, ed := seedDoc(t, s, sh, "a.md", strings.Repeat("line\n", 200))
+	s.openDoc(sh, a)
+	ed.SetSignColumn(gitSignColumn, map[int]editor.Sign{0: addedSign()})
+	ed.ShowSignColumn(gitSignColumn, true)
+	rule, below := tabRuleRow(t, s, sh)
+	p := s.editorPanel
+	gutter := p.x + slices.Index(below[p.x:], '┃')
+	for _, x := range []int{gutter, p.x + p.w - 1} {
+		if !strings.ContainsRune("│┃", below[x]) {
+			t.Fatalf("fixture: no gutter or scrollbar at %d under the rule: %q", x, string(below))
+		}
+		if rule[x] != '─' {
+			t.Fatalf("the rule should run flat over the editor's column %d: %q", x, string(rule))
+		}
+	}
+	if edge := s.sidebarPaneWidth() - 1; rule[edge] != '┼' {
+		t.Fatalf("the sidebar edge should still cross the rule at %d: %q", edge, string(rule))
+	}
+}
+
+// TestHeaderRuleSkipsEditorChrome: in minimal mode the editor sits right under the header
+// rule, which must not tee into its gutter or scrollbar.
+func TestHeaderRuleSkipsEditorChrome(t *testing.T) {
+	model, s, sh := newHomeRouterCfg(t, DefaultConfig(), Options{Mode: ModeFile, File: soloFile(t)})
+	defer Of(sh).close()
+	_ = s.editor.LoadFile()
+	model.Update(keyMsg("alt+e"))
+	model.Update(keyMsg("esc"))
+	s.editor.SetSignColumn(gitSignColumn, map[int]editor.Sign{0: addedSign(), 1: addedSign()})
+	s.editor.ShowSignColumn(gitSignColumn, true)
+	rows := bodyRows(s, sh)
+	if !s.headerRule() {
+		t.Fatal("fixture: the menu bar should be revealed")
+	}
+	below := []rune(rows[headerRows])
+	if !strings.ContainsRune(string(below), '┃') {
+		t.Fatalf("fixture: no gutter under the rule: %q", rows[headerRows])
+	}
+	if rule := rows[headerRows-1]; strings.ContainsAny(rule, "┬┌┐┼├┤") {
+		t.Fatalf("the header rule should not join the editor's chrome: %q", rule)
 	}
 }
 

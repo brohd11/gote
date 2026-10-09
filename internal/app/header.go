@@ -160,7 +160,7 @@ func (s *homeScreen) joinDockRule(sh *core.Shared, body string) string {
 	if r < 1 || r+1 >= len(lines) {
 		return body
 	}
-	lines[r] = joinRule(s.w, lines[r-1], lines[r+1])
+	lines[r] = joinRule(s.w, s.chromeOnly(lines[r-1], r-1), s.chromeOnly(lines[r+1], r+1))
 	return strings.Join(lines, "\n")
 }
 
@@ -203,7 +203,8 @@ func (s *homeScreen) joinTabRule(sh *core.Shared, body string) string {
 		right = at(x1)
 		x1++
 	}
-	rule := []rune(ansi.Strip(joinRule(x1-x0, ansi.Cut(lines[r-1], x0, x1), ansi.Cut(lines[r+1], x0, x1))))
+	above, below := s.chromeOnly(lines[r-1], r-1), s.chromeOnly(lines[r+1], r+1)
+	rule := []rune(ansi.Strip(joinRule(x1-x0, ansi.Cut(above, x0, x1), ansi.Cut(below, x0, x1))))
 	// An end cell whose own rule ran on outward is mid-line: ├ → ┼ and so on.
 	if strings.ContainsRune("┤┼", left) {
 		rule[0] = midGlyph(rule[0])
@@ -226,6 +227,66 @@ func (s *homeScreen) joinHeaderRule(body string) string {
 	if len(lines) <= headerRows {
 		return body
 	}
-	lines[headerRows-1] = joinRule(s.w, lines[headerRows-2], lines[headerRows])
+	// The row above is the header's own, whose menu separator is chrome.
+	lines[headerRows-1] = joinRule(s.w, lines[headerRows-2], s.chromeOnly(lines[headerRows], headerRows))
 	return strings.Join(lines, "\n")
+}
+
+// chromeOnly is body row r of the composed view with every cell blanked but the panes'
+// vertical frame edges (frameEdges), for joinRule to read: the git gutter, the scrollbar,
+// indent guides and quote bars draw the same glyphs as a frame but must not join a rule.
+func (s *homeScreen) chromeOnly(row string, r int) string {
+	edges := s.frameEdges(r)
+	var b strings.Builder
+	x := 0
+	for _, c := range ansi.Strip(row) {
+		w := ansi.StringWidth(string(c))
+		if x < len(edges) && edges[x] {
+			b.WriteRune(c)
+		} else {
+			b.WriteString(strings.Repeat(" ", w))
+		}
+		x += w
+	}
+	return b.String()
+}
+
+// frameEdges marks the columns of body row r where a pane draws a vertical frame edge.
+func (s *homeScreen) frameEdges(r int) []bool {
+	edges := make([]bool, s.w)
+	for panel, slot := range s.panelSlots {
+		x, y, w, h, ok := s.modular.SlotRect(slot)
+		if !ok || r < y || r >= y+h || w <= 0 {
+			continue
+		}
+		for _, c := range paneEdges(panel, w) {
+			if x+c >= 0 && x+c < s.w {
+				edges[x+c] = true
+			}
+		}
+	}
+	return edges
+}
+
+// paneEdges is the pane-local columns where panel, w cells wide, draws a vertical frame
+// edge. The editor has no frame, only a split's divider in its first column; every other
+// pane (the side column, the preview, the dock) is framed down both sides.
+func paneEdges(panel components.Panel, w int) []int {
+	switch p := panel.(type) {
+	case *headerPanel:
+		return nil
+	case *groupPanel:
+		return dividerEdge(p.separator)
+	case *documentTabBar:
+		return dividerEdge(p.separator)
+	}
+	return []int{0, w - 1}
+}
+
+// dividerEdge is a group divider's column, when the pane draws one.
+func dividerEdge(separator bool) []int {
+	if separator {
+		return []int{0}
+	}
+	return nil
 }
