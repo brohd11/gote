@@ -20,6 +20,7 @@ func (s *homeScreen) configureSignColumns() {
 		return
 	}
 	s.editor.SetSignColumnOrder(gitSignColumn, diagnosticSignColumn)
+	s.editor.SetScrollbarSignColumn(gitSignColumn)
 	s.editor.ShowSignColumn(gitSignColumn, s.gitGutter)
 	s.editor.ShowSignColumn(diagnosticSignColumn, s.diagnosticsGutter)
 	s.refreshDiagnosticSigns()

@@ -34,6 +34,15 @@ the listing and status when you need an explicit refresh.
 **View → Git gutter** toggles line-change markers. The initial value is
 `default_git_gutter` in each launch mode's [configuration](configuration.md#startup-display-and-language-tools).
 
+When the document overflows the editor, the scrollbar also shows an overview of
+these changes: green for additions, yellow for modifications, and red for deletions.
+Marked cells use a thicker continuous line (`┃`); the ordinary track and focused
+thumb keep their thin line (`│`). It follows the Git gutter toggle and includes
+unsaved edits. The focused scrollbar thumb keeps its normal color. Each track cell
+covers a range of display rows; when changes share a cell, the first changed line
+supplies its color. Untracked files keep the gutter's muted treatment. Clicking or
+dragging the scrollbar scrolls as usual.
+
 Click a gutter marker or press **Alt+Shift+D** in the editor to inspect a unified
 diff against HEAD, including unsaved edits. The shortcut opens the changed section
 at the cursor or within its three context lines, and works with the gutter hidden.
