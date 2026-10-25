@@ -94,6 +94,25 @@ func (s *homeScreen) setFileView(view fileView) {
 	s.rebuildModular(s.sh, noFocus)
 }
 
+// toggleScrollBar flips all three file views between scrolling and paging, live (each
+// re-fits itself, so no rebuild), and saves the choice as file_scroll_bar.
+func (s *homeScreen) toggleScrollBar(sh *core.Shared) core.Action {
+	s.scrollBar = !s.scrollBar
+	s.docsPanel.SetScroll(s.scrollBar)
+	s.filePanel.SetScroll(s.scrollBar)
+	s.groupedPanel.SetScroll(s.scrollBar)
+	Of(sh).Config.FileScrollBar = s.scrollBar
+	cfg, err := LoadConfig()
+	if err == nil {
+		cfg.FileScrollBar = s.scrollBar
+		err = SaveConfig(cfg)
+	}
+	if err != nil {
+		return core.SetStatus("could not save scroll bar: " + err.Error())
+	}
+	return core.Action{}
+}
+
 // docsPane is whichever panel fills the docs slot.
 type docsPane interface {
 	components.Panel

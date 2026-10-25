@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -501,4 +502,49 @@ func selectRow(t *testing.T, l *list.Model, name string) {
 		}
 	}
 	t.Fatalf("no row %q in %v", name, rowTitles(l))
+}
+
+// TestScrollBarToggle: View → File view ends with the Scroll bar toggle, which flips all
+// three file views live and saves the choice to config.yml.
+func TestScrollBarToggle(t *testing.T) {
+	root := scanTree(t)
+	s, sh := newHomeCfg(t, DefaultConfig(), Options{Mode: ModeScan, Dir: root, Depth: 3, DepthSet: true})
+	paged := func() []bool {
+		return []bool{
+			s.docsPanel.List().ShowPagination(),
+			s.filePanel.List().ShowPagination(),
+			s.groupedPanel.List().ShowPagination(),
+		}
+	}
+
+	items := s.fileViewMenuItems()
+	toggle := items[len(items)-1]
+	if !items[len(items)-2].Separator || unmark(toggle.Label) != "Scroll bar" {
+		t.Fatalf("File view should end with a separator and Scroll bar, got %v", menuLabels(items))
+	}
+	if strings.HasPrefix(toggle.Label, menuCheckMark) {
+		t.Fatal("Scroll bar is off by default and should be unchecked")
+	}
+	if got := paged(); !slices.Equal(got, []bool{true, true, true}) {
+		t.Fatalf("every file view should start paged, pagination shown = %v", got)
+	}
+
+	toggle.Pick(sh)
+	if got := paged(); !slices.Equal(got, []bool{false, false, false}) {
+		t.Fatalf("the toggle should scroll every file view, pagination shown = %v", got)
+	}
+	if cfg, err := LoadConfig(); err != nil || !cfg.FileScrollBar {
+		t.Fatalf("the toggle should save file_scroll_bar: true, got %v, %v", cfg.FileScrollBar, err)
+	}
+	if items := s.fileViewMenuItems(); !strings.HasPrefix(items[len(items)-1].Label, menuCheckMark) {
+		t.Fatal("once on, the row should be checked")
+	}
+
+	s.fileViewMenuItems()[len(items)-1].Pick(sh)
+	if got := paged(); !slices.Equal(got, []bool{true, true, true}) {
+		t.Fatalf("toggling back should page every file view, pagination shown = %v", got)
+	}
+	if cfg, _ := LoadConfig(); cfg.FileScrollBar {
+		t.Fatal("toggling back should save file_scroll_bar: false")
+	}
 }

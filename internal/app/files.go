@@ -20,8 +20,9 @@ func (s *homeScreen) filePanelOpts(c *Ctx) components.FilePanelOpts {
 	return components.FilePanelOpts{
 		Dir:        root,
 		Root:       root,
-		Border:     true,                      // as both sidebar lists are: with three panes up, the focused one must show
-		Compact:    true,                      // a 30-cell column has no room for the standard delegate's second line
+		Border:     true, // as both sidebar lists are: with three panes up, the focused one must show
+		Compact:    true, // a 30-cell column has no room for the standard delegate's second line
+		Scroll:     s.scrollBar,
 		Colors:     components.FileColorsDirs, // folders apart from documents at a glance in a narrow column
 		DensityKey: densityKey,
 		UpKey:      upKey,

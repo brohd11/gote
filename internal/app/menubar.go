@@ -493,7 +493,8 @@ func (s *homeScreen) defaultModeMenuItems(sh *core.Shared) []components.MenuItem
 	}
 }
 
-// fileViewMenuItems are View → File view: how the docs sidebar lists documents.
+// fileViewMenuItems are View → File view: how the docs sidebar lists documents, and
+// whether all three scroll or page.
 func (s *homeScreen) fileViewMenuItems() []components.MenuItem {
 	row := func(view fileView, label string, accel rune) components.MenuItem {
 		return components.MenuItem{Label: selected(s.fileView == view, label), Key: accel,
@@ -503,6 +504,8 @@ func (s *homeScreen) fileViewMenuItems() []components.MenuItem {
 		row(fileViewFlat, "Flat", 'f'),
 		row(fileViewFolder, "Folder", 'o'),
 		row(fileViewGrouped, "Grouped", 'g'),
+		{Separator: true},
+		{Label: checked(s.scrollBar, "Scroll bar"), Key: 's', Pick: menuPick(2, s.toggleScrollBar)},
 	}
 }
 

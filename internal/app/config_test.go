@@ -451,3 +451,29 @@ func TestLoadConfigDroppedGitGutterKey(t *testing.T) {
 		t.Error("the dead git_gutter key should not turn the new sections' gutters off")
 	}
 }
+
+// TestFileScrollBarConfig: the file views page unless the config says otherwise, and
+// the key survives a save.
+func TestFileScrollBarConfig(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"", false},
+		{"file_scroll_bar: false\n", false},
+		{"file_scroll_bar: true\n", true},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			cfg := writeConfig(t, tc.raw)
+			if cfg.FileScrollBar != tc.want {
+				t.Fatalf("FileScrollBar = %v, want %v", cfg.FileScrollBar, tc.want)
+			}
+			if err := SaveConfig(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if again, err := LoadConfig(); err != nil || again.FileScrollBar != tc.want {
+				t.Fatalf("round trip gave %v, %v; want %v", again.FileScrollBar, err, tc.want)
+			}
+		})
+	}
+}

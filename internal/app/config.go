@@ -22,6 +22,9 @@ type Config struct {
 	FileView string `yaml:"file_view"`
 	// FolderView is the legacy startup preference, used when FileView is unspecified.
 	FolderView bool `yaml:"folder_view"`
+	// FileScrollBar scrolls the file views a row at a time with a scroll bar instead of
+	// paging. Off by default; View → File view → Scroll bar toggles it and saves it here.
+	FileScrollBar bool `yaml:"file_scroll_bar"`
 	// IndentGuides makes the editor visualize complete leading indent levels. On by default.
 	IndentGuides bool `yaml:"indent_guides"`
 	// Project and SingleFile are per-launch startup toggles, separate because the two

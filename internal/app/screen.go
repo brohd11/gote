@@ -95,6 +95,7 @@ type homeScreen struct {
 	sidebarSplits        map[string][]float64 // adjusted vertical shares, keyed by visible pane composition
 	editorFlex           float64              // editor's share when the preview flex column is present; zero uses half
 	fileView             fileView             // the view occupying the Docs slot
+	scrollBar            bool                 // the file views scroll with a bar rather than page (file_scroll_bar)
 	showHidden           bool                 // session-only dot-file visibility in the folder view
 	minimal              bool                 // ModeFile: chrome masked; outline may supply the only side column
 	panelToggles         bool                 // the bottom panel and outline may be summoned (single_file_mode.allow_panel_toggle)
@@ -155,7 +156,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 	// there and nothing writes the choice back.
 	s := &homeScreen{sh: sh, editorGroup: &editorGroup{weight: 1}, sidebar: !minimal, minimal: minimal, fileView: c.Config.startFileView(),
 		sidebarSplits: make(map[string][]float64), outlineDataSeq: -1, outlineScheduledSeq: -1,
-		indentGuides: c.Config.IndentGuides,
+		indentGuides: c.Config.IndentGuides, scrollBar: c.Config.FileScrollBar,
 	}
 	s.gitGutter = gutterDefault(c.Config, c.Mode)
 	s.diagnosticsGutter = c.lsp != nil && c.Config.modeDefaults(c.Mode).DiagnosticsGutter
@@ -172,6 +173,7 @@ func NewHomeScreen(sh *core.Shared) core.Screen {
 		OnPointer: s.docsPointer,
 		Border:    true,
 		Selection: sidebarSelection,
+		Scroll:    s.scrollBar,
 	})
 	s.outlinePanel = s.newOutlinePanel()
 	s.openTabs = &documentTabBar{TabBar: components.NewTabBar()}

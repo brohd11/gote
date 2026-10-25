@@ -37,8 +37,8 @@ func isConfigFile(path string) bool {
 // fails to load changes nothing: LoadConfig's fallback is the defaults, which would wipe
 // the session's settings over a typo. restart names what this session cannot pick up.
 //
-// Startup states the user toggles at runtime (file_view, indent_guides, the gutters, the
-// menu bar) are left as they are; docs opened from now on follow the rest.
+// Startup states the user toggles at runtime (file_view, file_scroll_bar, indent_guides,
+// the gutters, the menu bar) are left as they are; docs opened from now on follow the rest.
 func (c *Ctx) ReloadConfig() (restart []string, err error) {
 	cfg, err := LoadConfig()
 	if err != nil {
