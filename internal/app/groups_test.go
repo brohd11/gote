@@ -496,6 +496,120 @@ func TestGroupResizeAndTabBarRouting(t *testing.T) {
 	groupInvariant(t, s, sh)
 }
 
+func TestGroupScrollbarAndDividerDrags(t *testing.T) {
+	s, sh := groupHome(t)
+	content := strings.Repeat("line\n", 200)
+	a, first := seedDoc(t, s, sh, "a.txt", content)
+	b, second := seedDoc(t, s, sh, "b.txt", content)
+	s.openDoc(sh, a)
+	s.openDoc(sh, b)
+	s.moveTab(sh, 1)
+	s.rebuildGroups(sh)
+	s.View(sh)
+	left, right := s.groups()[0], s.groups()[1]
+	barX := left.editorPanel.x + left.editorPanel.w - 1
+	y := left.editorPanel.y
+	_, limit, height := first.ScrollSpan()
+	if limit <= 0 || barX != right.openTabs.x-1 {
+		t.Fatal("fixture needs an overflowing left editor with its scrollbar beside the divider")
+	}
+	leftWidth, rightWidth := left.editorPanel.w, right.editorPanel.w
+	caret := first.CursorPosition()
+	click := func(x, y int) {
+		s.Update(sh, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	}
+	motion := func(x, y int) {
+		s.Update(sh, tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseLeft})
+	}
+	release := func(x, y int) {
+		s.Update(sh, tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
+	}
+	assertScroll := func(want int) {
+		t.Helper()
+		if got, _, _ := first.ScrollSpan(); got != want {
+			t.Fatalf("left editor scroll offset = %d, want %d", got, want)
+		}
+		if got, _, _ := second.ScrollSpan(); got != 0 {
+			t.Fatalf("left scrollbar changed right editor offset to %d", got)
+		}
+	}
+	assertWidths := func() {
+		t.Helper()
+		s.View(sh)
+		if left.editorPanel.w != leftWidth || right.editorPanel.w != rightWidth {
+			t.Fatalf("scrollbar resized groups: widths %d/%d, want %d/%d",
+				left.editorPanel.w, right.editorPanel.w, leftWidth, rightWidth)
+		}
+	}
+
+	// Track clicks reach both ends without resizing, even when the other group has focus.
+	click(barX, y+height-1)
+	release(barX, y+height-1)
+	assertScroll(limit)
+	assertWidths()
+	click(barX, y)
+	release(barX, y)
+	assertScroll(0)
+
+	// A thumb drag keeps scrolling across the divider and past the pane's bounds.
+	click(barX, y)
+	motion(barX+4, y+height+5)
+	assertScroll(limit)
+	motion(barX+4, y-5)
+	assertScroll(0)
+	release(barX+4, y-5)
+	motion(barX, y+height-1)
+	assertScroll(0)
+	assertWidths()
+	if first.CursorPosition() != caret {
+		t.Fatal("scrollbar gesture moved the caret")
+	}
+
+	// The neighboring divider still resizes when dragged across the scrollbar.
+	dividerX := right.openTabs.x
+	click(dividerX, y)
+	motion(dividerX-5, y+height/2)
+	release(dividerX-5, y+height/2)
+	s.View(sh)
+	if right.openTabs.x != dividerX-5 {
+		t.Fatalf("divider moved to %d, want %d", right.openTabs.x, dividerX-5)
+	}
+	assertScroll(0)
+
+	// A new scrollbar gesture after resizing uses the updated geometry.
+	leftWidth, rightWidth = left.editorPanel.w, right.editorPanel.w
+	barX = left.editorPanel.x + left.editorPanel.w - 1
+	click(barX, y+height-1)
+	release(barX, y+height-1)
+	assertScroll(limit)
+	assertWidths()
+}
+
+func TestGroupScrollbarColumnResizesWithoutBar(t *testing.T) {
+	s, sh := groupHome(t)
+	a, first := seedDoc(t, s, sh, "a.txt", "short\n")
+	b, _ := seedDoc(t, s, sh, "b.txt", "short\n")
+	s.openDoc(sh, a)
+	s.openDoc(sh, b)
+	s.moveTab(sh, 1)
+	s.rebuildGroups(sh)
+	s.View(sh)
+	left, right := s.groups()[0], s.groups()[1]
+	if _, limit, _ := first.ScrollSpan(); limit != 0 {
+		t.Fatal("fixture needs a left editor that draws no scrollbar")
+	}
+	// With no scrollbar, the cell before the divider keeps its resize target.
+	x, y := left.editorPanel.x+left.editorPanel.w-1, left.editorPanel.y
+	dividerX := right.openTabs.x
+	s.Update(sh, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	s.Update(sh, tea.MouseMotionMsg{X: x - 5, Y: y, Button: tea.MouseLeft})
+	s.Update(sh, tea.MouseReleaseMsg{X: x - 5, Y: y, Button: tea.MouseLeft})
+	s.View(sh)
+	if right.openTabs.x != dividerX-5 {
+		t.Fatalf("divider moved to %d, want %d", right.openTabs.x, dividerX-5)
+	}
+}
+
 func TestGroupTabSeparator(t *testing.T) {
 	s, sh := groupHome(t)
 	seedDoc(t, s, sh, "a.txt", "a")

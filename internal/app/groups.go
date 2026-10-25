@@ -107,15 +107,73 @@ func (p *groupPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, boo
 	}
 	// Pane-local coordinates count the separator; the editor's start after it.
 	if mm, ok := msg.(tea.MouseMsg); ok && p.sepW() > 0 {
-		msg = shiftMouseX(mm, -p.sepW())
+		msg = shiftMouse(mm, -p.sepW(), 0)
 	}
 	return p.ScreenPanel.UpdatePanel(sh, msg)
 }
 
-// shiftMouseX moves a mouse message dx columns, keeping its concrete type.
-func shiftMouseX(mm tea.MouseMsg, dx int) tea.Msg {
+// scrollbarInput gives a left group's scrollbar the press that ModularScreen would take
+// for a resize: the resize target spans the cell before the divider, which is that
+// scrollbar's column. With no scrollbar drawn, the cell stays a resize target. The
+// gesture is held here to its release, so a thumb drag can cross the divider.
+func (s *homeScreen) scrollbarInput(sh *core.Shared, msg tea.Msg) (core.Action, bool) {
+	if _, key := msg.(tea.KeyPressMsg); key {
+		s.barDrag = nil
+	}
+	mm, ok := msg.(tea.MouseMsg)
+	if !ok {
+		return core.Action{}, false
+	}
+	switch m := msg.(type) {
+	case tea.MouseClickMsg:
+		s.barDrag = nil
+		if m.Button != tea.MouseLeft || m.Mod != 0 || s.minimal || s.modular.Resizing() {
+			return core.Action{}, false
+		}
+		groups := s.groups()
+		for _, g := range groups[:len(groups)-1] {
+			p := g.editorPanel
+			if m.X != p.x+p.w-1 || m.Y < p.y || m.Y >= p.y+p.h {
+				continue
+			}
+			// A reader in the pane draws no editor scrollbar.
+			if g.fullPreview != nil {
+				return core.Action{}, false
+			}
+			if _, limit, _ := g.editor.ScrollSpan(); limit == 0 {
+				return core.Action{}, false
+			}
+			s.barDrag = g
+			focus := s.modular.FocusSlot(s.panelSlot(p))
+			act, _ := p.ScreenPanel.UpdatePanel(sh, shiftMouse(mm, -p.x, -p.y))
+			act.Cmd = tea.Batch(act.Cmd, focus)
+			return act, true
+		}
+		return core.Action{}, false
+	case tea.MouseMotionMsg:
+		if m.Button == tea.MouseNone {
+			s.barDrag = nil
+		}
+	case tea.MouseWheelMsg:
+		return core.Action{}, false
+	}
+	g := s.barDrag
+	if g == nil {
+		return core.Action{}, false
+	}
+	if _, release := msg.(tea.MouseReleaseMsg); release {
+		s.barDrag = nil
+	}
+	p := g.editorPanel
+	act, _ := p.ScreenPanel.UpdatePanel(sh, shiftMouse(mm, -p.x, -p.y))
+	return act, true
+}
+
+// shiftMouse moves a mouse message by (dx, dy), keeping its concrete type.
+func shiftMouse(mm tea.MouseMsg, dx, dy int) tea.Msg {
 	m := mm.Mouse()
 	m.X += dx
+	m.Y += dy
 	switch mm.(type) {
 	case tea.MouseClickMsg:
 		return tea.MouseClickMsg(m)

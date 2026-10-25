@@ -67,6 +67,7 @@ type homeScreen struct {
 	groupLayoutDirty     bool
 	*editorGroup         // active group; document actions always read through this pointer
 	buildingGroups       bool
+	barDrag              *editorGroup // the group whose scrollbar holds the current gesture
 	gitDocs              docsGit
 	bottomVisible        bool
 	header               *headerPanel // the layout's menu and breadcrumb leaf (minimal: the title)
@@ -394,7 +395,10 @@ func (s *homeScreen) Update(sh *core.Shared, msg tea.Msg) (next core.Screen, res
 			return s, s.finishHomeUpdate(sh, act)
 		}
 	}
-	_, act := s.modular.Update(sh, msg)
+	act, handled := s.scrollbarInput(sh, msg)
+	if !handled {
+		_, act = s.modular.Update(sh, msg)
+	}
 	s.promoteEditedScratch(sh)
 	if act.Msg != nil {
 		s.closeCompletion()
