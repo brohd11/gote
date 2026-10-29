@@ -49,15 +49,15 @@ func TestGitDiffShortcutAliasesAndEditingBindings(t *testing.T) {
 	}
 	s, sh := gitDiffHome(t, "old\n", "one two three\n")
 	s.Update(sh, keyMsg("alt+f"))
-	if s.editor.CursorPosition().Column == 0 {
+	if s.editor.CursorPosition().Column != 3 {
 		t.Fatal("word forward was intercepted")
 	}
 	s.Update(sh, keyMsg("alt+b"))
-	if s.editor.CursorPosition().Column != 3 {
+	if s.editor.CursorPosition().Column != 0 {
 		t.Fatal("word backward was intercepted")
 	}
 	s.Update(sh, keyMsg("alt+d"))
-	if s.gitDiff != nil || s.editor.Text() == "one two three\n" {
+	if s.gitDiff != nil || s.editor.Text() != " two three\n" {
 		t.Fatal("Alt+D no longer deletes a word")
 	}
 }

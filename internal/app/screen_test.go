@@ -790,14 +790,7 @@ func TestHomeLeavesWordMotionsToTheEditor(t *testing.T) {
 	if back == end {
 		t.Fatal("alt+b should reach the editor and move back by a word")
 	}
-	// alt+f is not the exact undo of alt+b: back stops on the previous word's END and
-	// forward on the next word's START, so the caret crosses the gap on one press and the
-	// word on the next. Two presses return it, which is still cursor position as the
-	// assertion — only the count changed.
-	s.Update(sh, keyMsg("alt+f"))
-	if s.editor.CursorPosition() == back {
-		t.Fatal("alt+f should reach the editor and move forward")
-	}
+	// Back crosses beta to its start; forward crosses it back to its end.
 	s.Update(sh, keyMsg("alt+f"))
 	if s.editor.CursorPosition() != end {
 		t.Fatalf("alt+f should move forward by a word: %v, want %v", s.editor.CursorPosition(), end)
@@ -807,6 +800,24 @@ func TestHomeLeavesWordMotionsToTheEditor(t *testing.T) {
 	}
 	if got := s.editor.Text(); got != "alpha beta" {
 		t.Fatalf("word motions must not edit the buffer: %q", got)
+	}
+
+	const expression = `ui.margin_container().name("M")`
+	s.editor.SetText(expression)
+	for _, prefix := range []string{`ui`, `ui.margin_container`, `ui.margin_container().name`, `ui.margin_container().name("M`, expression} {
+		s.Update(sh, keyMsg("alt+f"))
+		if got := s.editor.CursorPosition().Column; got != len(prefix) {
+			t.Fatalf("alt+f through expression: column %d, want %d after %q", got, len(prefix), prefix)
+		}
+	}
+	for _, prefix := range []string{`ui.margin_container().name("`, `ui.margin_container().`, `ui.`, ``} {
+		s.Update(sh, keyMsg("alt+b"))
+		if got := s.editor.CursorPosition().Column; got != len(prefix) {
+			t.Fatalf("alt+b through expression: column %d, want %d after %q", got, len(prefix), prefix)
+		}
+	}
+	if s.bottomVisible || !s.sidebar || s.editor.Text() != expression {
+		t.Fatal("word motions through punctuation must only move the cursor")
 	}
 }
 
