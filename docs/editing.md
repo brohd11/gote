@@ -32,6 +32,8 @@ Alt+? opens shortcut help while editing; ? also works outside text entry.
 | Ctrl+/ or Alt+/ | Toggle comments for a selection or the current line |
 | Alt+Shift+Backspace / Ctrl+Backspace / Ctrl+U | Delete to line start. Alt+Shift+Backspace works in every terminal; Ctrl+Backspace depends on the terminal (see [`kitty_keyboard`](configuration.md#startup-display-and-language-tools)) |
 | Ctrl+F | Search the current buffer |
+| Alt+- / Shift+F3 | Previous search match |
+| Alt+= / F3 | Next search match |
 | Ctrl+Alt+F | Find in Files |
 | Alt+Z | Toggle soft wrapping |
 | Alt+L | Toggle line numbers |
@@ -44,6 +46,12 @@ Alt+? opens shortcut help while editing; ? also works outside text entry.
 Alt+pipe (`alt+|`) toggles the bottom panel while preserving editor focus. The
 sidebar chord is `alt+\`. Markdown and language-tool shortcuts are covered in
 [Markdown](markdown.md) and [Language servers](language-servers.md).
+
+Find matches literal text, ignoring case. Enter or Esc leaves the find field and
+retains the query. Alt+- / Alt+= (no Shift needed for `=`) and Shift+F3 / F3 select
+the previous / next match while you edit, wrapping at either end. They also work
+inside the find field, alongside Up/Down. Editing a match updates the results;
+an empty query or no matches makes these shortcuts do nothing.
 
 Supported languages provide syntax highlighting, bracket/quote pairing, comment
 toggling, and language-aware indentation (configurable per language in

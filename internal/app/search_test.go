@@ -10,10 +10,81 @@ import (
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
+	editor "github.com/brohd11/go-text-edit"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
+
+func TestFindMatchShortcutsThroughRouter(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"project", ModeScan}, {"single file", ModeFile}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeSearchFile(t, root, "notes.txt", "foo foo foo")
+			model, s, sh := newHomeRouterCfg(t, testConfig(), Options{Mode: tc.mode, Dir: root, File: path})
+			t.Cleanup(Of(sh).close)
+			s.gitGutter = false
+			if tc.mode == ModeScan {
+				s.openDoc(sh, path)
+			}
+			s.editor.SetText("foo foo foo")
+			s.modular.FocusSlot(s.editorSlot())
+			id := s.currentID
+			drive := func(chord string) {
+				t.Helper()
+				var cmd tea.Cmd
+				model, cmd = model.Update(keyMsg(chord))
+				model = pumpModel(model, cmd)
+			}
+			assertMatch := func(column int, fieldFocused bool) {
+				t.Helper()
+				if got := s.editor.CursorPosition(); got != (editor.Position{Column: column}) {
+					t.Fatalf("caret=%+v, want column %d", got, column)
+				}
+				_, isField := model.(core.Router).Top().(*components.LineEditScreen)
+				if isField != fieldFocused || !s.editorPanel.Focused() || s.currentID != id {
+					t.Fatal("match navigation changed focus or the active document")
+				}
+			}
+			drive("ctrl+f")
+			drive("foo")
+			drive("alt+=")
+			assertMatch(4, true)
+			drive("shift+f3")
+			assertMatch(0, true)
+			drive("f3")
+			assertMatch(4, true)
+			drive("alt+-")
+			assertMatch(0, true)
+			drive("esc")
+			assertMatch(0, false)
+			drive("alt+=")
+			assertMatch(4, false)
+			drive("bar")
+			if s.editor.Text() != "foo bar foo" {
+				t.Fatalf("typing did not replace the selected match: %q", s.editor.Text())
+			}
+			drive("f3")
+			assertMatch(8, false)
+			drive("alt+-")
+			assertMatch(0, false)
+			drive("shift+f3")
+			assertMatch(8, false)
+			drive("ctrl+z")
+			if s.editor.Text() != "foo foo foo" {
+				t.Fatal("navigation interfered with undoing the replacement")
+			}
+			for _, hint := range []string{"alt+-", "alt+=", "shift+f3", "f3"} {
+				if !strings.Contains(s.helpText(), hint) {
+					t.Fatalf("shortcut help missing %s", hint)
+				}
+			}
+		})
+	}
+}
 
 func writeSearchFile(t *testing.T, root, rel, body string) string {
 	t.Helper()
