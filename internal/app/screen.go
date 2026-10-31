@@ -602,6 +602,14 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 	defer s.refreshDiagnostics()
 
 	switch msg := payload.(type) {
+	case editor.BufferChangedMsg:
+		if msg.Editor == s.editor {
+			s.closeCompletion()
+			s.closeSignature()
+			s.promoteEditedScratch(sh)
+			return s.finishHomeUpdate(sh, core.Action{})
+		}
+		return core.Action{}
 	case editor.DiskStateChangedMsg:
 		if msg.Reloaded {
 			Of(sh).open.each(func(entry *openEntry) {

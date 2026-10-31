@@ -365,7 +365,7 @@ func (s *homeScreen) editMenuItems() []components.MenuItem {
 		return nil
 	}
 	sep := []components.MenuItem{{Separator: true}}
-	items := slices.Concat(row("Undo"), row("Redo"), sep, clipboard, sep, row("Search"))
+	items := slices.Concat(row("Undo"), row("Redo"), sep, clipboard, sep, row("Search"), row("Replace"))
 	// The reader shows the doc, not the buffer these rows would change.
 	if s.readerOn() {
 		for i := range items {

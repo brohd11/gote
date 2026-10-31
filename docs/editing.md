@@ -9,7 +9,7 @@ label or use Alt+F, Alt+E, Alt+V, or Alt+O. Alt+1 through Alt+4 open the menus b
 position, left to right. While editing, Alt+F keeps its word-forward behavior; use
 Alt+1 to reach File. In an open menu, Left/Right switches menus and an underlined
 letter selects its row. The menus mirror the editor's keys: **File** has Save, Save As,
-Close, and Quit; **Edit** has Undo, Redo, the clipboard, Search, Indent, Dedent, and
+Close, and Quit; **Edit** has Undo, Redo, the clipboard, Search, Replace, Indent, Dedent, and
 Toggle comment; **View → Help** opens the shortcut page. Edit's rows are disabled
 while the reader shows the document.
 
@@ -32,6 +32,7 @@ Alt+? opens shortcut help while editing; ? also works outside text entry.
 | Ctrl+/ or Alt+/ | Toggle comments for a selection or the current line |
 | Alt+Shift+Backspace / Ctrl+Backspace / Ctrl+U | Delete to line start. Alt+Shift+Backspace works in every terminal; Ctrl+Backspace depends on the terminal (see [`kitty_keyboard`](configuration.md#startup-display-and-language-tools)) |
 | Ctrl+F | Search the current buffer |
+| Ctrl+R | Replace in the current buffer (rename when the file list has focus) |
 | Alt+- / Shift+F3 | Previous search match |
 | Alt+= / F3 | Next search match |
 | Ctrl+Alt+F | Find in Files |
@@ -52,6 +53,16 @@ retains the query. Alt+- / Alt+= (no Shift needed for `=`) and Shift+F3 / F3 sel
 the previous / next match while you edit, wrapping at either end. They also work
 inside the find field, alongside Up/Down. Editing a match updates the results;
 an empty query or no matches makes these shortcuts do nothing.
+
+Ctrl+R opens a two-field replace control. From the find field, Ctrl+R keeps the query
+and focuses Replace; from the editor, it focuses Find and seeds a single-line selection.
+Tab or Shift+Tab swaps fields. Up/Down, Alt+-/=, and Shift+F3/F3 select matches;
+Left/Right move within the field. Enter first selects a match under or after the caret
+if no exact match is selected. Once a match is selected, Enter replaces it and selects
+the next match, keeping the control focused. An empty replacement deletes the match.
+Replacement text is literal, and each replacement is one undo step. Esc returns to
+the editor, retaining both rows while Find is nonempty; click a row to refocus it.
+Ctrl+F returns to the single find field and retains the replacement value for later use.
 
 Supported languages provide syntax highlighting, bracket/quote pairing, comment
 toggling, and language-aware indentation (configurable per language in
