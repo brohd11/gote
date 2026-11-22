@@ -42,7 +42,6 @@ type searchPanel struct {
 
 func newSearchPanel(pick func(*core.Shared, searchEntry) core.Action) *searchPanel {
 	p := &searchPanel{entryList: newEntryList("Search", pick)}
-	p.status = "No search run."
 	p.statusGap, p.mutedHeading = true, true
 	p.group = func(e searchEntry) string { return e.path }
 	p.heading = func(path string) string {
@@ -54,8 +53,16 @@ func newSearchPanel(pick func(*core.Shared, searchEntry) core.Action) *searchPan
 	p.row = func(e searchEntry) string {
 		return fmt.Sprintf("%d:%d  %s", e.line+1, e.column+1, strings.TrimSpace(e.text))
 	}
-	p.reflow()
+	p.clear()
 	return p
+}
+
+func (p *searchPanel) clear() {
+	p.entries, p.selected, p.root = nil, -1, ""
+	p.status = "No search run."
+	p.SetTitle("Search")
+	p.ScrollTo(0)
+	p.reflow()
 }
 
 func (p *searchPanel) setSearching(query, root string) {
@@ -109,7 +116,7 @@ func (s *homeScreen) findFilesForm(sh *core.Shared) *components.FormScreen {
 	form := components.NewForm(components.FormOpts{
 		Title: "Find in Files", Overlay: true, Width: 64, Focus: "query",
 		Fields: []components.FormField{
-			components.NewTextField("query", "Search: ", "text to find"),
+			components.NewTextField("query", "Search: ", "text to find (empty clears)"),
 			components.NewTextField("path", "Path:   ", root),
 		},
 		Help: []key.Binding{
@@ -120,7 +127,7 @@ func (s *homeScreen) findFilesForm(sh *core.Shared) *components.FormScreen {
 		OnSubmit: func(sh *core.Shared, form *components.FormScreen) core.Action {
 			query := form.Value("query")
 			if strings.TrimSpace(query) == "" {
-				return core.Async(form.Focus("query"))
+				return core.Seq(core.Pop(), core.PropagateAll(findFilesRequest{target: s}))
 			}
 			root, err := resolveSearchRoot(Of(sh), form.Value("path"))
 			if err != nil {
@@ -173,9 +180,18 @@ func (s *homeScreen) beginFindFiles(sh *core.Shared, request findFilesRequest) c
 	if s.searchCancel != nil {
 		s.searchCancel()
 	}
+	s.searchCancel = nil
+	s.searchGeneration++
+	if strings.TrimSpace(request.query) == "" {
+		s.searchQuery = ""
+		s.search.clear()
+		if s.bottomVisible && s.bottom.active == bottomSearch {
+			return s.toggleBottom(sh)
+		}
+		return core.Action{}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.searchCancel = cancel
-	s.searchGeneration++
 	generation := s.searchGeneration
 	snapshots := make(map[string]string)
 	Of(sh).EachDoc(func(path string, ed *editor.Screen) {

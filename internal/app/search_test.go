@@ -248,3 +248,140 @@ func TestFindFilesShortcutRunsIntoFocusedBottomPanel(t *testing.T) {
 		t.Fatalf("search results = %#v", s.search.entries)
 	}
 }
+
+func TestFindFilesBlankSubmissionClearsSearch(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, tab string
+		visible, focused bool
+	}{
+		{"empty", "", bottomSearch, true, true},
+		{"whitespace", " \t ", bottomSearch, true, true},
+		{"editor focused", "", bottomSearch, true, false},
+		{"diagnostics", "", bottomDiagnostics, true, true},
+		{"hidden", "", bottomSearch, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeSearchFile(t, root, "match.txt", strings.Repeat("needle\n", 40))
+			model, s, sh := newHomeRouterCfg(t, testConfig(), Options{Mode: ModeScan, Dir: root})
+			t.Cleanup(Of(sh).close)
+			drive := func(chord string) {
+				t.Helper()
+				var cmd tea.Cmd
+				model, cmd = model.Update(keyMsg(chord))
+				model = pumpModel(model, cmd)
+			}
+			drive("ctrl+alt+f")
+			form := model.(core.Router).Top().(*components.FormScreen)
+			form.SetValue("query", "needle")
+			form.SetValue("path", root)
+			drive("enter")
+			if len(s.search.entries) != 40 || s.search.entries[0].path != path {
+				t.Fatal("initial search did not populate results")
+			}
+			s.search.selectEntry(30)
+			s.modular.Nudge(0, -3)
+			if !tc.visible {
+				s.toggleBottom(sh)
+			}
+			s.bottom.selectTab(tc.tab)
+			if tc.focused {
+				s.modular.FocusSlot(s.panelSlot(s.bottom))
+			} else {
+				s.modular.FocusSlot(s.editorSlot())
+			}
+			priorFocus := s.focusedPane()
+			priorHeight := s.search.height
+			drive("ctrl+alt+f")
+			form = model.(core.Router).Top().(*components.FormScreen)
+			form.SetValue("query", tc.query)
+			form.SetValue("path", filepath.Join(root, "missing-directory"))
+			drive("enter")
+			if model.(core.Router).Top() != s {
+				t.Fatal("blank search should dismiss the form without validating the path")
+			}
+			if s.searchQuery != "" || s.searchPath != root || s.searchCancel != nil {
+				t.Fatal("clear should forget the query and retain the previous search path")
+			}
+			if len(s.search.entries) != 0 || s.search.selected != -1 || s.search.ScrollOffset() != 0 ||
+				s.search.root != "" || s.search.status != "No search run." {
+				t.Fatal("clear should reset search results, selection, scrolling and status")
+			}
+			wantVisible := tc.visible && tc.tab == bottomDiagnostics
+			if s.bottomVisible != wantVisible || s.bottom.active != tc.tab {
+				t.Fatal("clear changed the wrong dock tab or visibility")
+			}
+			wantFocus := priorFocus
+			if !wantVisible && priorFocus == s.bottom {
+				wantFocus = s.editorPanel
+			}
+			if s.focusedPane() != wantFocus {
+				t.Fatal("clear did not preserve focus or return it from the closed dock to the editor")
+			}
+			if !s.bottomVisible {
+				s.toggleBottom(sh)
+				if s.search.height != priorHeight {
+					t.Fatal("closing search lost the resized dock height")
+				}
+			}
+			drive("ctrl+alt+f")
+			form = model.(core.Router).Top().(*components.FormScreen)
+			if form.Value("query") != "" || form.Value("path") != root {
+				t.Fatal("reopened form should have an empty query and the retained path")
+			}
+			form.SetValue("query", "needle")
+			drive("enter")
+			if len(s.search.entries) != 40 || !s.bottomVisible || !s.search.Focused() {
+				t.Fatal("a new search should work after clearing")
+			}
+		})
+	}
+}
+
+func TestSearchPanelClearResetsTitle(t *testing.T) {
+	search := newSearchPanel(nil)
+	search.SetSize(50, 8)
+	search.setResult("needle", "/tmp", []searchEntry{{path: "/tmp/match.txt", text: "needle"}}, false, nil)
+	search.clear()
+	view := stripANSI(search.View(false))
+	if !strings.Contains(view, "Search") || strings.Contains(view, "Search (") || !strings.Contains(view, "No search run.") {
+		t.Fatalf("clear did not reset the panel title and status: %s", view)
+	}
+}
+
+func TestClearFindFilesCancelsRunningSearchAndIgnoresLateResults(t *testing.T) {
+	s, sh := newHomeCfg(t, testConfig(), Options{Mode: ModeScan, Dir: t.TempDir()})
+	t.Cleanup(Of(sh).close)
+	s.beginFindFiles(sh, findFilesRequest{target: s, query: "needle", root: docsRoot(Of(sh))})
+	generation := s.searchGeneration
+	cancel := s.searchCancel
+	canceled := false
+	s.searchCancel = func() { canceled = true; cancel() }
+	s.beginFindFiles(sh, findFilesRequest{target: s})
+	if !canceled || s.searchCancel != nil || s.bottomVisible {
+		t.Fatal("clear should cancel the running search and close Search")
+	}
+	s.finishFindFiles(findFilesResult{
+		target: s, generation: generation, query: "needle",
+		entries: []searchEntry{{path: "late.txt", text: "needle"}},
+	})
+	if len(s.search.entries) != 0 || s.search.status != "No search run." {
+		t.Fatal("late results restored a cleared search")
+	}
+}
+
+func TestFindFilesCancelKeepsSearch(t *testing.T) {
+	model, s, sh := newHomeRouterCfg(t, testConfig(), Options{Mode: ModeScan, Dir: t.TempDir()})
+	t.Cleanup(Of(sh).close)
+	s.searchQuery = "needle"
+	s.search.setResult("needle", "/tmp", []searchEntry{{path: "/tmp/match.txt", text: "needle"}}, false, nil)
+	var cmd tea.Cmd
+	model, cmd = model.Update(keyMsg("ctrl+alt+f"))
+	model = pumpModel(model, cmd)
+	model.(core.Router).Top().(*components.FormScreen).SetValue("query", "")
+	model, cmd = model.Update(keyMsg("esc"))
+	model = pumpModel(model, cmd)
+	if model.(core.Router).Top() != s || s.searchQuery != "needle" || len(s.search.entries) != 1 {
+		t.Fatal("canceling a blank form should leave the previous search intact")
+	}
+}
