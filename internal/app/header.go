@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -44,15 +45,34 @@ func (p *headerPanel) View(bool) string {
 		b.WriteString(s.titleBar(true))
 	} else {
 		x := menusWidth(p.menuSpans) + 1
-		// The breadcrumb gets what the menus leave; it truncates, the menus never do.
-		crumbs := []core.Crumb{{Full: s.CrumbLabel(false), Short: s.CrumbLabel(true)}}
-		b.WriteString(core.RenderBreadcrumb(crumbs, max(p.w-x, 0)))
+		b.WriteString(s.scanBreadcrumb(max(p.w-x, 0)))
 	}
 	row := ansi.Truncate(b.String(), p.w, "")
 	for i := range p.menuSpans {
 		p.menuSpans[i].x1 = min(p.menuSpans[i].x1, p.w)
 	}
 	return row + "\n" + joinRule(p.w, "", "")
+}
+
+// scanBreadcrumb reserves room for the scan status before truncating the root path.
+// The status describes the seed, so sidebar filtering never changes its count.
+func (s *homeScreen) scanBreadcrumb(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	crumbs := []core.Crumb{{Full: s.CrumbLabel(false), Short: s.CrumbLabel(true)}}
+	c := Of(s.sh)
+	if !c.ScanPartial {
+		return ansi.Truncate(core.RenderBreadcrumb(crumbs, width), width, "")
+	}
+	status := fmt.Sprintf(" (Partial Scan: %d Files)", len(c.Files))
+	crumbWidth := width - ansi.StringWidth(status)
+	var crumb string
+	if crumbWidth > 2 { // the breadcrumb's horizontal padding needs two cells
+		crumb = ansi.Truncate(core.RenderBreadcrumb(crumbs, crumbWidth), crumbWidth, "")
+	}
+	status = lipgloss.NewStyle().Foreground(core.BorderColor).Render(status)
+	return ansi.Truncate(crumb+status, width, "")
 }
 
 // titleBar is minimal mode's doc title as the editor drew it over itself, muted while the

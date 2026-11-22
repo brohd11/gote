@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/list"
 	"github.com/brohd11/goutil/strutil"
@@ -79,11 +80,11 @@ func (f DocFilter) hasExt(name string) bool {
 
 // HomeDocs lists the docs in the home store dir, scanned like a vault to depth levels,
 // creating dir if missing. A listing failure yields an empty list.
-func HomeDocs(dir string, depth int, f DocFilter) []DocFile {
+func HomeDocs(dir string, depth int, f DocFilter, limits ScanLimits) ScanResult {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil
+		return ScanResult{}
 	}
-	return ScanDocs(dir, depth, f)
+	return ScanDocs(dir, depth, f, limits)
 }
 
 // skipDirs are trees a scan never enters (vendored code, build output); dot-directories
@@ -131,12 +132,54 @@ func (s *homeScreen) includeDoc(c *Ctx) func(string, fs.DirEntry) bool {
 	}
 }
 
-// ScanDocs walks root to depth levels (0 = root only) collecting accepted files, pruning
-// dot-directories and skipDirs (but never root itself). Unreadable subtrees are skipped.
-func ScanDocs(root string, depth int, f DocFilter) []DocFile {
-	var docs []DocFile
+const (
+	defaultScanMaxFiles       = 2000
+	defaultScanTimeoutSeconds = 3
+)
+
+// ScanLimits bounds discovery work. Nonpositive values use the defaults. Timeout is
+// checked between filesystem operations; an in-progress operation can overrun it.
+type ScanLimits struct {
+	MaxFiles int
+	Timeout  time.Duration
+}
+
+func (l ScanLimits) normalized() ScanLimits {
+	if l.MaxFiles <= 0 {
+		l.MaxFiles = defaultScanMaxFiles
+	}
+	if l.Timeout <= 0 {
+		l.Timeout = defaultScanTimeoutSeconds * time.Second
+	}
+	return l
+}
+
+// ScanResult contains the accepted files and whether a bound stopped discovery.
+// Partial does not imply that another matching file is known to exist.
+type ScanResult struct {
+	Files   []DocFile
+	Partial bool
+}
+
+// ScanDocs walks root to depth levels (0 = root only) collecting accepted files until
+// either limit is reached, pruning dot-directories and skipDirs (but never root itself).
+// Unreadable subtrees are skipped.
+func ScanDocs(root string, depth int, f DocFilter, limits ScanLimits) ScanResult {
+	return scanDocs(root, depth, f, limits, time.Now)
+}
+
+// now is injected so timeout tests can exercise the real walk without sleeping.
+func scanDocs(root string, depth int, f DocFilter, limits ScanLimits, now func() time.Time) ScanResult {
+	limits = limits.normalized()
+	deadline := now().Add(limits.Timeout)
+	var result ScanResult
+	timedOut := func() bool { return !now().Before(deadline) }
 	root = filepath.Clean(root)
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if timedOut() {
+			result.Partial = true
+			return fs.SkipAll
+		}
 		if err != nil {
 			return nil // skip what we can't read
 		}
@@ -150,12 +193,20 @@ func ScanDocs(root string, depth int, f DocFilter) []DocFile {
 			return nil
 		}
 		if f.Match(path, d.Name()) {
-			docs = append(docs, DocFile{Name: d.Name(), Path: path, Root: root})
+			result.Files = append(result.Files, DocFile{Name: d.Name(), Path: path, Root: root})
+			if len(result.Files) >= limits.MaxFiles {
+				result.Partial = true
+				return fs.SkipAll
+			}
+		}
+		if timedOut() {
+			result.Partial = true
+			return fs.SkipAll
 		}
 		return nil
 	})
-	sortDocs(docs)
-	return docs
+	sortDocs(result.Files)
+	return result
 }
 
 func sortDocs(docs []DocFile) {

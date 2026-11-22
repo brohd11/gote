@@ -55,13 +55,15 @@ var rootCmd = &cobra.Command{
 	Long: `gote is a simple TUI text editor. With no arguments it opens what the "default"
 key in ~/.gote/config.yml names — a directory path, or a configured vault's name — and
 the ~/.gote/docs document store when no valid default is configured. Given a directory
-it lists every matching file found by a recursive
+it lists matching files found by a recursive
 scan, to the depth given as a second argument. Given the name of a configured vault it
 opens that vault. Given a file it opens that file alone, with the sidebar and
 surrounding chrome hidden — the shape to use as your $EDITOR.
 
 Any text file is a document. Set extensions in the config to narrow that permanently,
 or --ext to narrow one run; --ext with no value widens a narrowed config back again.
+Scans stop after 2,000 documents or three seconds by default and show a partial-scan
+count in the top bar. Adjust scan_max_files and scan_timeout_seconds in the config.
 
   gote                  # the config's default dir or vault, otherwise ~/.gote/docs
   gote here             # scan the current directory, config depth

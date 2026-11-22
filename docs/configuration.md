@@ -15,9 +15,10 @@ documents. Saving either one reloads the config in the running session, and so d
 **File ▸ Refresh** (for edits made outside gote). A file that fails to parse changes
 nothing; the status bar names the error. After a reload:
 
-- the doc list follows `extensions` and `scan_depth` at once (unless `--ext`/`--depth`
-  were given at launch), and vaults, `default`, `default_doc_mode`, `format_on_save` and
-  the click gestures apply straight away;
+- the doc list follows `scan_max_files`, `scan_timeout_seconds`, `extensions` and
+  `scan_depth` at once (`--ext`/`--depth` still override their respective settings),
+  and vaults, `default`, `default_doc_mode`, `format_on_save` and the click gestures
+  apply straight away;
 - docs opened from then on follow the wrap, line-number and per-language indent settings,
   `kitty_keyboard` and the new `syntax_colors`;
 - startup states you toggle at runtime (`file_view`, `indent_guides`, the gutters, the
@@ -30,6 +31,8 @@ nothing; the status bar names the error. After a reload:
 ```yaml
 default: ~/.gote/docs
 scan_depth: 5
+scan_max_files: 2000
+scan_timeout_seconds: 3
 extensions: []
 file_view: flat
 vaults:
@@ -44,6 +47,17 @@ falls back to `~/.gote/docs`. Vaults are named document folders; use `gote notes
 An empty `extensions` list discovers any text file. `file_view` accepts `flat`,
 `folder`, or `grouped`. When it is empty, omitted, or unrecognized, the legacy
 `folder_view: true` starts in Folder view; otherwise the default is Flat.
+
+Document scans stop after `scan_max_files` accepted files or `scan_timeout_seconds`,
+whichever comes first. Missing or nonpositive values use the defaults above. These
+bounds apply at startup, on refresh, and when switching vaults. When a bound is
+reached, the top bar shows `(Partial Scan: X Files)` with the number of discovered
+documents; filtering the sidebar does not change that count. Scanning stops there
+until the next refresh. Folder view can still browse to omitted files, and Find
+in Files searches independently of the document list.
+
+The time budget is checked between filesystem operations; an operation already in
+progress can exceed it. It bounds document discovery rather than all startup work.
 
 See [CLI reference](cli.md) for per-run overrides and
 [Editing](editing.md#files-and-vaults) for file-view controls.

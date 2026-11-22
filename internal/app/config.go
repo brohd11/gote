@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/brohd11/goutil/configdir"
 	"github.com/brohd11/goutil/strutil"
@@ -14,9 +15,11 @@ import (
 // Config is ~/.gote/config.yml; a missing file yields the defaults. Nothing is
 // omitempty, so every key appears in the written file (empty lists as [] and {}).
 type Config struct {
-	Extensions []string `yaml:"extensions"` // restrict the lists to these; empty (the default) means any text file
-	ScanDepth  int      `yaml:"scan_depth"` // default recursive scan depth (default 5)
-	AutoLSP    bool     `yaml:"auto-lsp"`   // lazily start/connect configured servers for supported files
+	Extensions         []string `yaml:"extensions"`           // restrict the lists to these; empty (the default) means any text file
+	ScanDepth          int      `yaml:"scan_depth"`           // default recursive scan depth (default 5)
+	ScanMaxFiles       int      `yaml:"scan_max_files"`       // maximum accepted documents per scan
+	ScanTimeoutSeconds int      `yaml:"scan_timeout_seconds"` // cooperative scan time budget
+	AutoLSP            bool     `yaml:"auto-lsp"`             // lazily start/connect configured servers for supported files
 	// FileView selects the starting Docs view: flat, folder, or grouped. Empty or
 	// unrecognized values honor the legacy FolderView setting.
 	FileView string `yaml:"file_view"`
@@ -147,10 +150,12 @@ type VaultConfig struct {
 // directories. Default names the home store it already resolves to, to show the key.
 func DefaultConfig() Config {
 	return Config{
-		ScanDepth:    5,
-		AutoLSP:      false,
-		IndentGuides: true,
-		Project:      ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
+		ScanDepth:          5,
+		ScanMaxFiles:       defaultScanMaxFiles,
+		ScanTimeoutSeconds: defaultScanTimeoutSeconds,
+		AutoLSP:            false,
+		IndentGuides:       true,
+		Project:            ModeDefaults{GitGutter: true, DiagnosticsGutter: true, AllowLSP: true},
 		SingleFile: SingleFileConfig{
 			ModeDefaults:     ModeDefaults{GitGutter: true, DiagnosticsGutter: false, AllowLSP: true},
 			AllowPanelToggle: false,
@@ -261,11 +266,24 @@ func loadMainConfig() (Config, error) {
 	if cfg.ScanDepth <= 0 {
 		cfg.ScanDepth = 5
 	}
+	if cfg.ScanMaxFiles <= 0 {
+		cfg.ScanMaxFiles = defaultScanMaxFiles
+	}
+	if cfg.ScanTimeoutSeconds <= 0 {
+		cfg.ScanTimeoutSeconds = defaultScanTimeoutSeconds
+	}
 	if cfg.Vaults == nil {
 		cfg.Vaults = map[string]VaultConfig{}
 	}
 	normalizeSyntaxColors(&cfg.SyntaxColors)
 	return cfg, nil
+}
+
+func (cfg Config) scanLimits() ScanLimits {
+	return ScanLimits{
+		MaxFiles: cfg.ScanMaxFiles,
+		Timeout:  time.Duration(cfg.ScanTimeoutSeconds) * time.Second,
+	}.normalized()
 }
 
 // normalizeExtensions puts extensions into NewDocFilter's canonical shape, so configs

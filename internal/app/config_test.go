@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestLoadConfigDefaults: a missing config.yml means the defaults, no error.
@@ -18,6 +19,35 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg, DefaultConfig()) {
 		t.Fatalf("cfg = %+v, want %+v", cfg, DefaultConfig())
+	}
+}
+
+func TestScanLimitsConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw      string
+		files, seconds int
+	}{
+		{"missing", "", 2000, 3},
+		{"zero", "scan_max_files: 0\nscan_timeout_seconds: 0\n", 2000, 3},
+		{"negative", "scan_max_files: -1\nscan_timeout_seconds: -2\n", 2000, 3},
+		{"custom", "scan_max_files: 500\nscan_timeout_seconds: 7\n", 500, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := writeConfig(t, tc.raw)
+			if cfg.ScanMaxFiles != tc.files || cfg.ScanTimeoutSeconds != tc.seconds {
+				t.Fatalf("scan config = %d files, %d seconds", cfg.ScanMaxFiles, cfg.ScanTimeoutSeconds)
+			}
+			if limits := cfg.scanLimits(); limits.MaxFiles != tc.files || limits.Timeout != time.Duration(tc.seconds)*time.Second {
+				t.Fatalf("effective limits = %+v", limits)
+			}
+			if err := SaveConfig(cfg); err != nil {
+				t.Fatal(err)
+			}
+			again, err := LoadConfig()
+			if err != nil || !reflect.DeepEqual(again, cfg) {
+				t.Fatalf("scan config round trip changed: %+v, %v", again, err)
+			}
+		})
 	}
 }
 
@@ -144,7 +174,7 @@ func TestEnsureConfig(t *testing.T) {
 	}
 	// The whole point of materializing it: the file is where the schema is documented, so
 	// every key has to be in it — an omitted one is a setting the user cannot discover.
-	for _, key := range []string{"extensions:", "scan_depth:", "auto-lsp:", "folder_view:", "file_view:", "indent_guides:", "git_gutter:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
+	for _, key := range []string{"extensions:", "scan_depth:", "scan_max_files:", "scan_timeout_seconds:", "auto-lsp:", "folder_view:", "file_view:", "indent_guides:", "git_gutter:", "syntax_colors:", "brackets:", "default:", "vaults:"} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("a materialized config should show every key, %q is missing:\n%s", key, raw)
 		}
@@ -238,7 +268,7 @@ func TestDirLayout(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "docs.md"), []byte("not a doc either"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := docNames(HomeDocs(docs, 5, DocFilter{})); len(got) != 0 {
+	if got := docNames(HomeDocs(docs, 5, DocFilter{}, ScanLimits{}).Files); len(got) != 0 {
 		t.Fatalf("the store = %v, want it empty — nothing in the config home is a document", got)
 	}
 	if st, err := os.Stat(docs); err != nil || !st.IsDir() {

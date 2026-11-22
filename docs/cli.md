@@ -49,6 +49,11 @@ gote --ext= here       # Any text file, even with a narrowed config
 gote --scan           # Scan the current directory
 ```
 
+Discovery stops after 2,000 accepted documents or three seconds by default. The
+top bar shows `(Partial Scan: X Files)` when either bound is reached. Adjust
+`scan_max_files` and `scan_timeout_seconds` in [Configuration](configuration.md)
+to change these bounds. Folder view can still browse files omitted by the scan.
+
 `--scan` and `--vault` cannot be combined. The positional depth is valid for
 folder/vault scans, not a single file.
 

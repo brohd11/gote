@@ -31,17 +31,18 @@ const defaultVaultName = "gote-default"
 // open buffer. Open maps a path to its editor, which owns the buffer, so unsaved edits
 // survive switching files.
 type Ctx struct {
-	Version   string
-	Mode      Mode
-	ScanDir   string
-	FilePath  string // ModeFile's file; the doc the minimal editor boots on
-	VaultName string // ModeVault's configured display/lookup name
-	Depth     int
-	Filter    DocFilter // which files the lists seed from
-	NewExt    string    // extension rename appends to an extensionless name
-	Preview   bool      // --preview: boot straight into the full-screen reader
-	Files     []DocFile
-	Config    Config
+	Version     string
+	Mode        Mode
+	ScanDir     string
+	FilePath    string // ModeFile's file; the doc the minimal editor boots on
+	VaultName   string // ModeVault's configured display/lookup name
+	Depth       int
+	Filter      DocFilter // which files the lists seed from
+	NewExt      string    // extension rename appends to an extensionless name
+	Preview     bool      // --preview: boot straight into the full-screen reader
+	Files       []DocFile
+	ScanPartial bool // the last seed stopped at a file or time bound
+	Config      Config
 
 	// Groups reference retained buffers and survive the screen for session saving.
 	groups      []*editorGroup
@@ -184,19 +185,18 @@ func Of(sh *core.Shared) *Ctx { return core.App[Ctx](sh) }
 // Seed re-reads the doc list for the current mode (home store, scan, or nothing for a
 // single file). Open buffers are never touched.
 func (c *Ctx) Seed() {
+	var result ScanResult
 	switch c.Mode {
 	case ModeScan, ModeVault:
-		c.Files = ScanDocs(c.ScanDir, c.Depth, c.Filter)
-	case ModeFile:
-		c.Files = nil
+		result = ScanDocs(c.ScanDir, c.Depth, c.Filter, c.Config.scanLimits())
+	case ModeFile: // no discovery in single-file mode
 	default:
 		dir, err := DocsDir()
-		if err != nil {
-			c.Files = nil
-			return
+		if err == nil {
+			result = HomeDocs(dir, c.Depth, c.Filter, c.Config.scanLimits())
 		}
-		c.Files = HomeDocs(dir, c.Depth, c.Filter)
 	}
+	c.Files, c.ScanPartial = result.Files, result.Partial
 }
 
 // resolveDefault turns Config.Default into a bare `gote` launch: a path when written as

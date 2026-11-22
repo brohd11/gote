@@ -53,6 +53,25 @@ func TestReloadConfig(t *testing.T) {
 	}
 }
 
+func TestReloadConfigScanLimits(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	cfg := DefaultConfig()
+	cfg.ScanMaxFiles = 1
+	c := New("test", cfg, Options{Mode: ModeScan, Dir: writeTree(t)})
+	if !c.ScanPartial || len(c.Files) != 1 {
+		t.Fatal("initial seed did not apply the cap")
+	}
+	writeConfigFile(t, "config.yml", "scan_max_files: 10\nscan_timeout_seconds: 7\n")
+	if _, err := c.ReloadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	c.Seed()
+	if c.ScanPartial || len(c.Files) != 5 || c.Config.ScanTimeoutSeconds != 7 {
+		t.Fatalf("reloaded seed = %v, partial %v, timeout %d", docNames(c.Files), c.ScanPartial, c.Config.ScanTimeoutSeconds)
+	}
+}
+
 // TestReloadConfigMalformed: a file that fails to parse changes nothing, rather than
 // falling back to the defaults LoadConfig would return.
 func TestReloadConfigMalformed(t *testing.T) {

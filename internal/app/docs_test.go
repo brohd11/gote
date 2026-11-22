@@ -78,21 +78,21 @@ func equalNames(got []string, want ...string) bool {
 func TestScanDocsDepth(t *testing.T) {
 	root := writeTree(t)
 
-	if got := docNames(ScanDocs(root, 0, mdOnly)); !equalNames(got, "F.MD", "a.md") {
+	if got := docNames(ScanDocs(root, 0, mdOnly, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md") {
 		t.Fatalf("depth 0 = %v, want root files only", got)
 	}
-	if got := docNames(ScanDocs(root, 1, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md") {
+	if got := docNames(ScanDocs(root, 1, mdOnly, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md", "c.md") {
 		t.Fatalf("depth 1 = %v, want root + one level", got)
 	}
-	if got := docNames(ScanDocs(root, 2, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
+	if got := docNames(ScanDocs(root, 2, mdOnly, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
 		t.Fatalf("depth 2 = %v, want everything but .hidden", got)
 	}
 	txt := DocFilter{Exts: []string{"txt"}}
-	if got := ScanDocs(root, 3, txt); len(got) != 1 || got[0].Name != "b.txt" {
+	if got := ScanDocs(root, 3, txt, ScanLimits{}).Files; len(got) != 1 || got[0].Name != "b.txt" {
 		t.Fatalf("txt scan = %v, want b.txt only", docNames(got))
 	}
 	multi := DocFilter{Exts: []string{"md", "txt"}}
-	if got := docNames(ScanDocs(root, 0, multi)); !equalNames(got, "F.MD", "a.md", "b.txt") {
+	if got := docNames(ScanDocs(root, 0, multi, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md", "b.txt") {
 		t.Fatalf("multi-extension scan = %v, want both types at the root", got)
 	}
 }
@@ -105,7 +105,7 @@ func TestScanDocsAnyText(t *testing.T) {
 	write(t, root, "empty", nil)
 	write(t, root, "logo.png", []byte("\x89PNG\r\n\x1a\n\x00\x00binary"))
 
-	got := docNames(ScanDocs(root, 0, anyText))
+	got := docNames(ScanDocs(root, 0, anyText, ScanLimits{}).Files)
 	if !equalNames(got, "F.MD", "Makefile", "a.md", "b.txt", "empty") {
 		t.Fatalf("default scan = %v, want every text file and no binary", got)
 	}
@@ -120,14 +120,14 @@ func TestScanDocsSkipsNoiseDirs(t *testing.T) {
 	write(t, root, "vendor/dep/dep.go", []byte("package dep\n"))
 	write(t, root, "build/out.txt", []byte("artifact\n"))
 
-	if got := docNames(ScanDocs(root, 5, anyText)); !equalNames(got, "main.go") {
+	if got := docNames(ScanDocs(root, 5, anyText, ScanLimits{}).Files); !equalNames(got, "main.go") {
 		t.Fatalf("scan = %v, want the project's own file only", got)
 	}
 
 	// Scanning from inside a pruned directory must still list it: the prune spares the
 	// walk root, so `gote here` works wherever it is run.
 	inside := filepath.Join(root, "node_modules")
-	if got := docNames(ScanDocs(inside, 5, anyText)); !equalNames(got, "index.js") {
+	if got := docNames(ScanDocs(inside, 5, anyText, ScanLimits{}).Files); !equalNames(got, "index.js") {
 		t.Fatalf("scan rooted in node_modules = %v, want index.js", got)
 	}
 }
@@ -135,7 +135,7 @@ func TestScanDocsSkipsNoiseDirs(t *testing.T) {
 // TestScanDocsPaths: the results are sorted by path and carry absolute paths.
 func TestScanDocsPaths(t *testing.T) {
 	root := writeTree(t)
-	docs := ScanDocs(root, 0, mdOnly)
+	docs := ScanDocs(root, 0, mdOnly, ScanLimits{}).Files
 	if len(docs) != 2 {
 		t.Fatalf("got %d docs, want 2", len(docs))
 	}
@@ -148,19 +148,19 @@ func TestScanDocsPaths(t *testing.T) {
 // pruned — and a missing store is created rather than an error.
 func TestHomeDocs(t *testing.T) {
 	root := writeTree(t)
-	if got := docNames(HomeDocs(root, 5, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
+	if got := docNames(HomeDocs(root, 5, mdOnly, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md", "c.md", "d.md") {
 		t.Fatalf("home docs = %v, want every md file outside dot-dirs", got)
 	}
-	if got := docNames(HomeDocs(root, 1, mdOnly)); !equalNames(got, "F.MD", "a.md", "c.md") {
+	if got := docNames(HomeDocs(root, 1, mdOnly, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md", "c.md") {
 		t.Fatalf("depth-1 home docs = %v, want the scan to stop at depth", got)
 	}
 	write(t, root, "logo.png", []byte("\x89PNG\x00\x00"))
-	if got := docNames(HomeDocs(root, 0, anyText)); !equalNames(got, "F.MD", "a.md", "b.txt") {
+	if got := docNames(HomeDocs(root, 0, anyText, ScanLimits{}).Files); !equalNames(got, "F.MD", "a.md", "b.txt") {
 		t.Fatalf("default home docs = %v, want every top-level text file and no binary", got)
 	}
 
 	missing := filepath.Join(t.TempDir(), "fresh-store")
-	docs := HomeDocs(missing, 5, mdOnly)
+	docs := HomeDocs(missing, 5, mdOnly, ScanLimits{}).Files
 	if len(docs) != 0 {
 		t.Fatalf("a fresh store should be empty, got %v", docNames(docs))
 	}
