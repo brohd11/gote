@@ -20,12 +20,15 @@ import (
 // bubblestack draws the column; the git meaning is gote's.
 
 // gutter is the diff state for the doc in the editor pane. Baselines are cheap to re-read
-// on a switch, so there is no per-doc cache to invalidate when HEAD moves.
+// on a switch, so there is no per-doc cache. HEAD moving under an open doc (a commit made
+// outside gote) is caught on focus and reseed by recheckBaseline, keyed on oid.
 type gutter struct {
 	path        string        // the doc base belongs to; "" ⇒ nothing loaded
 	loading     string        // a read in flight for this path, so it is issued once
 	base        string        // HEAD's copy of it
 	state       repo.Baseline // and whether HEAD had one at all
+	root        string        // the checkout base came from; "" ⇒ not in a repo
+	oid         string        // the commit HEAD named when base was read, the staleness key
 	seq         int           // editor generation the drawn signs were computed from
 	drawn       bool          // seq is meaningful — generation zero is a real state
 	pending     bool          // a debounce wake is already scheduled for pendingPath/pendingSeq
@@ -41,6 +44,11 @@ type baselineMsg struct {
 	path  string // guarded against on receipt: the pane may have moved on
 	base  string
 	state repo.Baseline
+	root  string
+	oid   string
+	// unchanged reports a recheck that found HEAD where it was: nothing to store, only the
+	// in-flight mark to clear.
+	unchanged bool
 }
 
 type gutterRefreshMsg struct {
@@ -185,17 +193,42 @@ func (s *homeScreen) loadBaseline(path string) tea.Cmd {
 	}
 	s.gutter.loading = path
 	return func() tea.Msg {
-		base, state, _ := readGitBaseline(path)
-		return core.PropagateAll(baselineMsg{path: path, base: base, state: state})
+		m, _ := readGitBaseline(path)
+		return core.PropagateAll(m)
 	}
 }
 
-func readGitBaseline(path string) (string, repo.Baseline, error) {
+// recheckBaseline re-reads the loaded baseline only if HEAD has moved since it was read:
+// one rev-parse when it has not. It runs on focus and reseed, when an outside commit most
+// likely landed. A doc outside any repo is skipped; nothing it can do makes HEAD move.
+func (s *homeScreen) recheckBaseline() tea.Cmd {
+	path, root, oid := s.gutter.path, s.gutter.root, s.gutter.oid
+	if !s.gitGutter || s.editor == nil || path == "" || root == "" || s.gutter.loading == path {
+		return nil
+	}
+	s.gutter.loading = path
+	return func() tea.Msg {
+		if repo.HeadOID(root) == oid {
+			return core.PropagateAll(baselineMsg{path: path, unchanged: true})
+		}
+		m, _ := readGitBaseline(path)
+		return core.PropagateAll(m)
+	}
+}
+
+// readGitBaseline reads HEAD's copy of path, with the checkout and commit it came from.
+// The commit is read first, so a HEAD that moves mid-read leaves the older id stored and
+// the next recheck reloads.
+func readGitBaseline(path string) (baselineMsg, error) {
+	m := baselineMsg{path: path, state: repo.BaselineNone}
 	dir, ok := repo.RepoRoot(path)
 	if !ok {
-		return "", repo.BaselineNone, nil
+		return m, nil
 	}
-	return repo.HeadBlob(dir, path)
+	m.root, m.oid = dir, repo.HeadOID(dir)
+	var err error
+	m.base, m.state, err = repo.HeadBlob(dir, path)
+	return m, err
 }
 
 // applyBaseline stores a finished read, dropping one for a doc the pane has left.
@@ -203,10 +236,11 @@ func (s *homeScreen) applyBaseline(m baselineMsg) {
 	if s.gutter.loading == m.path {
 		s.gutter.loading = ""
 	}
-	if m.path != s.currentPath || !s.gitGutter {
+	if m.unchanged || m.path != s.currentPath || !s.gitGutter {
 		return
 	}
 	s.gutter.path, s.gutter.base, s.gutter.state = m.path, m.base, m.state
+	s.gutter.root, s.gutter.oid = m.root, m.oid
 	s.gutter.drawn, s.gutter.pending = false, false
 	s.drawGutter()
 }

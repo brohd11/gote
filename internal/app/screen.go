@@ -591,10 +591,16 @@ func (s *homeScreen) Receive(sh *core.Shared, payload any) (result core.Action) 
 		return act
 	}
 	// Focus and blur pace the sidebar's git poll but are not consumed: blur also resets
-	// mouse gestures below. Regaining focus is when an external commit most likely landed.
+	// mouse gestures below. Regaining focus is when an external commit most likely landed,
+	// so it also rechecks each gutter's baseline against HEAD.
 	switch payload.(type) {
 	case ReseedMsg, tea.FocusMsg:
 		defer func() { result.Cmd = tea.Batch(result.Cmd, s.refreshDocsGit()) }()
+		defer func() {
+			for _, g := range s.groups() {
+				result.Cmd = tea.Batch(result.Cmd, s.withGroup(g, s.recheckBaseline))
+			}
+		}()
 	case tea.BlurMsg:
 		s.closeGitDiff()
 		s.idleDocsGit()

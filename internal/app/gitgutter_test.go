@@ -8,7 +8,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 	editor "github.com/brohd11/go-text-edit"
@@ -424,5 +426,70 @@ func gitRun(t *testing.T, dir string, args ...string) {
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestHomeGutterFollowsHEADOnFocusAndReseed: a commit made outside gote moves HEAD under
+// an open doc. Focus and reseed must notice and redraw, and must not re-read the blob
+// when HEAD has not moved.
+func TestHomeGutterFollowsHEADOnFocusAndReseed(t *testing.T) {
+	for _, trigger := range []struct {
+		name string
+		msg  any
+	}{{"focus", tea.FocusMsg{}}, {"reseed", ReseedMsg{}}} {
+		t.Run(trigger.name, func(t *testing.T) {
+			dir := t.TempDir()
+			gitInit(t, dir)
+			file := filepath.Join(dir, "notes.md")
+			if err := os.WriteFile(file, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, dir, "add", ".")
+			gitRun(t, dir, "commit", "-q", "-m", "init")
+
+			model, s, sh := newHomeRouter(t, Options{})
+			// No wall-clock waits: the sidebar poll is not under test.
+			s.gitDocs.timer = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
+			s.openDoc(sh, file)
+			s.editor.SetText("one\nTWO\nthree\n")
+			model.Update(s.refreshGutter()())
+			if got := kind(signAt(t, s, 1)); got != "mod" {
+				t.Fatalf("the edited line should be marked modified, got %s", got)
+			}
+			oid := s.gutter.oid
+			if oid == "" || s.gutter.root == "" {
+				t.Fatalf("the baseline should record its checkout and commit, root=%q oid=%q", s.gutter.root, oid)
+			}
+
+			// HEAD where it was: the recheck keeps the baseline and clears its mark.
+			base := s.gutter.base
+			s.gutter.base = "sentinel" // a re-read would overwrite it
+			cmd := s.recheckBaseline()
+			if cmd == nil {
+				t.Fatal("a loaded baseline in a repo should be rechecked")
+			}
+			if s.recheckBaseline() != nil {
+				t.Fatal("a recheck already in flight should not issue another")
+			}
+			model.Update(cmd())
+			if s.gutter.base != "sentinel" || s.gutter.loading != "" {
+				t.Fatalf("an unmoved HEAD should not re-read the blob, base=%q loading=%q", s.gutter.base, s.gutter.loading)
+			}
+			s.gutter.base = base
+
+			// Commit the edit elsewhere: the buffer now matches HEAD.
+			if err := os.WriteFile(file, []byte("one\nTWO\nthree\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, dir, "commit", "-q", "-am", "edit")
+
+			pumpModel(model, s.Receive(sh, trigger.msg).Cmd)
+			if s.gutter.oid == oid {
+				t.Fatal("the baseline should have been re-read at the new HEAD")
+			}
+			if signs := s.editor.SignsForColumn(gitSignColumn); len(signs) != 0 {
+				t.Fatalf("a buffer matching the new HEAD should carry no markers, got %s", summary(signs))
+			}
+		})
 	}
 }

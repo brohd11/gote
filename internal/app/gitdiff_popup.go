@@ -86,8 +86,8 @@ func (s *homeScreen) openGitDiff(sh *core.Shared, line, x, y int) core.Action {
 	// A hidden gutter intentionally drops its baseline. Keyboard inspection still
 	// works, without turning the column on or changing its refresh lifecycle.
 	return core.Async(func() tea.Msg {
-		base, state, err := readGitBaseline(p.path)
-		return core.PropagateAll(gitDiffBaselineMsg{target: s, ui: p, base: base, state: state, err: err})
+		m, err := readGitBaseline(p.path)
+		return core.PropagateAll(gitDiffBaselineMsg{target: s, ui: p, base: m.base, state: m.state, err: err})
 	})
 }
 
